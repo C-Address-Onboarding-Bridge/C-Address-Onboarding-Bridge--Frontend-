@@ -1,5 +1,18 @@
 import React, { memo } from "react";
+import Link from "next/link";
 import { Wallet } from "lucide-react";
+
+const protocolLinks = [
+  { href: "/bridge", label: "G → C Bridge" },
+  { href: "/onramp", label: "Fiat Onramp" },
+  { href: "/cex", label: "CEX Withdrawal" },
+];
+
+const resourceLinks = [
+  { href: "https://soroban.stellar.org", label: "Soroban Docs" },
+  { href: "https://github.com", label: "GitHub" },
+  { href: "https://stellar.org", label: "Stellar" },
+];
 
 const Footer = () => {
   return (
@@ -21,19 +34,41 @@ const Footer = () => {
 
           <div>
             <h3 className="text-sm font-semibold mb-3">Protocol</h3>
+            {/*
+              Internal routes go through next/link, never a bare <a>. A raw
+              anchor triggers a full document load, which tears down the client
+              tree — the wallet session in WalletProvider is in-memory only, so
+              a footer click would drop the connected address, the network
+              status and any half-filled bridge/onramp form.
+            */}
             <ul className="space-y-2">
-              <li><a href="/bridge" className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]">G → C Bridge</a></li>
-              <li><a href="/onramp" className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]">Fiat Onramp</a></li>
-              <li><a href="/cex" className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]">CEX Withdrawal</a></li>
+              {protocolLinks.map((link) => (
+                <li key={link.href}>
+                  <Link href={link.href} className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]">
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
             </ul>
           </div>
 
           <div>
             <h3 className="text-sm font-semibold mb-3">Resources</h3>
+            {/* External destinations stay plain anchors: next/link has nothing
+                to prefetch or client-navigate off-origin. */}
             <ul className="space-y-2">
-              <li><a href="https://soroban.stellar.org" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]">Soroban Docs</a></li>
-              <li><a href="https://github.com" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]">GitHub</a></li>
-              <li><a href="https://stellar.org" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]">Stellar</a></li>
+              {resourceLinks.map((link) => (
+                <li key={link.href}>
+                  <a
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]"
+                  >
+                    {link.label}
+                  </a>
+                </li>
+              ))}
             </ul>
           </div>
         </div>
