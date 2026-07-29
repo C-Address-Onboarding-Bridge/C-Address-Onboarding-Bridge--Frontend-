@@ -2,6 +2,7 @@ import React, { memo, useMemo } from "react";
 import { ArrowLeftRight, CreditCard, Building2, ExternalLink, Loader2 } from "lucide-react";
 import type { BridgeTransactionData } from "@/lib/types";
 import { getExplorerUrl } from "@/lib/stellar";
+import { formatTransactionDate } from "@/lib/format";
 import type { StellarNetwork } from "@/lib/types";
 
 const typeConfig: Record<string, { icon: typeof ArrowLeftRight; label: string; color: string }> = {
@@ -29,7 +30,10 @@ const TransactionItem = memo(function TransactionItem({ tx, network }: { tx: Bri
   const status = statusConfig[tx.status];
   const Icon = type.icon;
 
-  const date = useMemo(() => new Date(tx.timestamp).toLocaleDateString(), [tx.timestamp]);
+  // Formatted against the app's declared locale rather than the host's, so the
+  // date matches the surrounding English text on every machine and renders the
+  // same on the server as it does after hydration.
+  const date = useMemo(() => formatTransactionDate(tx.timestamp), [tx.timestamp]);
   const toShort = useMemo(() => {
     if (!tx.toAddress) return "";
     return tx.toAddress.length > 20 ? `${tx.toAddress.slice(0, 10)}...${tx.toAddress.slice(-6)}` : tx.toAddress;
