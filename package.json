@@ -28,7 +28,7 @@
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.0.2",
     "cross-env": "^10.1.0",
-    "eslint": "^9",
+    "eslint": "^10",
     "eslint-config-next": "16.2.7",
     "husky": "^9.1.7",
     "jsdom": "^29.1.1",
