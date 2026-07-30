@@ -33,7 +33,7 @@
     "husky": "^9.1.7",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4",
-    "typescript": "^5",
+    "typescript": "^7",
     "vitest": "^4.1.8"
   }
 }
