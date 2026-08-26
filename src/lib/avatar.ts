@@ -60,7 +60,7 @@ export function isRenderableAvatar(value: unknown): value is string {
 
 /** Storage key for an address. Exported so tests and docs can reference it. */
 export function avatarStorageKey(address: string): string {
-  throw new Error('Not implemented: avatarStorageKey');
+  return `${STORAGE_PREFIX}${address}`;
 }
 
 function storage(): Storage | null {
