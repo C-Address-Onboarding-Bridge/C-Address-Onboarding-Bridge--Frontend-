@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
-import { connectWallet, checkConnection, getWalletAddress, getWalletNetwork } from "@/lib/stellar";
+import { connectWallet, checkConnection, getWalletAddress, getWalletNetwork, initWalletKit, openWalletSelectionModal } from "@/lib/stellar";
 import { APP_NETWORK, isSupportedNetwork, type StellarNetwork, type WalletNetworkState } from "@/lib/types";
 import { loadSession, markConnected, markDisconnected } from "@/lib/session";
 import {
@@ -50,6 +50,16 @@ interface WalletContextType {
   cancelOperation: (id: string) => void;
   /** Replays queued funding submissions after explicit user confirmation. */
   confirmFunding: () => Promise<void>;
+  /**
+   * The wallet ID last selected by the user via the Stellar Wallets Kit modal
+   * (e.g. "freighter", "xbull", "lobstr"). Null until a wallet is connected. (#459)
+   */
+  selectedWalletId: string | null;
+  /**
+   * Opens the Stellar Wallets Kit wallet selection modal programmatically.
+   * Equivalent to calling connect() but makes the modal intent explicit. (#459)
+   */
+  openWalletModal: () => Promise<void>;
 }
 
 const WalletContext = createContext<WalletContextType | null>(null);
@@ -74,6 +84,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [networkStatus, setNetworkStatus] = useState<WalletNetworkState>(APP_NETWORK);
   const [walletNetworkName, setWalletNetworkName] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  /**
+   * The wallet ID last selected by the user via the Stellar Wallets Kit modal.
+   * Hydrated from the stored session on mount so the kit can restore the same
+   * wallet module across page reloads. (#459)
+   */
+  const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
   /**
    * `networkMismatch` is true when the network changed after the initial
    * connection was established. It's reset to false on:
@@ -166,10 +182,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [setPending]);
 
+  // Initialise the Stellar Wallets Kit on mount, restoring the previously
+  // selected wallet so the user does not have to re-choose after a reload. (#459)
+  useEffect(() => {
+    const session = loadSession();
+    if (session.selectedWalletId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedWalletId(session.selectedWalletId);
+    }
+    void initWalletKit(session.selectedWalletId);
+  }, []);
+
   // Connectivity awareness: keep `isOnline` in sync and replay safe operations
   // when the connection returns. (#475)
-  useEffect(() => {
-    const sync = () => {
+  useEffect(() => {    const sync = () => {
       const online = typeof navigator === "undefined" ? true : navigator.onLine;
       isOnlineRef.current = online;
       setIsOnline(online);
@@ -266,12 +292,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     manuallyDisconnectedRef.current = false;
     setIsConnecting(true);
     try {
-      const pk = await connectWallet();
-      if (pk) {
+      // Open the Stellar Wallets Kit modal so the user can choose any supported
+      // wallet (Freighter, xBull, Lobstr, Albedo, Rabet, etc.). (#459)
+      const result = await openWalletSelectionModal();
+      if (result) {
+        const { address: pk, walletId } = result;
         // Persist the cleared flag only once a wallet actually answered, so a
-        // cancelled Freighter prompt leaves an earlier disconnect in place.
-        markConnected(pk);
+        // cancelled prompt leaves an earlier disconnect in place.
+        markConnected(pk, Date.now(), walletId);
         setAddress(pk);
+        setSelectedWalletId(walletId);
         const { status, name } = await getWalletNetwork();
         applyNetwork(status, name);
         // Record the network at the point of explicit connection so we can
@@ -280,9 +310,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         dismissedRef.current = false;
         setNetworkMismatch(false);
       } else {
-        // Freighter handed back no address (prompt dismissed / locked): leave
-        // the stored session decision in force instead of letting a failed
-        // attempt count as a reconnect.
+        // User dismissed the modal: leave the stored session decision in force
+        // instead of letting a cancelled attempt count as a reconnect.
         manuallyDisconnectedRef.current = loadSession().manuallyDisconnected;
       }
     } finally {
@@ -388,6 +417,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         enqueueOperation,
         cancelOperation,
         confirmFunding,
+        selectedWalletId,
+        // openWalletModal is an alias for connect that makes the modal intent
+        // explicit for components that want a "Change wallet" button. (#459)
+        openWalletModal: connect,
       }}
     >
       {children}

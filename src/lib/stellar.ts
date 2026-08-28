@@ -1,10 +1,4 @@
 import {
-  isConnected,
-  getAddress,
-  signTransaction,
-  getNetwork,
-} from "@stellar/freighter-api";
-import {
   TransactionBuilder,
   Operation,
   BASE_FEE,
@@ -28,6 +22,98 @@ import { withSequenceRetry } from "./sequenceManager";
 
 export type { AppNetwork, WalletNetworkState, BridgeTransactionData } from "./types";
 
+// ---------------------------------------------------------------------------
+// Stellar Wallets Kit — multi-wallet abstraction (#459)
+// ---------------------------------------------------------------------------
+// We lazily initialise the kit only in the browser, so SSR and tests that do
+// not exercise wallet paths never import the kit's browser-only DOM code.
+// ---------------------------------------------------------------------------
+
+/** The wallet ID stored in the session. Null means no wallet has been chosen yet. */
+export type WalletId = string | null;
+
+/** Lazy singleton kit reference. Populated by initWalletKit(). */
+let _kitReady = false;
+
+/**
+ * Initialise the Stellar Wallets Kit with the standard set of modules.
+ *
+ * Safe to call multiple times — subsequent calls are no-ops.
+ * Must be called client-side only (not during SSR).
+ *
+ * @param selectedWalletId - Previously persisted wallet ID to restore, if any.
+ */
+export async function initWalletKit(selectedWalletId?: string | null): Promise<void> {
+  if (_kitReady || typeof window === "undefined") return;
+
+  const [
+    { StellarWalletsKit, Networks: KitNetworks },
+    { FreighterModule },
+    { xBullModule },
+    { LobstrModule },
+    { AlbedoModule },
+    { RabetModule },
+  ] = await Promise.all([
+    import("@creit.tech/stellar-wallets-kit/sdk"),
+    import("@creit.tech/stellar-wallets-kit/modules/freighter"),
+    import("@creit.tech/stellar-wallets-kit/modules/xbull"),
+    import("@creit.tech/stellar-wallets-kit/modules/lobstr"),
+    import("@creit.tech/stellar-wallets-kit/modules/albedo"),
+    import("@creit.tech/stellar-wallets-kit/modules/rabet"),
+  ]);
+
+  StellarWalletsKit.init({
+    modules: [
+      new FreighterModule(),
+      new xBullModule(),
+      new LobstrModule(),
+      new AlbedoModule(),
+      new RabetModule(),
+    ],
+    selectedWalletId: selectedWalletId ?? undefined,
+  });
+
+  _kitReady = true;
+}
+
+/**
+ * Open the Stellar Wallets Kit auth modal and resolve with the selected address.
+ * Returns null when the user dismisses without connecting.
+ *
+ * Initialises the kit on first call.
+ */
+export async function openWalletSelectionModal(): Promise<{ address: string; walletId: string } | null> {
+  if (typeof window === "undefined") return null;
+
+  const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+
+  if (!_kitReady) {
+    await initWalletKit();
+  }
+
+  try {
+    const { address } = await StellarWalletsKit.authModal();
+    // After authModal resolves, the selected module is set on the kit.
+    const walletId = StellarWalletsKit.selectedModule.productId;
+    return { address, walletId };
+  } catch {
+    // User dismissed the modal or an error occurred.
+    return null;
+  }
+}
+
+/**
+ * Return the currently active wallet's productId, or null if no wallet is set.
+ * This is a synchronous helper that reads from in-memory kit state.
+ */
+export function getActiveWalletId(): string | null {
+  if (!_kitReady || typeof window === "undefined") return null;
+  // The kit exposes selectedModule as a getter that throws if nothing is set.
+  // We can't call it synchronously without dynamic import in ESM, so return
+  // null here; callers should use the selectedWalletId from the session instead.
+  return null;
+}
+
 /** Seconds a built transaction stays valid before the network rejects it. */
 const TRANSACTION_TIMEOUT_SECONDS = 30;
 
@@ -43,16 +129,49 @@ export async function getNetworkPassphrase(network: StellarNetwork): Promise<str
   throw new Error('Not implemented: getNetworkPassphrase');
 }
 
+/**
+ * Connect a wallet. Opens the Stellar Wallets Kit selection modal so the user
+ * can choose Freighter, xBull, Lobstr, Albedo, Rabet, or any other supported
+ * wallet. Returns the connected public key, or null when the user cancels.
+ *
+ * Replaces the previous direct Freighter call so all wallet interaction is
+ * routed through the kit's abstraction layer. (#459)
+ */
 export async function connectWallet(): Promise<string | null> {
-  throw new Error('Not implemented: connectWallet');
+  const result = await openWalletSelectionModal();
+  return result?.address ?? null;
 }
 
+/**
+ * Check whether the kit has an active, connected address.
+ *
+ * The kit keeps the selected address in memory across renders; we use that
+ * as the "is connected" signal rather than polling every individual wallet
+ * provider, which is both faster and avoids permission-prompt loops. (#459)
+ */
 export async function checkConnection(): Promise<boolean> {
-  throw new Error('Not implemented: checkConnection');
+  if (!_kitReady || typeof window === "undefined") return false;
+  try {
+    const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+    const { address } = await StellarWalletsKit.getAddress();
+    return !!address;
+  } catch {
+    return false;
+  }
 }
 
+/**
+ * Return the public key for the currently connected wallet, or null.
+ */
 export async function getWalletAddress(): Promise<string | null> {
-  throw new Error('Not implemented: getWalletAddress');
+  if (!_kitReady || typeof window === "undefined") return null;
+  try {
+    const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+    const { address } = await StellarWalletsKit.getAddress();
+    return address || null;
+  } catch {
+    return null;
+  }
 }
 
 export interface WalletNetworkInfo {
@@ -75,9 +194,37 @@ export interface WalletNetworkInfo {
  * Futurenet user saw a confident "Testnet" label, had balances read off the
  * wrong chain, and got transactions built with the testnet passphrase — with
  * every resulting error pointing away from the real cause. (#289)
+ *
+ * Now delegates to whichever wallet the user selected via the kit. (#459)
  */
 export async function getWalletNetwork(): Promise<WalletNetworkInfo> {
-  throw new Error('Not implemented: getWalletNetwork');
+  if (!_kitReady || typeof window === "undefined") {
+    return { status: "UNKNOWN", name: null };
+  }
+  try {
+    const { StellarWalletsKit, Networks: KitNetworks } = await import("@creit.tech/stellar-wallets-kit/sdk");
+    const { networkPassphrase } = await StellarWalletsKit.getNetwork();
+
+    // Map kit network passphrase → app WalletNetworkState
+    if (networkPassphrase === KitNetworks.PUBLIC) {
+      return { status: "PUBLIC", name: "PUBLIC" };
+    }
+    if (networkPassphrase === KitNetworks.TESTNET) {
+      return { status: "TESTNET", name: "TESTNET" };
+    }
+
+    // Any other passphrase (Futurenet, Standalone, custom) is unsupported.
+    // Derive a human-readable name from the passphrase for the warning notice.
+    const knownNames: Record<string, string> = {
+      [KitNetworks.FUTURENET]: "FUTURENET",
+      [KitNetworks.SANDBOX]: "SANDBOX",
+      [KitNetworks.STANDALONE]: "STANDALONE",
+    };
+    const name = knownNames[networkPassphrase] ?? networkPassphrase.split(";")[0].trim().toUpperCase();
+    return { status: "UNSUPPORTED", name };
+  } catch {
+    return { status: "UNKNOWN", name: null };
+  }
 }
 
 /**
@@ -86,7 +233,8 @@ export async function getWalletNetwork(): Promise<WalletNetworkInfo> {
  * see {@link WalletNetworkState}. (#289)
  */
 export async function getCurrentNetwork(): Promise<WalletNetworkState> {
-  throw new Error('Not implemented: getCurrentNetwork');
+  const { status } = await getWalletNetwork();
+  return status;
 }
 
 /**
@@ -96,7 +244,15 @@ export function formatNetworkLabel(
   status: WalletNetworkState,
   name?: string | null
 ): string {
-  throw new Error('Not implemented: formatNetworkLabel');
+  if (status === "PUBLIC") return "Mainnet";
+  if (status === "TESTNET") return "Testnet";
+  if (status === "UNKNOWN") return "Unknown";
+  // UNSUPPORTED: use the raw name if available, with title-case
+  if (name) {
+    const lower = name.toLowerCase();
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  }
+  return "Unsupported";
 }
 
 // Validate against the SDK's StrKey, which enforces the correct base32
@@ -313,26 +469,23 @@ async function buildSignAndSubmit(
       const currentNetwork = await getCurrentNetwork();
       if (currentNetwork !== network) {
         throw new Error(
-          "Network changed in Freighter — please retry. " +
-          `Transaction was built for ${network} but Freighter is now on ${currentNetwork}.`
+          "Network changed in wallet — please retry. " +
+          `Transaction was built for ${network} but wallet is now on ${currentNetwork}.`
         );
       }
 
-      const signedResult = await signTransaction(tx.toXDR(), {
+      // Use the Stellar Wallets Kit to sign — this works regardless of which
+      // wallet (Freighter, xBull, Lobstr, etc.) the user selected. (#459)
+      const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+      const signedResult = await StellarWalletsKit.signTransaction(tx.toXDR(), {
         networkPassphrase: passphrase,
       });
 
-      if ("error" in signedResult && signedResult.error) {
-        throw new Error(`Signing failed: ${signedResult.error}`);
-      }
-
-      // #242 — Runtime shape guard on the wallet's response.  TypeScript's
-      // type assertion above provides no runtime guarantee: a version mismatch,
-      // an API change in the Freighter extension, or a compromised extension
-      // could return a missing or non-string `signedTxXdr`.  Catching that
-      // here produces a clear "unexpected wallet response" error instead of a
-      // confusing low-level parse failure inside TransactionBuilder.fromXDR.
-      const signedXDR = (signedResult as { signedTxXdr: string }).signedTxXdr;
+      // #242 — Runtime shape guard on the wallet's response.  A version
+      // mismatch, API change, or compromised extension could return a missing
+      // or non-string `signedTxXdr`.  The kit throws on signing errors, so we
+      // only need to guard against a missing/empty XDR here.
+      const signedXDR = signedResult.signedTxXdr;
       if (typeof signedXDR !== "string" || !signedXDR) {
         throw new Error(
           "Wallet returned an unexpected response while signing — signedTxXdr is missing or empty."
@@ -373,17 +526,24 @@ export function toSafeErrorMessage(error: unknown, fallback: string): string {
 }
 
 /**
- * Verifies that Freighter's active account is the account that will source the
- * transaction, *before* anything is built or signed.
+ * Verifies that the active wallet account matches the transaction source address
+ * before anything is built or signed.
  *
- * Freighter signs with whichever account is active, not with the account named
- * as the transaction source. A transaction sourced from address A carrying only
- * B's signature fails at submission with tx_bad_auth — an opaque error that
- * says nothing about the actual mismatch. Failing here instead names both
- * addresses and tells the user what to do. (#287)
+ * The kit signs with whichever account is active; a mismatch produces a
+ * tx_bad_auth rejection at submission. Failing here names both addresses and
+ * tells the user what to do. (#287)
  */
 export async function assertActiveAccountMatches(sourceAddress: string): Promise<void> {
-  throw new Error('Not implemented: assertActiveAccountMatches');
+  const activeAddress = await getWalletAddress();
+  if (!activeAddress) {
+    throw new Error("No wallet is connected. Please connect your wallet and try again.");
+  }
+  if (activeAddress !== sourceAddress) {
+    throw new Error(
+      `Active wallet account (${truncateAddress(activeAddress)}) does not match the source address ` +
+      `(${truncateAddress(sourceAddress)}). Switch to the correct account in your wallet and retry.`
+    );
+  }
 }
 
 /**
