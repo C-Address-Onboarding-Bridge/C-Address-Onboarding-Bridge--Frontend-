@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, JetBrains_Mono } from "next/font/google";
+import { headers } from "next/headers";
 import "./globals.css";
 import { WalletProvider } from "@/components/wallet-provider";
 import { FeatureFlagProvider } from "@/contexts/FeatureFlagContext";
@@ -23,9 +24,19 @@ export const metadata: Metadata = {
     "Fund any Soroban smart account (C-address) directly — from a CEX withdrawal, a credit card, or an existing G-address.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Read the per-request nonce injected by middleware so Next.js can attach it
+  // to inline scripts it generates (hydration bootstrap, etc.). (#457)
+  const headersList = await headers();
+  const nonce = headersList.get("x-nonce") ?? undefined;
+
   return (
     <html lang="en" className={`${geist.variable} ${jetbrainsMono.variable}`}>
+      <head>
+        {/* Pass the nonce to Next.js inline script injection via the meta tag.
+            Next.js reads this during SSR to nonce-tag its own inline scripts. */}
+        {nonce && <meta name="x-nonce" content={nonce} />}
+      </head>
       <body className="antialiased">
         <FeatureFlagProvider>
           <WalletProvider>

@@ -12,20 +12,21 @@ const initialJsBudgetBytes = Number(process.env.NEXT_PUBLIC_INITIAL_JS_BUDGET_KB
 // so that bundle-size budget violations fail the build.
 const enforceBudget = process.env.ENFORCE_BUDGET === "true";
 
-const isDev = process.env.NODE_ENV === "development";
-// Start in Report-Only mode for issue #239 initial rollout; after confirming no
-// legitimate traffic triggers violations, flip to enforcing ("Content-Security-Policy").
-const CSP_HEADER_NAME = "Content-Security-Policy-Report-Only";
+// Enforcing CSP header (switched from Report-Only after validating no
+// legitimate traffic triggered violations — see issues #239, #456).
+const CSP_HEADER_NAME = "Content-Security-Policy";
 
-// NOTE on 'unsafe-inline' in script-src / style-src: this weakens XSS protection
-// and is a deliberate tradeoff. Next.js App Router injects inline bootstrap
-// scripts for hydration and Tailwind 4 injects inline styles; removing
-// 'unsafe-inline' would require a nonce-based CSP via proxy.ts with per-request
-// nonce generation + forced dynamic rendering on all pages + connection() calls,
-// which is a larger refactor (track as a follow-up).
+// NOTE: The primary CSP is generated per-request in src/middleware.ts, which
+// injects a random nonce into script-src so Next.js inline hydration scripts
+// are permitted without 'unsafe-inline'. The static header below is a
+// conservative fallback for any response that bypasses middleware (e.g. direct
+// static-file serving in certain deployment configs). It intentionally omits
+// 'unsafe-inline' from script-src; style-src retains it because Tailwind 4
+// injects inline styles at runtime and does not yet support nonce injection.
+const isDev = process.env.NODE_ENV === "development";
 const cspHeader = `
   default-src 'self';
-  script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""};
+  script-src 'self'${isDev ? " 'unsafe-eval'" : ""};
   style-src 'self' 'unsafe-inline';
   img-src 'self' data:;
   font-src 'self';
