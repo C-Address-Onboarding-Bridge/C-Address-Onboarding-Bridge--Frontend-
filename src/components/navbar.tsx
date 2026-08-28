@@ -15,6 +15,7 @@ import { usePathname } from "next/navigation";
 import { Wallet, ArrowLeftRight, CreditCard, Building2, LayoutDashboard, UserRound, Menu, X, AlertTriangle, LogOut } from "lucide-react";
 import { useWallet } from "./wallet-provider";
 import { PrefetchLink } from "./prefetch-link";
+import NotificationCentre from "./notification-centre";
 import { formatNetworkLabel } from "@/lib/stellar";
 
 const navLinks = [
@@ -163,6 +164,9 @@ const Navbar = () => {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Notification centre for transaction and account events (#477). */}
+            <NotificationCentre />
+
             {isConnected ? (
               <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
                 <div className="w-2 h-2 rounded-full bg-[var(--success)]" />

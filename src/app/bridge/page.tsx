@@ -8,6 +8,7 @@ import type { AccountBalances } from "@/lib/stellar";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useStepTransition } from "@/hooks/useStepTransition";
 import LiveRegion from "@/components/live-region";
+import { addNotification } from "@/lib/notifications";
 
 type Step = "form" | "review" | "confirm";
 type TxStatus = "idle" | "signing" | "submitting" | "success" | "error";
@@ -173,9 +174,24 @@ export default function BridgePage() {
       setTxHash(result.hash);
       setTxStatus("success");
       setStep("confirm");
+      // Record the outcome in the notification centre so the result survives
+      // navigation away from the review/confirm screen. (#477)
+      addNotification({
+        kind: "transaction",
+        title: "Transaction submitted",
+        message: `${amount} ${asset} to ${toAddress.slice(0, 8)}…${toAddress.slice(-6)}`,
+        href: getExplorerUrl(network, "tx", result.hash),
+      });
     } catch (e: unknown) {
-      setTxError(toSafeErrorMessage(e, "Transaction failed. Please try again."));
+      const message = toSafeErrorMessage(e, "Transaction failed. Please try again.");
+      setTxError(message);
       setTxStatus("error");
+      addNotification({
+        kind: "failure",
+        title: "Transaction failed",
+        message: `${message.slice(0, 120)}${message.length > 120 ? "…" : ""}`,
+        href: "/bridge",
+      });
     }
   };
 
