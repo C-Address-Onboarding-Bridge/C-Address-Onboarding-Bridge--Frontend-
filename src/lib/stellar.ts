@@ -31,6 +31,90 @@ export type { AppNetwork, WalletNetworkState, BridgeTransactionData } from "./ty
 /** Seconds a built transaction stays valid before the network rejects it. */
 const TRANSACTION_TIMEOUT_SECONDS = 30;
 
+// ─── Network switching (#480) ──────────────────────────────────────────────────
+//
+// The freighter-api package (v6) exports no network-switching call, but the
+// Freighter extension injects `window.freighter` with an optional `setNetwork`
+// that dapps can use to request a network change. When that API is absent the
+// switcher falls back to "manual": the user changes the network inside
+// Freighter and the app's connection poller picks the change up.
+
+export type SwitchNetworkResult = "switched" | "cancelled" | "manual";
+
+interface FreighterInjectedApi {
+  setNetwork?: (
+    networkPassphrase: string,
+    networkName: string,
+    networkUrl: string,
+    opts?: unknown
+  ) => Promise<unknown>;
+}
+
+const NETWORK_PARAMS: Record<StellarNetwork, { passphrase: string; name: string; url: string }> = {
+  PUBLIC: {
+    passphrase: Networks.PUBLIC,
+    name: "Public Global Stellar Network ; September 2015",
+    url: HORIZON_URL.PUBLIC,
+  },
+  TESTNET: {
+    passphrase: Networks.TESTNET,
+    name: "Test SDF Network ; September 2015",
+    url: HORIZON_URL.TESTNET,
+  },
+};
+
+/** How often the switcher re-checks the wallet after requesting a change. */
+const SWITCH_POLL_INTERVAL_MS = 500;
+/** How long the switcher waits for the wallet to land on the target network. */
+const SWITCH_POLL_TIMEOUT_MS = 8_000;
+
+/**
+ * Asks the wallet to switch to `target` and waits for it to confirm.
+ *
+ * - `"switched"` — the wallet accepted and is now on `target`.
+ * - `"cancelled"` — the wallet declined the prompt or never landed on the
+ *   target within the timeout.
+ * - `"manual"` — the injected wallet has no programmatic switch API, so the
+ *   user must switch inside Freighter; the app's poller detects the change.
+ */
+/**
+ * Whether a mainnet action needs an explicit warning: the user is on mainnet
+ * and the network changed recently, and they haven't acknowledged it yet.
+ * Pure so it is unit-testable without rendering the page. (#480)
+ */
+export function shouldWarnOnMainnetAction(
+  network: StellarNetwork,
+  recentlyChangedNetwork: boolean,
+  acknowledged: boolean
+): boolean {
+  return network === "PUBLIC" && recentlyChangedNetwork && !acknowledged;
+}
+
+export async function switchWalletNetwork(target: StellarNetwork): Promise<SwitchNetworkResult> {
+  const injected = (window as unknown as { freighter?: FreighterInjectedApi }).freighter;
+  if (!injected?.setNetwork) {
+    return "manual";
+  }
+
+  const params = NETWORK_PARAMS[target];
+  try {
+    await injected.setNetwork(params.passphrase, params.name, params.url);
+  } catch {
+    // The user declined the prompt inside the wallet.
+    return "cancelled";
+  }
+
+  const deadline = Date.now() + SWITCH_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const { status } = await getWalletNetwork();
+    if (status === target) {
+      return "switched";
+    }
+    await new Promise((resolve) => setTimeout(resolve, SWITCH_POLL_INTERVAL_MS));
+  }
+  return "cancelled";
+}
+
 export async function getHorizonServer(network: StellarNetwork): Promise<Horizon.Server> {
   return new Horizon.Server(HORIZON_URL[network]);
 }

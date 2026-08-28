@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRightLeft, Wallet, Send, ArrowRight, Check, AlertCircle, Loader2, ExternalLink } from "lucide-react";
+import { ArrowRightLeft, Wallet, Send, ArrowRight, Check, AlertCircle, AlertTriangle, Loader2, ExternalLink } from "lucide-react";
 import { useWallet } from "@/components/wallet-provider";
-import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel, getEstimatedFeeXLM, toSafeErrorMessage } from "@/lib/stellar";
+import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel, getEstimatedFeeXLM, toSafeErrorMessage, shouldWarnOnMainnetAction } from "@/lib/stellar";
 import type { AccountBalances, SimulationResult } from "@/lib/stellar";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useStepTransition } from "@/hooks/useStepTransition";
@@ -30,6 +30,7 @@ export default function BridgePage() {
     walletNetworkName,
     isNetworkSupported,
     isOnline,
+    recentlyChangedNetwork,
     connect,
   } = useWallet();
   // The source is always Freighter's connected account, never free text.
@@ -54,6 +55,9 @@ export default function BridgePage() {
   // `simulating` covers the in-flight fetch. (#478)
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [simulating, setSimulating] = useState(false);
+  // Set when the user tries to confirm a mainnet action shortly after a
+  // network change; signing waits for explicit acknowledgement. (#480)
+  const [mainnetWarning, setMainnetWarning] = useState(false);
 
   // Keyboard + screen-reader step transitions: focus the new step's heading and
   // announce the change. Implemented in useStepTransition. (#476)
@@ -189,18 +193,9 @@ export default function BridgePage() {
     }
   };
 
-  const handleConfirm = async () => {
-    if (!fromAddress || !toAddress || !amount) return;
-    // Never build against a network the app only guessed at. (#289)
-    if (!isNetworkSupported) {
-      setTxError(
-        networkStatus === "UNSUPPORTED"
-          ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
-          : "Freighter's network couldn't be read. Unlock the extension and reload before submitting."
-      );
-      setTxStatus("error");
-      return;
-    }
+  /** The signing + submission step, shared by the confirm button and the
+   *  mainnet warning's "I understand" action. (#480) */
+  const performConfirm = async () => {
     setTxStatus("signing");
     setTxError(null);
 
@@ -237,6 +232,27 @@ export default function BridgePage() {
     }
   };
 
+  const handleConfirm = async () => {
+    if (!fromAddress || !toAddress || !amount) return;
+    // Never build against a network the app only guessed at. (#289)
+    if (!isNetworkSupported) {
+      setTxError(
+        networkStatus === "UNSUPPORTED"
+          ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
+          : "Freighter's network couldn't be read. Unlock the extension and reload before submitting."
+      );
+      setTxStatus("error");
+      return;
+    }
+    // Warn before a mainnet action initiated shortly after a network change:
+    // real funds are at stake and the switch may have been a mistake. (#480)
+    if (shouldWarnOnMainnetAction(network, recentlyChangedNetwork, mainnetWarning)) {
+      setMainnetWarning(true);
+      return;
+    }
+    await performConfirm();
+  };
+
   const handleReset = () => {
     setStep("form");
     setTxStatus("idle");
@@ -244,6 +260,7 @@ export default function BridgePage() {
     setTxError(null);
     // Form values may change, so a stale prediction must not carry over.
     setSimulation(null);
+    setMainnetWarning(false);
   };
 
   // Announcements for screen readers, derived from the existing status state.
@@ -502,6 +519,42 @@ export default function BridgePage() {
                     </span>
                   </div>
                 </div>
+
+                {mainnetWarning && network === "PUBLIC" && (
+                  <div
+                    role="alert"
+                    className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3"
+                  >
+                    <AlertTriangle className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-[var(--error)]">Mainnet warning</p>
+                      <p className="text-xs text-[var(--text-muted)] mt-1">
+                        You changed networks recently. This transaction will send real funds
+                        on Mainnet and can&apos;t be undone. Make sure you intend to use real
+                        assets before continuing.
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMainnetWarning(false);
+                            void performConfirm();
+                          }}
+                          className="px-4 py-2 rounded-lg bg-[var(--error)] text-white text-xs font-medium hover:bg-[var(--error)]/90 transition-colors"
+                        >
+                          I understand — continue on Mainnet
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMainnetWarning(false)}
+                          className="px-4 py-2 rounded-lg border border-[var(--border)] text-xs font-medium text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Predicted outcome from the simulation endpoint (#478). */}
                 {simulating ? (
