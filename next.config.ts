@@ -13,9 +13,9 @@ const initialJsBudgetBytes = Number(process.env.NEXT_PUBLIC_INITIAL_JS_BUDGET_KB
 const enforceBudget = process.env.ENFORCE_BUDGET === "true";
 
 const isDev = process.env.NODE_ENV === "development";
-// Start in Report-Only mode for issue #239 initial rollout; after confirming no
-// legitimate traffic triggers violations, flip to enforcing ("Content-Security-Policy").
-const CSP_HEADER_NAME = "Content-Security-Policy-Report-Only";
+// Enforcing CSP header (switched from Report-Only after validating no
+// legitimate traffic triggered violations — see issues #239, #456).
+const CSP_HEADER_NAME = "Content-Security-Policy";
 
 // NOTE on 'unsafe-inline' in script-src / style-src: this weakens XSS protection
 // and is a deliberate tradeoff. Next.js App Router injects inline bootstrap
