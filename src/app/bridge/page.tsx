@@ -8,6 +8,10 @@ import type { AccountBalances } from "@/lib/stellar";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useStepTransition } from "@/hooks/useStepTransition";
 import LiveRegion from "@/components/live-region";
+import {
+  IN_FLIGHT_TRANSACTION_KEY,
+  type InFlightTransaction,
+} from "@/components/error-boundary";
 
 type Step = "form" | "review" | "confirm";
 type TxStatus = "idle" | "signing" | "submitting" | "success" | "error";
@@ -173,6 +177,24 @@ export default function BridgePage() {
       setTxHash(result.hash);
       setTxStatus("success");
       setStep("confirm");
+
+      // Record the freshly-submitted transaction so a later crash can surface a
+      // link to its detail page instead of hiding that funds may be in motion.
+      // The transaction detail page clears this once it reaches a terminal
+      // state. (#473)
+      try {
+        const inFlight: InFlightTransaction = {
+          hash: result.hash,
+          network,
+          from: fromAddress,
+          to: toAddress,
+          amount,
+          asset,
+        };
+        sessionStorage.setItem(IN_FLIGHT_TRANSACTION_KEY, JSON.stringify(inFlight));
+      } catch {
+        // Storage unavailable (private mode) — the recovery link just won't show.
+      }
     } catch (e: unknown) {
       setTxError(toSafeErrorMessage(e, "Transaction failed. Please try again."));
       setTxStatus("error");

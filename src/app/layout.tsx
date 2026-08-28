@@ -3,6 +3,7 @@ import { Geist, JetBrains_Mono } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import { WalletProvider } from "@/components/wallet-provider";
+import { ErrorBoundary, WalletErrorBoundary } from "@/components/error-boundary";
 import { FeatureFlagProvider } from "@/contexts/FeatureFlagContext";
 import { FeatureFlagPanel } from "@/components/FeatureFlagPanel";
 import { StatusBanner } from "@/components/status-banner";
@@ -104,27 +105,35 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="antialiased">
-        <FeatureFlagProvider>
-          <WalletProvider>
-            <StatusBanner />
-            <div className="min-h-screen flex flex-col">
-              <a
-                href="#main-content"
-                className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-[var(--primary)] focus:text-white focus:font-medium focus:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-light)]"
-              >
-                Skip to main content
-              </a>
-              <Navbar />
-              <main id="main-content" tabIndex={-1} className="flex-1 pt-16">
-                {children}
-              </main>
-              <Footer />
-            </div>
-            <FeatureFlagPanel />
-            <ServiceWorkerRegistrar />
-            <OfflineBanner />
-          </WalletProvider>
-        </FeatureFlagProvider>
+        {/* App-wide boundaries (#473): every unexpected error is reported
+            through the central handleError path and renders a recoverable
+            fallback instead of a white screen. The wallet layer gets its own
+            boundary so wallet-specific failures surface a targeted message. */}
+        <ErrorBoundary context="app">
+          <FeatureFlagProvider>
+            <WalletErrorBoundary>
+              <WalletProvider>
+                <StatusBanner />
+                <div className="min-h-screen flex flex-col">
+                  <a
+                    href="#main-content"
+                    className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-[var(--primary)] focus:text-white focus:font-medium focus:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-light)]"
+                  >
+                    Skip to main content
+                  </a>
+                  <Navbar />
+                  <main id="main-content" tabIndex={-1} className="flex-1 pt-16">
+                    {children}
+                  </main>
+                  <Footer />
+                </div>
+                <FeatureFlagPanel />
+                <ServiceWorkerRegistrar />
+                <OfflineBanner />
+              </WalletProvider>
+            </WalletErrorBoundary>
+          </FeatureFlagProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );
