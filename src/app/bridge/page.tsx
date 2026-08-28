@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowRightLeft, Wallet, Send, ArrowRight, Check, AlertCircle, Loader2, ExternalLink } from "lucide-react";
 import { useWallet } from "@/components/wallet-provider";
 import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel, getEstimatedFeeXLM, toSafeErrorMessage } from "@/lib/stellar";
-import type { AccountBalances } from "@/lib/stellar";
+import type { AccountBalances, SimulationResult } from "@/lib/stellar";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useStepTransition } from "@/hooks/useStepTransition";
 import LiveRegion from "@/components/live-region";
@@ -49,6 +49,11 @@ export default function BridgePage() {
   // Falls back to the static placeholder if the fetch fails. (#257)
   const FALLBACK_FEE = "~0.00001 XLM";
   const [estimatedFee, setEstimatedFee] = useState<string>(FALLBACK_FEE);
+  // Simulation result fetched from /api/simulate before the signing step is
+  // presented. `null` means no simulation has run for the current form values;
+  // `simulating` covers the in-flight fetch. (#478)
+  const [simulation, setSimulation] = useState<SimulationResult | null>(null);
+  const [simulating, setSimulating] = useState(false);
 
   // Keyboard + screen-reader step transitions: focus the new step's heading and
   // announce the change. Implemented in useStepTransition. (#476)
@@ -134,10 +139,11 @@ export default function BridgePage() {
     };
   }, [address, network, isNetworkSupported]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!canProceed) return;
-    setStep("review");
     setTxError(null);
+    setSimulation(null);
+    setSimulating(true);
     // Fetch a fresh fee estimate in the background; if it fails the
     // fallback value already set in state is shown instead. (#257)
     getEstimatedFeeXLM(network).then((fee) => setEstimatedFee(fee)).catch(() => {
@@ -145,6 +151,42 @@ export default function BridgePage() {
       // guard here for defence in depth.
       setEstimatedFee(FALLBACK_FEE);
     });
+    // Simulate before presenting the signing step: the review screen shows
+    // the predicted fee, net amount, recipient, and any specific failure
+    // reason instead of asking the user to sign blind. The endpoint always
+    // resolves; if it can't run (offline / unreachable), the review screen
+    // degrades to the static fee estimate and lets the user continue. (#478)
+    try {
+      const response = await fetch("/api/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceAddress: fromAddress,
+          destinationAddress: toAddress,
+          amount,
+          assetCode: asset,
+          network,
+        }),
+      });
+      if (response.ok) {
+        setSimulation((await response.json()) as SimulationResult);
+      } else {
+        setSimulation({
+          ok: false,
+          reason: "simulation_unavailable",
+          message: "The transaction couldn't be simulated right now. Review the details and try again.",
+        });
+      }
+    } catch {
+      setSimulation({
+        ok: false,
+        reason: "simulation_unavailable",
+        message: "The transaction couldn't be simulated right now. Review the details and try again.",
+      });
+    } finally {
+      setSimulating(false);
+      setStep("review");
+    }
   };
 
   const handleConfirm = async () => {
@@ -200,6 +242,8 @@ export default function BridgePage() {
     setTxStatus("idle");
     setTxHash(null);
     setTxError(null);
+    // Form values may change, so a stale prediction must not carry over.
+    setSimulation(null);
   };
 
   // Announcements for screen readers, derived from the existing status state.
@@ -453,9 +497,51 @@ export default function BridgePage() {
                   </div>
                   <div className="flex justify-between items-center p-4 rounded-lg bg-[var(--surface-2)]">
                     <span className="text-sm text-[var(--text-muted)]">Fee</span>
-                    <span className="text-sm">{estimatedFee}</span>
+                    <span className="text-sm">
+                      {simulation?.ok ? simulation.feeXlm : estimatedFee}
+                    </span>
                   </div>
                 </div>
+
+                {/* Predicted outcome from the simulation endpoint (#478). */}
+                {simulating ? (
+                  <div className="flex items-center gap-2 p-4 rounded-lg bg-[var(--surface-2)]">
+                    <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none text-[var(--text-muted)]" />
+                    <span className="text-sm text-[var(--text-muted)]">Simulating transaction…</span>
+                  </div>
+                ) : simulation?.ok ? (
+                  <div className="p-4 rounded-lg border border-[var(--success)]/20 bg-[var(--success)]/5">
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-[var(--text-muted)]">Net amount received</span>
+                        <span className="text-sm font-semibold">
+                          {simulation.netAmount} {simulation.asset}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-[var(--text-muted)]">Recipient</span>
+                        <span className="text-sm font-mono">{simulation.recipient}</span>
+                      </div>
+                      <p className="text-xs text-[var(--text-muted)]">
+                        This is a prediction based on current network state — it can change
+                        before the transaction is submitted.
+                      </p>
+                    </div>
+                  </div>
+                ) : simulation && !simulation.ok ? (
+                  <div
+                    role="alert"
+                    className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3"
+                  >
+                    <AlertCircle className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-[var(--error)]">
+                        Simulation predicts failure
+                      </p>
+                      <p className="text-xs text-[var(--text-muted)] mt-1">{simulation.message}</p>
+                    </div>
+                  </div>
+                ) : null}
 
                 {txError && (
                   <div className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3">
@@ -477,7 +563,17 @@ export default function BridgePage() {
                   </button>
                   <button
                     onClick={handleConfirm}
-                    disabled={txStatus === "signing" || txStatus === "submitting" || !isOnline}
+                    disabled={
+                      txStatus === "signing" ||
+                      txStatus === "submitting" ||
+                      !isOnline ||
+                      (simulation !== null && !simulation.ok)
+                    }
+                    title={
+                      simulation !== null && !simulation.ok
+                        ? "Fix the issue shown by the simulation before signing"
+                        : undefined
+                    }
                     className="flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-light)]"
                   >
                     {txStatus === "signing" || txStatus === "submitting" ? (
