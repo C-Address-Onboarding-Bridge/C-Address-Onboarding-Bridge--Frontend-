@@ -45,5 +45,52 @@ export interface UseCopyToClipboardReturn {
  *                       Defaults to 2000ms.
  */
 export function useCopyToClipboard(resetAfterMs = COPY_FEEDBACK_DURATION_MS): UseCopyToClipboardReturn {
-  throw new Error('Not implemented: useCopyToClipboard');
+  const [status, setStatus] = useState<CopyStatus>("idle");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleReset = useCallback(() => {
+    if (resetAfterMs <= 0) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      setStatus("idle");
+      timerRef.current = null;
+    }, resetAfterMs);
+  }, [resetAfterMs]);
+
+  const copy = useCallback(
+    async (text: string): Promise<boolean> => {
+      // navigator.clipboard is only available in secure contexts (HTTPS or localhost).
+      if (!navigator?.clipboard?.writeText) {
+        setStatus("error");
+        scheduleReset();
+        return false;
+      }
+
+      try {
+        await navigator.clipboard.writeText(text);
+        setStatus("copied");
+        scheduleReset();
+        return true;
+      } catch {
+        // writeText() can reject if:
+        //   - Clipboard-write permission is denied by the user
+        //   - The document is not focused
+        //   - The browser blocks the request for another reason
+        setStatus("error");
+        scheduleReset();
+        return false;
+      }
+    },
+    [scheduleReset],
+  );
+
+  const reset = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setStatus("idle");
+  }, []);
+
+  return { status, copy, reset };
 }
