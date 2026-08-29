@@ -85,5 +85,7 @@ export function parseError(error: unknown): AppError {
  * Never throws — safe to use in catch blocks.
  */
 export function handleError(error: unknown, context?: string): AppError {
-  throw new Error('Not implemented: handleError');
+  const parsed = parseError(error);
+  console.error(context ? `[${context}] ${parsed.message}` : parsed.message, parsed.details ?? error);
+  return parsed;
 }
