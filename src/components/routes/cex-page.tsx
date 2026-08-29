@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { Building2, Copy, Check, ExternalLink, Wallet, X, Clock } from "lucide-react";
-import { CEX_LIST } from "@/lib/types";
+import { useState } from "react";
+import { Building2, Copy, Check, ExternalLink, Wallet, X, Clock, HelpCircle } from "lucide-react";
+import { CEX_LIST, type CexConfig } from "@/lib/types";
 import { isCAddress } from "@/lib/stellar";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
+import { useDebounce } from "@/hooks/useDebounce";
+import LiveRegion from "@/components/live-region";
+import { useHelp } from "@/contexts/HelpContext";
 
 /**
  * CexPage — CEX withdrawal routing to C-addresses.
@@ -20,34 +23,64 @@ import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
  *   in the error state instead of a success checkmark. (#300)
  */
 export default function CexPage() {
-  const [selectedCex, setSelectedCex] = useState(CEX_LIST[0]);
+  const { openHelp } = useHelp();
+  // Annotated with CexConfig rather than inferred: CEX_LIST is `as const`, so
+  // the inferred type would be the literal type of Binance alone and selecting
+  // any other exchange would not type-check. (#346)
+  const [selectedCex, setSelectedCex] = useState<CexConfig>(CEX_LIST[0]);
   const [cAddress, setCAddress] = useState("");
   const { status: copyStatus, copy: copyToClipboard } = useCopyToClipboard();
 
+  // Debounce address so validation only runs 200 ms after the user stops
+  // typing — avoids re-validating on every keystroke while keeping the
+  // displayed input value instant.
+  const debouncedCAddress = useDebounce(cAddress, 200);
+
   // Validate once the user has typed something.
-  const addressTouched = cAddress.length > 0;
-  const addressValid = addressTouched && isCAddress(cAddress);
+  const addressTouched = debouncedCAddress.length > 0;
+  const addressValid = addressTouched && isCAddress(debouncedCAddress);
   const addressError =
     addressTouched && !addressValid
       ? "Invalid C-address — must be a valid Soroban contract address (starts with C)."
       : null;
 
-  const withdrawalUrl = useMemo(() => selectedCex.withdrawalUrl, [selectedCex]);
+  // Direct property read — the previous useMemo on a single property access
+  // added overhead without any memoization benefit.
+  const withdrawalUrl = selectedCex.withdrawalUrl;
+
+  // Copy feedback is icon-only (plus a visible "Copy failed" label), so the
+  // outcome has to be announced for it to exist at all for AT users.
+  const copyAnnouncement =
+    copyStatus === "copied"
+      ? "C-address copied to clipboard."
+      : copyStatus === "error"
+        ? "Copy failed. Check clipboard permissions and try again."
+        : "";
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">CEX Withdrawal Routing</h1>
-        <p className="text-[var(--text-muted)]">
-          Route your centralized exchange withdrawals directly to a Soroban C-address.
-        </p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold mb-2">CEX Withdrawal Routing</h1>
+          <p className="text-[var(--text-muted)]">
+            Route your centralized exchange withdrawals directly to a Soroban C-address.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={openHelp}
+          className="hidden sm:flex p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors"
+          aria-label="Open help centre"
+        >
+          <HelpCircle className="w-5 h-5" />
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
           {/* Step 1 */}
           <div className="card p-6">
-            <h3 className="font-semibold mb-4">1. Select Your Exchange</h3>
+            <h2 className="font-semibold mb-4">1. Select Your Exchange</h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {CEX_LIST.map((cex) => (
                 <button
@@ -70,7 +103,7 @@ export default function CexPage() {
 
           {/* Step 2 — C-address input with validation */}
           <div className="card p-6">
-            <h3 className="font-semibold mb-4">2. Enter Your C-Address</h3>
+            <h2 className="font-semibold mb-4">2. Enter Your C-Address</h2>
             <p className="text-xs text-[var(--text-muted)] mb-3">
               Your Soroban smart account address. C-addresses start with the letter{" "}
               <code>C</code> and are distinct from regular Stellar G-addresses.
@@ -102,8 +135,12 @@ export default function CexPage() {
                 {addressError}
               </p>
             )}
+            {/* The invalid case is announced via role="alert"; without a
+                matching role here the *positive* result of typing a correct
+                address is silent, so an AT user gets told when they are wrong
+                but never when they are right. */}
             {addressValid && (
-              <p className="mt-2 text-xs text-green-500 flex items-center gap-1">
+              <p role="status" className="mt-2 text-xs text-green-500 flex items-center gap-1">
                 <Check className="w-3 h-3 flex-shrink-0" />
                 Valid C-address
               </p>
@@ -112,7 +149,12 @@ export default function CexPage() {
 
           {/* Step 3 — Withdrawal details */}
           <div className="card p-6">
-            <h3 className="font-semibold mb-4">3. Withdrawal Details for {selectedCex.name}</h3>
+            <h2 className="font-semibold mb-4">3. Withdrawal Details for {selectedCex.name}</h2>
+
+            {/* Mounted with the card, not with the copy row below (which comes
+                and goes with addressValid) — a live region inserted at the same
+                moment it gains text can go unannounced. */}
+            <LiveRegion message={copyAnnouncement} />
 
             {/* Bridge deposit address — coming soon (#299) */}
             <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface-2)] p-4 mb-4 flex items-start gap-3">
@@ -141,6 +183,8 @@ export default function CexPage() {
                   <div className="flex flex-col items-center gap-1">
                     <button
                       onClick={() => copyToClipboard(cAddress)}
+                      // Explicit name: title is not a dependable accessible name.
+                      aria-label="Copy C-address"
                       title={
                         copyStatus === "error"
                           ? "Copy failed — check clipboard permissions"
@@ -169,7 +213,7 @@ export default function CexPage() {
         {/* Sidebar */}
         <div className="space-y-4">
           <div className="card p-5">
-            <h3 className="font-semibold mb-3">Exchange Details</h3>
+            <h2 className="font-semibold mb-3">Exchange Details</h2>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-[var(--text-muted)]">Exchange</span>
@@ -187,7 +231,7 @@ export default function CexPage() {
           </div>
 
           <div className="card p-5">
-            <h3 className="font-semibold mb-3">How It Works</h3>
+            <h2 className="font-semibold mb-3">How It Works</h2>
             <ol className="space-y-3 text-sm text-[var(--text-muted)]">
               <li className="flex gap-2">
                 <span className="text-[var(--primary-light)] font-medium">1.</span>

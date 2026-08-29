@@ -18,6 +18,16 @@
   --success: #00b894;
   --warning: #fdcb6e;
   --error: #e17055;
+
+  /* Channel-list forms of the two brand hues, for the places that need an
+     alpha variant. `rgb(var(--primary-rgb) / 0.3)` keeps a single source of
+     truth; a literal `rgba(108, 92, 231, 0.3)` silently drifts when --primary
+     is retuned. Must be kept in step with --primary / --secondary above. */
+  --primary-rgb: 108 92 231;
+  --secondary-rgb: 0 206 201;
+
+  /* The brand gradient, used by .gradient-text and .gradient-border. */
+  --gradient-brand: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
 }
 
 @theme inline {
@@ -49,7 +59,15 @@ body {
 }
 
 ::selection {
-  background: rgba(108, 92, 231, 0.3);
+  background: rgb(var(--primary-rgb) / 0.3);
+}
+
+/* Scrollbars. The ::-webkit-* rules cover Chromium and Safari; the standard
+   properties are what Firefox reads, and without them it fell back to the
+   default light scrollbar on a dark page. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) var(--surface);
 }
 
 ::-webkit-scrollbar {
@@ -66,7 +84,7 @@ body {
 }
 
 .gradient-text {
-  background: linear-gradient(135deg, #6c5ce7 0%, #00cec9 100%);
+  background: var(--gradient-brand);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -82,23 +100,36 @@ body {
   inset: 0;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(135deg, #6c5ce7, #00cec9);
+  background: var(--gradient-brand);
+  /* Punches the interior out of the gradient so only a 1px ring paints. Both
+     the prefixed and the standard property have to be declared: with only
+     `-webkit-mask` present, the unprefixed `mask-composite: exclude` had no
+     mask to composite in Firefox, which painted the gradient over the whole
+     element instead of just its border. */
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask-composite: exclude;
 }
 
 .glow {
-  box-shadow: 0 0 20px rgba(108, 92, 231, 0.15), 0 0 40px rgba(0, 206, 201, 0.05);
+  box-shadow:
+    0 0 20px rgb(var(--primary-rgb) / 0.15),
+    0 0 40px rgb(var(--secondary-rgb) / 0.05);
 }
 
 .card-hover {
-  transition: all 0.2s ease;
+  /* Enumerated rather than `all`: `transition: all` also animates properties
+     changed by unrelated state (colour, border) and forces the compositor to
+     watch every one of them. */
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .card-hover:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 30px rgba(108, 92, 231, 0.12);
+  box-shadow: 0 8px 30px rgb(var(--primary-rgb) / 0.12);
 }
 
 /*

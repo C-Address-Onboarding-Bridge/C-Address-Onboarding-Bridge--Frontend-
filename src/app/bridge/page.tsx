@@ -1,11 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowRightLeft, Wallet, Send, ArrowRight, Check, AlertCircle, Loader2, ExternalLink } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRightLeft, Wallet, Send, ArrowRight, Check, AlertCircle, Loader2, ExternalLink, Lock as LockIcon } from "lucide-react";
 import { useWallet } from "@/components/wallet-provider";
-import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel } from "@/lib/stellar";
+import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel, getEstimatedFeeXLM, toSafeErrorMessage } from "@/lib/stellar";
 import type { AccountBalances } from "@/lib/stellar";
+import { createLock } from "@/lib/api";
+import { validateUnlockTime, type Lock as LockRecord } from "@/lib/locks";
+import { useDebounce } from "@/hooks/useDebounce";
+import { useStepTransition } from "@/hooks/useStepTransition";
+import LiveRegion from "@/components/live-region";
+import BatchFundingForm from "@/components/BatchFundingForm";
+import { submitBatchFunding } from "@/lib/api";
 
+type FlowMode = "single" | "batch";
 type Step = "form" | "review" | "confirm";
 type TxStatus = "idle" | "signing" | "submitting" | "success" | "error";
 
@@ -25,26 +33,60 @@ export default function BridgePage() {
     networkStatus,
     walletNetworkName,
     isNetworkSupported,
+    isOnline,
+    recentlyChangedNetwork,
     connect,
   } = useWallet();
+  const { openHelp } = useHelp();
   // The source is always Freighter's connected account, never free text.
   // Freighter signs with its active account regardless of what the transaction
   // names as its source, so any other value could only ever produce a
   // tx_bad_auth failure after the user had already approved the signature. (#287)
   const fromAddress = address ?? "";
+  const [flowMode, setFlowMode] = useState<FlowMode>("single");
   const [toAddress, setToAddress] = useState("");
   const [amount, setAmount] = useState("");
   const [asset, setAsset] = useState("XLM");
+  // Locking is an optional add-on to the same form, not a separate flow: the
+  // address/amount/asset fields above are shared, and only the submit path
+  // branches (createLock vs. bridgeViaContract). See src/lib/locks.ts and
+  // src/lib/api.ts for why this is a placeholder interface. (#467)
+  const [isLocked, setIsLocked] = useState(false);
+  const [unlockAt, setUnlockAt] = useState("");
+  const [lockResult, setLockResult] = useState<LockRecord | null>(null);
   const [step, setStep] = useState<Step>("form");
   const [txStatus, setTxStatus] = useState<TxStatus>("idle");
   const [txHash, setTxHash] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
   const [sourceBalances, setSourceBalances] = useState<AccountBalances | null>(null);
+  // null covers both "no tiers configured" and "not loaded yet" — FeeTierDisplay
+  // hides itself either way, so no separate loading state is needed. (#468)
+  const [feeTierStatus, setFeeTierStatus] = useState<FeeTierStatus | null>(null);
+  // Fee estimate fetched from Horizon when the user moves to the review step.
+  // Falls back to the static placeholder if the fetch fails. (#257)
+  const FALLBACK_FEE = "~0.00001 XLM";
+  const [estimatedFee, setEstimatedFee] = useState<string>(FALLBACK_FEE);
+  // Simulation result fetched from /api/simulate before the signing step is
+  // presented. `null` means no simulation has run for the current form values;
+  // `simulating` covers the in-flight fetch. (#478)
+  const [simulation, setSimulation] = useState<SimulationResult | null>(null);
+  const [simulating, setSimulating] = useState(false);
+  // Set when the user tries to confirm a mainnet action shortly after a
+  // network change; signing waits for explicit acknowledgement. (#480)
+  const [mainnetWarning, setMainnetWarning] = useState(false);
+
+  // Keyboard + screen-reader step transitions: focus the new step's heading and
+  // announce the change. Implemented in useStepTransition. (#476)
+  const { headingRef, announcement: stepAnnouncement } = useStepTransition(step);
 
   const validFrom = !fromAddress || isValidStellarAddress(fromAddress);
-  const validTo = !toAddress || (isValidStellarAddress(toAddress) && isCAddress(toAddress));
+  // Debounce address/amount validation to avoid running StrKey CRC checks on
+  // every keystroke — validation fires 300 ms after the user stops typing.
+  const debouncedToAddress = useDebounce(toAddress, 300);
+  const debouncedAmount = useDebounce(amount, 300);
+  const validTo = !debouncedToAddress || (isValidStellarAddress(debouncedToAddress) && isCAddress(debouncedToAddress));
   const networkLabel = formatNetworkLabel(networkStatus, walletNetworkName);
-  const validAmount = !amount || isValidStellarAmount(amount);
+  const validAmount = !debouncedAmount || isValidStellarAmount(debouncedAmount);
 
   // Balances are only meaningful for a connected wallet on a supported
   // network; anything cached from before a disconnect or a switch to an
@@ -53,21 +95,30 @@ export default function BridgePage() {
 
   // Balance available for the currently-selected asset. XLM lives in `total`;
   // other assets (e.g. USDC) come from the matching entry in `balances`.
-  const availableBalance =
-    activeBalances === null
-      ? null
-      : asset === "XLM"
-        ? activeBalances.total
-        : activeBalances.balances.find((b) => b.asset === asset)?.amount ?? "0";
+  // Only the asset dropdown and the fetched balances should trigger this
+  // lookup — memoized so typing in the address/amount fields on every
+  // keystroke doesn't re-run the `.find()` over the balances list. (#366)
+  const availableBalance = useMemo(
+    () =>
+      activeBalances === null
+        ? null
+        : asset === "XLM"
+          ? activeBalances.total
+          : (activeBalances.balances.find((b) => b.asset === asset)?.amount ?? "0"),
+    [activeBalances, asset]
+  );
 
   // Spendable balance leaves the XLM minimum reserve untouched; the reserve is
   // only held in XLM, so non-XLM assets can be sent down to zero.
-  const spendableBalance =
-    availableBalance === null
-      ? null
-      : asset === "XLM"
-        ? Number(availableBalance) - Number(getAccountMinimumBalance())
-        : Number(availableBalance);
+  const spendableBalance = useMemo(
+    () =>
+      availableBalance === null
+        ? null
+        : asset === "XLM"
+          ? Number(availableBalance) - Number(getAccountMinimumBalance())
+          : Number(availableBalance),
+    [availableBalance, asset]
+  );
 
   const insufficientBalance =
     spendableBalance !== null &&
@@ -77,11 +128,17 @@ export default function BridgePage() {
 
   // No Soroban transfer path is implemented yet, so no destination this form
   // accepts (validTo requires a C-address) can actually be bridged. See #284.
-  const bridgingBlocked = Boolean(toAddress) && validTo;
+  // This blocks only the instant path — a locked transfer goes through the
+  // timelock contract via the API instead of a classic payment, so it isn't
+  // affected by the same limitation. (#467)
+  const bridgingBlocked = Boolean(debouncedToAddress) && validTo && !isLocked;
+
+  const unlockValidation = isLocked ? validateUnlockTime(unlockAt) : null;
 
   const canProceed =
     isConnected &&
     isNetworkSupported &&
+    isOnline &&
     fromAddress &&
     toAddress &&
     amount &&
@@ -89,6 +146,9 @@ export default function BridgePage() {
     validTo &&
     !insufficientBalance &&
     !bridgingBlocked &&
+    (!isLocked || unlockValidation?.ok === true) &&
+    debouncedToAddress === toAddress &&
+    debouncedAmount === amount &&
     txStatus === "idle";
 
   // Balances follow the connected account: no manual "use connected wallet"
@@ -105,10 +165,72 @@ export default function BridgePage() {
     };
   }, [address, network, isNetworkSupported]);
 
+  // Fee tier preview follows the connected account the same way balances do.
+  // getFeeTierPreview never throws (it resolves null on any failure), so
+  // there's nothing to catch here — a failed fetch degrades to the same
+  // "hide the tier display" state as tiers genuinely not being configured. (#468)
+  useEffect(() => {
+    if (!address || !isNetworkSupported) {
+      setFeeTierStatus(null);
+      return;
+    }
+    let cancelled = false;
+    getFeeTierPreview(address, network).then((result) => {
+      if (!cancelled) setFeeTierStatus(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [address, network, isNetworkSupported]);
+
   const handleSubmit = () => {
     if (!canProceed) return;
-    setStep("review");
     setTxError(null);
+    setSimulation(null);
+    setSimulating(true);
+    // Fetch a fresh fee estimate in the background; if it fails the
+    // fallback value already set in state is shown instead. (#257)
+    getEstimatedFeeXLM(network).then((fee) => setEstimatedFee(fee)).catch(() => {
+      // getEstimatedFeeXLM never throws (it falls back internally), but
+      // guard here for defence in depth.
+      setEstimatedFee(FALLBACK_FEE);
+    });
+    // Simulate before presenting the signing step: the review screen shows
+    // the predicted fee, net amount, recipient, and any specific failure
+    // reason instead of asking the user to sign blind. The endpoint always
+    // resolves; if it can't run (offline / unreachable), the review screen
+    // degrades to the static fee estimate and lets the user continue. (#478)
+    try {
+      const response = await fetch("/api/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceAddress: fromAddress,
+          destinationAddress: toAddress,
+          amount,
+          assetCode: asset,
+          network,
+        }),
+      });
+      if (response.ok) {
+        setSimulation((await response.json()) as SimulationResult);
+      } else {
+        setSimulation({
+          ok: false,
+          reason: "simulation_unavailable",
+          message: "The transaction couldn't be simulated right now. Review the details and try again.",
+        });
+      }
+    } catch {
+      setSimulation({
+        ok: false,
+        reason: "simulation_unavailable",
+        message: "The transaction couldn't be simulated right now. Review the details and try again.",
+      });
+    } finally {
+      setSimulating(false);
+      setStep("review");
+    }
   };
 
   const handleConfirm = async () => {
@@ -123,6 +245,29 @@ export default function BridgePage() {
       setTxStatus("error");
       return;
     }
+    if (isLocked) {
+      if (!unlockValidation || !unlockValidation.ok) return;
+      setTxStatus("submitting");
+      setTxError(null);
+      try {
+        const lock = await createLock({
+          from: fromAddress,
+          recipient: toAddress,
+          amount,
+          asset,
+          unlockTime: unlockValidation.unlockTime,
+          network,
+        });
+        setLockResult(lock);
+        setTxStatus("success");
+        setStep("confirm");
+      } catch (e: unknown) {
+        setTxError(toSafeErrorMessage(e, "Lock creation failed. Please try again."));
+        setTxStatus("error");
+      }
+      return;
+    }
+
     setTxStatus("signing");
     setTxError(null);
 
@@ -138,10 +283,46 @@ export default function BridgePage() {
       setTxHash(result.hash);
       setTxStatus("success");
       setStep("confirm");
+      // Record the outcome in the notification centre so the result survives
+      // navigation away from the review/confirm screen. (#477)
+      addNotification({
+        kind: "transaction",
+        title: "Transaction submitted",
+        message: `${amount} ${asset} to ${toAddress.slice(0, 8)}…${toAddress.slice(-6)}`,
+        href: getExplorerUrl(network, "tx", result.hash),
+      });
     } catch (e: unknown) {
-      setTxError(e instanceof Error ? e.message : "Transaction failed");
+      const message = toSafeErrorMessage(e, "Transaction failed. Please try again.");
+      setTxError(message);
       setTxStatus("error");
+      addNotification({
+        kind: "failure",
+        title: "Transaction failed",
+        message: `${message.slice(0, 120)}${message.length > 120 ? "…" : ""}`,
+        href: "/bridge",
+      });
     }
+  };
+
+  const handleConfirm = async () => {
+    if (!fromAddress || !toAddress || !amount) return;
+    // Never build against a network the app only guessed at. (#289)
+    if (!isNetworkSupported) {
+      setTxError(
+        networkStatus === "UNSUPPORTED"
+          ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
+          : "Freighter's network couldn't be read. Unlock the extension and reload before submitting."
+      );
+      setTxStatus("error");
+      return;
+    }
+    // Warn before a mainnet action initiated shortly after a network change:
+    // real funds are at stake and the switch may have been a mistake. (#480)
+    if (shouldWarnOnMainnetAction(network, recentlyChangedNetwork, mainnetWarning)) {
+      setMainnetWarning(true);
+      return;
+    }
+    await performConfirm();
   };
 
   const handleReset = () => {
@@ -149,7 +330,25 @@ export default function BridgePage() {
     setTxStatus("idle");
     setTxHash(null);
     setTxError(null);
+    setLockResult(null);
   };
+
+  // Batch funding submits through the API's batch endpoint (which invokes the
+  // contract's batch_fund_c_address), not through a Freighter-signed classic
+  // payment repeated per recipient — see issue #465.
+  const handleBatchSubmit = async (recipients: { address: string; amount: string }[]) => {
+    if (!isNetworkSupported) {
+      throw new Error(
+        networkStatus === "UNSUPPORTED"
+          ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
+          : "Freighter's network couldn't be read. Unlock the extension and reload before submitting."
+      );
+    }
+    const response = await submitBatchFunding(fromAddress, recipients, network);
+    return response.results;
+  };
+
+  const batchDisabled = !isConnected || !isNetworkSupported || !isOnline;
 
   // Announcements for screen readers, derived from the existing status state.
   // The visible UI copy is unchanged; these strings follow exactly the wording
@@ -182,14 +381,103 @@ export default function BridgePage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">
           <div className="card p-6">
-            <div aria-live="polite" aria-atomic="true" className="sr-only">
-              {politeAnnouncement}
+            <LiveRegion message={politeAnnouncement} />
+            <LiveRegion politeness="assertive" message={assertiveAnnouncement} />
+            <LiveRegion message={stepAnnouncement} />
+
+            <div
+              role="tablist"
+              aria-label="Funding mode"
+              className="flex gap-1 p-1 mb-6 rounded-lg bg-[var(--surface-2)] w-fit"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={flowMode === "single"}
+                data-testid="flow-mode-single"
+                onClick={() => setFlowMode("single")}
+                disabled={txStatus === "signing" || txStatus === "submitting"}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors disabled:opacity-50 ${
+                  flowMode === "single" ? "bg-[var(--primary)] text-white" : "text-[var(--text-muted)]"
+                }`}
+              >
+                Single Recipient
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={flowMode === "batch"}
+                data-testid="flow-mode-batch"
+                onClick={() => setFlowMode("batch")}
+                disabled={txStatus === "signing" || txStatus === "submitting"}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors disabled:opacity-50 ${
+                  flowMode === "batch" ? "bg-[var(--primary)] text-white" : "text-[var(--text-muted)]"
+                }`}
+              >
+                Batch (CSV)
+              </button>
             </div>
-            <div aria-live="assertive" aria-atomic="true" className="sr-only">
-              {assertiveAnnouncement}
-            </div>
+
+            {flowMode === "batch" && (
+              <div className="space-y-6">
+                <h2 className="text-xl font-semibold mb-4">Batch Fund C-Addresses</h2>
+
+                {!isOnline && (
+                  <div className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-[var(--text-muted)]">
+                      You&apos;re offline, so the batch can&apos;t submit right now.
+                    </p>
+                  </div>
+                )}
+                {isConnected && !isNetworkSupported && (
+                  <div className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-[var(--text-muted)]">
+                      {networkStatus === "UNSUPPORTED"
+                        ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
+                        : "Freighter's network couldn't be read. Unlock the extension and reload."}
+                    </p>
+                  </div>
+                )}
+                {!isConnected && (
+                  <div className="p-4 rounded-lg bg-[var(--surface-2)] border border-dashed border-[var(--border)]">
+                    <p className="text-xs text-[var(--text-muted)]">
+                      Connect Freighter to choose the source account before submitting a batch.
+                    </p>
+                  </div>
+                )}
+
+                <BatchFundingForm
+                  onSubmit={handleBatchSubmit}
+                  estimateFee={() => getEstimatedFeeXLM(network)}
+                  disabled={batchDisabled}
+                />
+              </div>
+            )}
+
+            {flowMode === "single" && (
+              <>
             {step === "form" && (
               <div className="space-y-6">
+                <h2
+                  id="step-form-heading"
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="text-xl font-semibold mb-4 focus:outline-none"
+                >
+                  Enter Bridge Details
+                </h2>
+
+                {!isOnline && (
+                  <div className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-[var(--text-muted)]">
+                      You&apos;re offline, so the bridge can&apos;t submit right now.
+                      Your details are kept; reconnect to send the transaction.
+                    </p>
+                  </div>
+                )}
                 {isConnected && !isNetworkSupported && (
                   <div className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3">
                     <AlertCircle className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
@@ -222,7 +510,7 @@ export default function BridgePage() {
                           value={fromAddress}
                           readOnly
                           aria-describedby="from-address-help"
-                          className="w-full pl-10 pr-4 py-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm font-mono text-[var(--text-muted)] cursor-not-allowed focus:outline-none"
+                          className="w-full pl-10 pr-4 py-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm font-mono text-[var(--text-muted)] cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2"
                         />
                       </div>
                       <p id="from-address-help" className="text-xs text-[var(--text-muted)] mt-1">
@@ -261,37 +549,54 @@ export default function BridgePage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">To (C-address)</label>
+                  <div className="flex items-center gap-2 mb-2">
+                    <label htmlFor="to-address" className="block text-sm font-medium">To (C-address)</label>
+                    <button
+                      type="button"
+                      onClick={openHelp}
+                      className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--foreground)] transition-colors"
+                      aria-label="Learn about C-addresses"
+                    >
+                      <HelpCircle className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                   <div className="relative">
                     <Send className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
-                     <input
-                       type="text"
-                       value={toAddress}
-                       onChange={(e) => setToAddress(e.target.value)}
-                       placeholder="CABC...DEF"
-                       aria-invalid={!validTo && !!toAddress}
-                       aria-describedby={!validTo && toAddress ? "to-address-error" : undefined}
-                       className="w-full pl-10 pr-4 py-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm font-mono focus:outline-none focus:border-[var(--primary)] transition-colors"
-                       disabled={txStatus !== "idle"}
-                     />
-                   </div>
-                   {!validTo && toAddress && (
-                     <p id="to-address-error" className="text-xs text-[var(--error)] mt-1" role="alert">
-                       Invalid C-address (must start with C and be 56 characters)
-                     </p>
-                   )}
+                    <input
+                      id="to-address"
+                      type="text"
+                      value={toAddress}
+                      onChange={(e) => setToAddress(e.target.value)}
+                      placeholder="CABC...DEF"
+                      aria-invalid={!validTo && !!toAddress}
+                      aria-describedby={!validTo && toAddress ? "to-address-error" : undefined}
+                        className="w-full pl-10 pr-4 py-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2 focus:border-[var(--primary)] transition-colors"
+                        disabled={txStatus !== "idle"}
+                    />
+                  </div>
+                  {!validTo && toAddress && (
+                    <p id="to-address-error" className="text-xs text-[var(--error)] mt-1" role="alert">
+                      Invalid C-address (must start with C and be 56 characters)
+                    </p>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">Amount</label>
+                  <label htmlFor="bridge-amount" className="block text-sm font-medium mb-2">Amount</label>
                   <div className="flex gap-3">
                     <div className="relative flex-1">
                       <input
+                        id="bridge-amount"
                         type="text"
                         value={amount}
                         onChange={(e) => setAmount(e.target.value)}
                         placeholder="0.00"
-                        className="w-full px-4 py-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
+                        aria-invalid={(!validAmount && !!amount) || insufficientBalance}
+                        aria-describedby={
+                          (!validAmount && amount) ? "amount-format-error" :
+                          insufficientBalance ? "amount-balance-error" : undefined
+                        }
+                        className="w-full px-4 py-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2 focus:border-[var(--primary)] transition-colors"
                         disabled={txStatus !== "idle"}
                       />
                       {spendableBalance !== null && spendableBalance > 0 && txStatus === "idle" && (
@@ -308,20 +613,21 @@ export default function BridgePage() {
                     <select
                       value={asset}
                       onChange={(e) => setAsset(e.target.value)}
-                      className="px-4 py-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
+                      aria-label="Asset to send"
+                      className="px-4 py-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2 focus:border-[var(--primary)] transition-colors"
                       disabled={txStatus !== "idle"}
                     >
                       <option>XLM</option>
                       <option>USDC</option>
                     </select>
                   </div>
-                  {!validAmount && amount && (
+                  {!validAmount && debouncedAmount && (
                     <p className="text-xs text-[var(--error)] mt-1">
                       Invalid amount. Enter a positive number with up to 7 decimal places (e.g. &quot;10&quot; or &quot;0.5&quot;).
                     </p>
                   )}
                   {insufficientBalance && (
-                    <p className="text-xs text-[var(--error)] mt-1">
+                    <p id="amount-balance-error" className="text-xs text-[var(--error)] mt-1" role="alert">
                       Insufficient balance. Available:{" "}
                       {spendableBalance !== null ? Math.max(spendableBalance, 0).toFixed(2) : "0.00"} {asset}
                       {asset === "XLM" ? " (after minimum reserve)" : ""}
@@ -329,7 +635,50 @@ export default function BridgePage() {
                   )}
                 </div>
 
-                {bridgingBlocked && (
+                <div className="p-4 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isLocked}
+                      onChange={(e) => setIsLocked(e.target.checked)}
+                      disabled={txStatus !== "idle"}
+                      data-testid="lock-toggle"
+                      className="w-4 h-4 rounded border-[var(--border)] accent-[var(--primary)]"
+                    />
+                    <span className="text-sm font-medium inline-flex items-center gap-1.5">
+                      <LockIcon className="w-3.5 h-3.5" />
+                      Lock until a future date
+                    </span>
+                  </label>
+                  <p className="text-xs text-[var(--text-muted)] mt-1 ml-7">
+                    Optional — instead of sending instantly, the recipient can claim this once the
+                    unlock time passes. Manage incoming locks from the Dashboard.
+                  </p>
+                  {isLocked && (
+                    <div className="mt-3 ml-7">
+                      <label htmlFor="unlock-at" className="block text-xs text-[var(--text-muted)] mb-1">
+                        Unlock date &amp; time
+                      </label>
+                      <input
+                        id="unlock-at"
+                        type="datetime-local"
+                        value={unlockAt}
+                        onChange={(e) => setUnlockAt(e.target.value)}
+                        disabled={txStatus !== "idle"}
+                        aria-invalid={!!unlockAt && unlockValidation?.ok === false}
+                        aria-describedby={unlockAt && unlockValidation?.ok === false ? "unlock-at-error" : undefined}
+                        className="w-full sm:w-auto px-4 py-2.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2 focus:border-[var(--primary)] transition-colors"
+                      />
+                      {unlockAt && unlockValidation?.ok === false && (
+                        <p id="unlock-at-error" className="text-xs text-[var(--error)] mt-1" role="alert">
+                          {unlockValidation.error}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {!isLocked && bridgingBlocked && (
                   <div className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3">
                     <AlertCircle className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
                     <p className="text-xs text-[var(--text-muted)]">{BRIDGING_UNAVAILABLE_MESSAGE}</p>
@@ -339,17 +688,26 @@ export default function BridgePage() {
                 <button
                   onClick={handleSubmit}
                   disabled={!canProceed}
-                  className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-disabled={!canProceed}
+                  title={!isOnline ? "Reconnect to the network to continue" : undefined}
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-light)]"
                 >
                   <Send className="w-4 h-4" />
-                  Review Bridge Transaction
+                  {isLocked ? "Review Locked Transfer" : "Review Bridge Transaction"}
                 </button>
               </div>
             )}
 
             {step === "review" && (
               <div className="space-y-6">
-                <h3 className="font-semibold text-lg">Review Transaction</h3>
+                <h2
+                  id="step-review-heading"
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="font-semibold text-lg focus:outline-none"
+                >
+                  {isLocked ? "Review Locked Transfer" : "Review Transaction"}
+                </h2>
 
                 <div className="space-y-4">
                   <div className="flex justify-between items-center p-4 rounded-lg bg-[var(--surface-2)]">
@@ -364,15 +722,33 @@ export default function BridgePage() {
                     <span className="text-sm text-[var(--text-muted)]">Amount</span>
                     <span className="text-sm font-semibold">{amount} {asset}</span>
                   </div>
+                  {isLocked && unlockValidation?.ok && (
+                    <div className="flex justify-between items-center p-4 rounded-lg bg-[var(--surface-2)]">
+                      <span className="text-sm text-[var(--text-muted)]">Unlocks</span>
+                      <span className="text-sm">{new Date(unlockValidation.unlockTime).toLocaleString()}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center p-4 rounded-lg bg-[var(--surface-2)]">
                     <span className="text-sm text-[var(--text-muted)]">Network</span>
                     <span className="text-sm">{networkLabel}</span>
                   </div>
                   <div className="flex justify-between items-center p-4 rounded-lg bg-[var(--surface-2)]">
-                    <span className="text-sm text-[var(--text-muted)]">Fee</span>
-                    <span className="text-sm">~0.00001 XLM</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-[var(--text-muted)]">Fee</span>
+                      <button
+                        type="button"
+                        onClick={openHelp}
+                        className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--foreground)] transition-colors"
+                        aria-label="Learn about fees"
+                      >
+                        <HelpCircle className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <span className="text-sm">{estimatedFee}</span>
                   </div>
                 </div>
+
+                <FeeTierDisplay status={feeTierStatus} amount={Number(amount)} asset={asset} />
 
                 {txError && (
                   <div className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3">
@@ -394,13 +770,28 @@ export default function BridgePage() {
                   </button>
                   <button
                     onClick={handleConfirm}
-                    disabled={txStatus === "signing" || txStatus === "submitting"}
-                    className="flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50"
+                    disabled={
+                      txStatus === "signing" ||
+                      txStatus === "submitting" ||
+                      !isOnline ||
+                      (simulation !== null && !simulation.ok)
+                    }
+                    title={
+                      simulation !== null && !simulation.ok
+                        ? "Fix the issue shown by the simulation before signing"
+                        : undefined
+                    }
+                    className="flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-light)]"
                   >
                     {txStatus === "signing" || txStatus === "submitting" ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none" />
-                        {txStatus === "signing" ? "Signing..." : "Submitting..."}
+                        {txStatus === "signing" ? "Signing..." : isLocked ? "Locking..." : "Submitting..."}
+                      </>
+                    ) : isLocked ? (
+                      <>
+                        <LockIcon className="w-4 h-4" />
+                        Confirm & Lock
                       </>
                     ) : (
                       <>
@@ -413,12 +804,48 @@ export default function BridgePage() {
               </div>
             )}
 
-            {step === "confirm" && txStatus === "success" && (
+            {step === "confirm" && txStatus === "success" && isLocked && lockResult && (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 rounded-full bg-[var(--success)]/10 flex items-center justify-center mx-auto mb-4">
+                  <LockIcon className="w-8 h-8 text-[var(--success)]" />
+                </div>
+                <h2
+                  id="step-confirm-heading"
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="text-lg font-semibold mb-2 focus:outline-none"
+                >
+                  Transfer Locked
+                </h2>
+                <p className="text-sm text-[var(--text-muted)] mb-6">
+                  {lockResult.amount} {lockResult.asset} is locked for {toAddress}. It unlocks{" "}
+                  {new Date(lockResult.unlockTime).toLocaleString()}, after which the recipient can
+                  claim it from their Dashboard.
+                </p>
+                <div className="mt-4">
+                  <button
+                    onClick={handleReset}
+                    className="px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors"
+                  >
+                    New Bridge Transaction
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {step === "confirm" && txStatus === "success" && !isLocked && (
               <div className="text-center py-12">
                 <div className="w-16 h-16 rounded-full bg-[var(--success)]/10 flex items-center justify-center mx-auto mb-4">
                   <Check className="w-8 h-8 text-[var(--success)]" />
                 </div>
-                <h3 className="text-lg font-semibold mb-2">Transaction Submitted</h3>
+                <h2
+                  id="step-confirm-heading"
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="text-lg font-semibold mb-2 focus:outline-none"
+                >
+                  Transaction Submitted
+                </h2>
                 <p className="text-sm text-[var(--text-muted)] mb-4">
                   Your bridge transaction has been submitted to the network.
                 </p>
@@ -449,7 +876,14 @@ export default function BridgePage() {
                 <div className="w-16 h-16 rounded-full bg-[var(--error)]/10 flex items-center justify-center mx-auto mb-4">
                   <AlertCircle className="w-8 h-8 text-[var(--error)]" />
                 </div>
-                <h3 className="text-lg font-semibold mb-2">Transaction Failed</h3>
+                <h2
+                  id="step-confirm-error-heading"
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="text-lg font-semibold mb-2 focus:outline-none"
+                >
+                  Transaction Failed
+                </h2>
                 <p className="text-sm text-[var(--text-muted)] mb-6">{txError || "An unexpected error occurred"}</p>
                 <button
                   onClick={() => { setStep("review"); setTxStatus("idle"); setTxError(null); }}
@@ -458,6 +892,8 @@ export default function BridgePage() {
                   Try Again
                 </button>
               </div>
+            )}
+              </>
             )}
           </div>
         </div>

@@ -1,5 +1,31 @@
+/**
+ * Site-wide footer.
+ *
+ * Structure:
+ * - Brand/summary column describing the C-Address Bridge protocol.
+ * - "Protocol" column: internal links to the three funding routes
+ *   (`/bridge`, `/onramp`, `/cex`) that also appear in the navbar.
+ * - "Resources" column: external links (Soroban docs, GitHub, Stellar.org),
+ *   all opened via `target="_blank"` with `rel="noopener noreferrer"`.
+ * - A bottom bar with a disclaimer and the protocol name.
+ *
+ * Purely presentational — no state, no props. Memoized since it never
+ * changes across route navigations.
+ */
 import React, { memo } from "react";
 import { Wallet } from "lucide-react";
+import { PrefetchLink } from "./prefetch-link";
+
+// Internal destinations must go through the router, not a raw <a>. A bare
+// anchor triggers a full document load, which remounts WalletProvider and
+// wipes its in-memory session refs — most visibly re-connecting a wallet the
+// user had explicitly disconnected (#288) and re-showing a dismissed
+// network-mismatch banner (#289). External links below stay plain anchors.
+const protocolLinks = [
+  { href: "/bridge", label: "G → C Bridge" },
+  { href: "/onramp", label: "Fiat Onramp" },
+  { href: "/cex", label: "CEX Withdrawal" },
+];
 
 const Footer = () => {
   return (
@@ -22,9 +48,16 @@ const Footer = () => {
           <div>
             <h3 className="text-sm font-semibold mb-3">Protocol</h3>
             <ul className="space-y-2">
-              <li><a href="/bridge" className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]">G → C Bridge</a></li>
-              <li><a href="/onramp" className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]">Fiat Onramp</a></li>
-              <li><a href="/cex" className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]">CEX Withdrawal</a></li>
+              {protocolLinks.map((link) => (
+                <li key={link.href}>
+                  <PrefetchLink
+                    href={link.href}
+                    className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]"
+                  >
+                    {link.label}
+                  </PrefetchLink>
+                </li>
+              ))}
             </ul>
           </div>
 
