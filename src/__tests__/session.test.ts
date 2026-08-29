@@ -76,6 +76,20 @@ describe("wallet session persistence (#343)", () => {
     expect(isSessionExpired({ ...session, updatedAt: NaN }, NOW)).toBe(true);
   });
 
+  it("isSessionExpired treats a future-stamped record as not expired in isolation", () => {
+    // loadSession layers its own future-stamp rejection on top of this; in
+    // isolation a negative age is simply "not yet past the TTL".
+    const session = { address: ADDRESS, manuallyDisconnected: true, updatedAt: NOW + 60_000 };
+    expect(isSessionExpired(session, NOW)).toBe(false);
+  });
+
+  it("isSessionExpired defaults `now` to the current time when omitted", () => {
+    const recent = { address: ADDRESS, manuallyDisconnected: true, updatedAt: Date.now() };
+    expect(isSessionExpired(recent)).toBe(false);
+    const stale = { address: ADDRESS, manuallyDisconnected: true, updatedAt: Date.now() - SESSION_TTL_MS - 1 };
+    expect(isSessionExpired(stale)).toBe(true);
+  });
+
   it("markDisconnected returns the written session", () => {
     const result = markDisconnected(ADDRESS, NOW);
     expect(result.manuallyDisconnected).toBe(true);
