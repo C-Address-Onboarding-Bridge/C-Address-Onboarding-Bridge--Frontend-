@@ -86,6 +86,27 @@ describe("sequenceManager", () => {
       expect(mockHorizonServer.loadAccount).toHaveBeenCalledTimes(2);
     });
 
+    it("propagates a network fetch error without caching a bad entry (#529)", async () => {
+      (mockHorizonServer.loadAccount as Mock).mockRejectedValueOnce(
+        new Error("network unreachable")
+      );
+
+      await expect(
+        getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET")
+      ).rejects.toThrow("network unreachable");
+
+      // A failed fetch must not poison the cache — the next call should
+      // retry against the network rather than serving/incrementing a
+      // partial or missing entry.
+      (mockHorizonServer.loadAccount as Mock).mockResolvedValueOnce({
+        sequenceNumber: () => "100",
+      });
+
+      const result = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      expect(result).toBe(101n);
+      expect(mockHorizonServer.loadAccount).toHaveBeenCalledTimes(2);
+    });
+
     it("handles SorobanRpc server", async () => {
       const mockAccount = { sequenceNumber: () => "100" };
       (mockSorobanRpcServer.getAccount as Mock).mockResolvedValue(mockAccount);
