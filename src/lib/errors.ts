@@ -69,7 +69,16 @@ export function createAppError(
   message?: string,
   details?: unknown,
 ): AppError {
-  throw new Error('Not implemented: createAppError');
+  return new AppError({
+    code,
+    message: message ?? code,
+    userMessage: USER_MESSAGES[code],
+    details,
+    retryable:
+      code === ErrorCode.API_ERROR ||
+      code === ErrorCode.TIMEOUT ||
+      code === ErrorCode.TRANSACTION_FAILED,
+  });
 }
 
 /**
@@ -77,7 +86,38 @@ export function createAppError(
  * Maps common Stellar/Freighter errors to typed codes.
  */
 export function parseError(error: unknown): AppError {
-  throw new Error('Not implemented: parseError');
+  if (error instanceof AppError) return error;
+
+  const message =
+    error instanceof Error ? error.message : typeof error === "string" ? error : String(error ?? "Unknown error");
+  const lower = message.toLowerCase();
+
+  if (lower.includes("freighter not detected") || lower.includes("wallet not found")) {
+    return createAppError(ErrorCode.WALLET_NOT_FOUND, message, error);
+  }
+  if (lower.includes("connect wallet") || lower.includes("wallet connection") || lower.includes("connection refused")) {
+    return createAppError(ErrorCode.WALLET_CONNECTION_FAILED, message, error);
+  }
+  if (lower.includes("wrong network") || lower.includes("network mismatch") || lower.includes("passphrase")) {
+    return createAppError(ErrorCode.NETWORK_MISMATCH, message, error);
+  }
+  if (lower.includes("rejected")) {
+    return createAppError(ErrorCode.TRANSACTION_REJECTED, message, error);
+  }
+  if (lower.includes("insufficient balance")) {
+    return createAppError(ErrorCode.INSUFFICIENT_BALANCE, message, error);
+  }
+  if (lower.includes("timed out") || lower.includes("timeout")) {
+    return createAppError(ErrorCode.TIMEOUT, message, error);
+  }
+  if (lower.includes("invalid address")) {
+    return createAppError(ErrorCode.INVALID_ADDRESS, message, error);
+  }
+  if (lower.includes("api") || lower.includes("server error") || lower.includes("status 5")) {
+    return createAppError(ErrorCode.API_ERROR, message, error);
+  }
+
+  return createAppError(ErrorCode.UNKNOWN, message, error);
 }
 
 /**
