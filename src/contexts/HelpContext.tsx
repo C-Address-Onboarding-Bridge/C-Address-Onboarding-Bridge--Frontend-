@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { HelpCenter } from '@/components/HelpCenter';
 
 interface HelpContextType {
@@ -14,6 +14,26 @@ export function HelpProvider({ children, locale }: { children: ReactNode; locale
   const [isOpen, setIsOpen] = useState(false);
   const openHelp = useCallback(() => setIsOpen(true), []);
   const closeHelp = useCallback(() => setIsOpen(false), []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setIsOpen(true);
+      }
+      if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) {
+          return;
+        }
+        event.preventDefault();
+        setIsOpen(true);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   return (
     <HelpContext.Provider value={{ openHelp, closeHelp }}>

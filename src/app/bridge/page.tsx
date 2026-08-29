@@ -12,6 +12,7 @@ import { useStepTransition } from "@/hooks/useStepTransition";
 import LiveRegion from "@/components/live-region";
 import BatchFundingForm from "@/components/BatchFundingForm";
 import { submitBatchFunding } from "@/lib/api";
+import { useHelp } from "@/contexts/HelpContext";
 
 type FlowMode = "single" | "batch";
 type Step = "form" | "review" | "confirm";
@@ -24,6 +25,18 @@ type TxStatus = "idle" | "signing" | "submitting" | "success" | "error";
 // error after signing.
 const BRIDGING_UNAVAILABLE_MESSAGE =
   "G → C bridging isn't live yet: classic Stellar payments can't reach Soroban contract addresses, and the Soroban transfer path hasn't shipped. Follow progress in issue #284.";
+
+const ASSET_DECIMALS: Record<string, number> = {
+  XLM: 7,
+  USDC: 2,
+};
+
+function normalizeAmountInput(value: string, decimals: number): string {
+  const cleaned = value.replace(/[^\d.]/g, "");
+  const [whole = "", ...fractionRest] = cleaned.split(".");
+  const fraction = fractionRest.join("").slice(0, decimals);
+  return fractionRest.length > 0 ? `${whole}.${fraction}` : whole;
+}
 
 export default function BridgePage() {
   const {
@@ -65,6 +78,7 @@ export default function BridgePage() {
   // Falls back to the static placeholder if the fetch fails. (#257)
   const FALLBACK_FEE = "~0.00001 XLM";
   const [estimatedFee, setEstimatedFee] = useState<string>(FALLBACK_FEE);
+  const assetDecimals = ASSET_DECIMALS[asset] ?? 7;
 
   // Keyboard + screen-reader step transitions: focus the new step's heading and
   // announce the change. Implemented in useStepTransition. (#476)
@@ -186,6 +200,14 @@ export default function BridgePage() {
       setEstimatedFee(FALLBACK_FEE);
     });
   };
+
+  useEffect(() => {
+    if (!amount) return;
+    const normalized = normalizeAmountInput(amount, assetDecimals);
+    if (normalized !== amount) {
+      setAmount(normalized);
+    }
+  }, [asset, assetDecimals, amount]);
 
   const handleConfirm = async () => {
     if (!fromAddress || !toAddress || !amount) return;
@@ -507,7 +529,7 @@ export default function BridgePage() {
                         id="bridge-amount"
                         type="text"
                         value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
+                        onChange={(e) => setAmount(normalizeAmountInput(e.target.value, assetDecimals))}
                         placeholder="0.00"
                         aria-invalid={(!validAmount && !!amount) || insufficientBalance}
                         aria-describedby={
@@ -520,7 +542,7 @@ export default function BridgePage() {
                       {spendableBalance !== null && spendableBalance > 0 && txStatus === "idle" && (
                         <button
                           type="button"
-                          onClick={() => setAmount(Math.max(spendableBalance, 0).toFixed(7))}
+                          onClick={() => setAmount(Math.max(spendableBalance, 0).toFixed(assetDecimals))}
                           className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded text-xs font-semibold bg-[var(--primary)]/10 text-[var(--primary-light)] hover:bg-[var(--primary)]/20 transition-colors"
                           aria-label="Fill maximum available balance"
                         >
