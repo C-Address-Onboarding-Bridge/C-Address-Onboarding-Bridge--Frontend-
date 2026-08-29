@@ -501,6 +501,30 @@ describe("sequenceManager", () => {
 
       expect(result).toBe("success");
     });
+
+    it("defaults maxRetries to 1, giving up after a single retry", async () => {
+      const mockAccount = { sequenceNumber: () => "100" };
+      (mockHorizonServer.loadAccount as Mock).mockResolvedValue(mockAccount);
+
+      const badSeqError = {
+        response: {
+          data: {
+            extras: { result_codes: { transaction: "tx_bad_seq" } },
+          },
+        },
+      };
+
+      const fn = vi.fn().mockRejectedValue(badSeqError);
+
+      // No maxRetries argument passed - should use the default of 1.
+      const promise = withSequenceRetry(testAccountId, fn, mockHorizonServer, "TESTNET");
+      const expectation = expect(promise).rejects.toEqual(badSeqError);
+      await vi.runAllTimersAsync();
+      await expectation;
+
+      // Initial attempt + 1 retry = 2 calls total.
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("clearAllSequenceCache", () => {
