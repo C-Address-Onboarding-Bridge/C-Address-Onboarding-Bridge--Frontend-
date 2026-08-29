@@ -16,13 +16,30 @@
  */
 
 /**
- * 32 characters. Long enough for a real name or handle, short enough to render
+ * 32 code points. Long enough for a real name or handle, short enough to render
  * on one line next to the avatar without truncation at mobile widths.
+ *
+ * The cap is measured in **Unicode code points** (i.e. `[...value].length`),
+ * not UTF-16 code units (`String.prototype.length`). This means emoji and other
+ * astral-plane characters each count as 1, matching what the user sees on
+ * screen. (#458)
  */
 export const DISPLAY_NAME_MAX_LENGTH = 32;
 
 const STORAGE_PREFIX = "profile:";
 const NAME_SUFFIX = ":name";
+
+/**
+ * Count the number of Unicode code points in a string.
+ *
+ * JavaScript's `String.prototype.length` returns the number of UTF-16 code
+ * units, which double-counts any character outside the Basic Multilingual Plane
+ * (e.g. emoji, mathematical symbols). Spreading the string into an array
+ * iterates by code point instead, giving the count a user would expect. (#458)
+ */
+function codePointLength(value: string): number {
+  return [...value].length;
+}
 
 /**
  * True when `value` holds a C0/C1 control character, a bidi mark, or a bidi
@@ -49,7 +66,7 @@ export type DisplayNameValidation =
 
 /** Storage key for an address. Exported so tests and docs can reference it. */
 export function displayNameStorageKey(address: string): string {
-  throw new Error('Not implemented: displayNameStorageKey');
+  return `${STORAGE_PREFIX}${address}${NAME_SUFFIX}`;
 }
 
 /**
@@ -58,14 +75,44 @@ export function displayNameStorageKey(address: string): string {
  * Returns the trimmed value on success so callers store exactly what was
  * validated — validating one string and persisting another is how a rule like
  * the length cap gets bypassed by trailing whitespace.
+ *
+ * Length is measured in **Unicode code points** so that emoji and other
+ * astral-plane characters count as 1 against the cap, matching what the user
+ * sees on screen. (#458)
  */
 export function validateDisplayName(raw: string): DisplayNameValidation {
-  throw new Error('Not implemented: validateDisplayName');
+  const trimmed = raw.trim();
+
+  if (trimmed.length === 0) {
+    return { ok: false, error: "Enter a display name." };
+  }
+
+  // Count code points, not UTF-16 code units, so emoji count as 1. (#458)
+  const len = codePointLength(trimmed);
+  if (len > DISPLAY_NAME_MAX_LENGTH) {
+    return {
+      ok: false,
+      error: `Display name is too long — the limit is ${DISPLAY_NAME_MAX_LENGTH} characters (yours is ${len}).`,
+    };
+  }
+
+  if (hasControlChars(trimmed)) {
+    return {
+      ok: false,
+      error: "Display name contains invalid characters.",
+    };
+  }
+
+  return { ok: true, value: trimmed };
 }
 
 /** True when `value` came out of storage in a shape that is safe to render. */
 export function isRenderableDisplayName(value: unknown): value is string {
-  throw new Error('Not implemented: isRenderableDisplayName');
+  if (typeof value !== "string") return false;
+  // Must be trimmed (saveDisplayName always stores the trimmed form).
+  if (value !== value.trim()) return false;
+  // Re-run the same validation used at write time.
+  return validateDisplayName(value).ok;
 }
 
 function storage(): Storage | null {
@@ -80,7 +127,19 @@ function storage(): Storage | null {
 
 /** Reads the stored display name for `address`, or null when absent/invalid. */
 export function loadDisplayName(address: string | null | undefined): string | null {
-  throw new Error('Not implemented: loadDisplayName');
+  if (!address) return null;
+  const store = storage();
+  if (!store) return null;
+
+  let raw: string | null;
+  try {
+    raw = store.getItem(displayNameStorageKey(address));
+  } catch {
+    return null;
+  }
+
+  if (raw === null) return null;
+  return isRenderableDisplayName(raw) ? raw : null;
 }
 
 /**
@@ -92,18 +151,45 @@ export function saveDisplayName(
   address: string | null | undefined,
   name: string,
 ): boolean {
-  throw new Error('Not implemented: saveDisplayName');
+  if (!address) return false;
+  const store = storage();
+  if (!store) return false;
+
+  const validation = validateDisplayName(name);
+  if (!validation.ok) return false;
+
+  try {
+    store.setItem(displayNameStorageKey(address), validation.value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Removes the stored display name for `address`. */
 export function clearDisplayName(address: string | null | undefined): void {
-  throw new Error('Not implemented: clearDisplayName');
+  if (!address) return;
+  const store = storage();
+  if (!store) return;
+
+  try {
+    store.removeItem(displayNameStorageKey(address));
+  } catch {
+    // Swallow — nothing useful to do if removal fails.
+  }
 }
 
 /**
  * Short form of a Stellar address for display: `GABC…WXYZ`. Falls back to the
  * whole string when it is too short to shorten meaningfully.
+ *
+ * Stellar addresses are Base32-encoded and contain only ASCII characters, so
+ * `String.prototype.slice` is safe here without any code-point awareness.
  */
 export function shortenAddress(address: string | null | undefined): string {
-  throw new Error('Not implemented: shortenAddress');
+  if (!address) return "";
+  // Keep at least 12 characters (6 + 6) before eliding; shorter strings are
+  // returned as-is so the display never shows "GA…" with nothing after.
+  if (address.length <= 12) return address;
+  return `${address.slice(0, 6)}…${address.slice(-6)}`;
 }

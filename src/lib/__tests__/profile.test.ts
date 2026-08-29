@@ -75,6 +75,61 @@ describe('profile store (#325)', () => {
       expect(validateDisplayName('中本聡').ok).toBe(true);
       expect(validateDisplayName('🚀 rocket').ok).toBe(true);
     });
+
+    // --- Unicode / code-point boundary tests (#458) ---
+
+    it('counts each emoji as 1 character, not 2', () => {
+      // 🚀 is U+1F680, a single code point that occupies 2 UTF-16 code units.
+      // 32 emoji must be accepted; 33 must be rejected.
+      const exactly32 = '🚀'.repeat(32);
+      const over32    = '🚀'.repeat(33);
+
+      expect(validateDisplayName(exactly32).ok).toBe(true);
+
+      const result = validateDisplayName(over32);
+      expect(result.ok).toBe(false);
+      // The error must report 33 (code points), not 66 (UTF-16 code units).
+      expect(result.ok === false && result.error).toContain('33');
+    });
+
+    it('counts astral-plane characters (𝄞 U+1D11E) as 1 each', () => {
+      // Musical symbol G-CLEF — U+1D11E — lives outside the BMP.
+      const exactly32 = '𝄞'.repeat(32);
+      const over32    = '𝄞'.repeat(33);
+
+      expect(validateDisplayName(exactly32).ok).toBe(true);
+      expect(validateDisplayName(over32).ok).toBe(false);
+    });
+
+    it('counts a combining-mark sequence as its constituent code points', () => {
+      // "e\u0301" is two code points (LATIN SMALL LETTER E + COMBINING ACUTE
+      // ACCENT) that render as one glyph "é". The limit applies to code points,
+      // so 16 of these pairs = 32 code points → accepted; 17 pairs = 34 → rejected.
+      const e_acute = 'e\u0301'; // 2 code points
+      const exactly32 = e_acute.repeat(16); // 16 × 2 = 32 code points
+      const over32    = e_acute.repeat(17); // 17 × 2 = 34 code points
+
+      expect(validateDisplayName(exactly32).ok).toBe(true);
+      expect(validateDisplayName(over32).ok).toBe(false);
+    });
+
+    it('reports the code-point count in the error, not the UTF-16 length', () => {
+      // A name of 33 emoji: code-point length 33, UTF-16 length 66.
+      const name = '😀'.repeat(33);
+      const result = validateDisplayName(name);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        // Must mention 33 (actual code-point count), not 66 (UTF-16 units).
+        expect(result.error).toContain('33');
+        expect(result.error).not.toContain('66');
+      }
+    });
+
+    it('accepts a mixed ASCII + emoji name within the code-point limit', () => {
+      // "Hi 🎉🎉🎉" = 3 + 1 + 3 = 7 code points — well within 32.
+      expect(validateDisplayName('Hi 🎉🎉🎉').ok).toBe(true);
+    });
   });
 
   describe('isRenderableDisplayName', () => {
