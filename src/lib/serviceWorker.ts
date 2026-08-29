@@ -104,7 +104,7 @@ export function cacheStrategyFor(request: RequestLike, origin: string): CacheStr
 
 /** True for caches this app owns from an older worker version — deleted on activate. */
 export function isStaleCache(cacheName: string): boolean {
-  throw new Error('Not implemented: isStaleCache');
+  return cacheName.startsWith(SW_CACHE_PREFIX) && cacheName !== SW_CACHE_NAME;
 }
 
 /** Only responses that are OK, basic (same-origin) and non-partial are worth storing. */
