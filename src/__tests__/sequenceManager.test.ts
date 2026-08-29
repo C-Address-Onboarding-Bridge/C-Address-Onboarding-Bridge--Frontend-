@@ -512,5 +512,10 @@ describe("sequenceManager", () => {
       expect(result2).toBe(201n);
       expect(mockHorizonServer.loadAccount).toHaveBeenCalledTimes(4);
     });
+
+    it("is a no-op and does not throw when the cache is already empty", () => {
+      expect(() => clearAllSequenceCache()).not.toThrow();
+      expect(() => clearAllSequenceCache()).not.toThrow();
+    });
   });
 });
