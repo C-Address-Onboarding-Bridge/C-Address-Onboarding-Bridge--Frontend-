@@ -11,6 +11,8 @@ vi.mock("@/lib/stellar", () => ({
   checkConnection: vi.fn().mockResolvedValue(false),
   getWalletAddress: vi.fn().mockResolvedValue(null),
   getWalletNetwork: vi.fn().mockResolvedValue({ status: "TESTNET", name: "Testnet" }),
+  initWalletKit: vi.fn().mockResolvedValue(undefined),
+  openWalletSelectionModal: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/session", () => ({

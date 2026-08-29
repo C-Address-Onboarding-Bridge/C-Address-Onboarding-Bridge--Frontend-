@@ -28,10 +28,16 @@ export interface WalletSession {
   manuallyDisconnected: boolean;
   /** Epoch ms this record was last written. */
   updatedAt: number;
+  /**
+   * The wallet ID last chosen by the user in the Stellar Wallets Kit modal
+   * (e.g. "freighter", "xbull", "lobstr"). Persisted so the kit can restore
+   * the same module on the next page load. (#459)
+   */
+  selectedWalletId: string | null;
 }
 
 function freshSession(now: number): WalletSession {
-  return { address: null, manuallyDisconnected: false, updatedAt: now };
+  return { address: null, manuallyDisconnected: false, updatedAt: now, selectedWalletId: null };
 }
 
 function storage(): Storage | null {
@@ -59,6 +65,7 @@ function parseSession(raw: string | null): WalletSession | null {
       address: typeof candidate.address === "string" ? candidate.address : null,
       manuallyDisconnected: candidate.manuallyDisconnected === true,
       updatedAt: typeof candidate.updatedAt === "number" ? candidate.updatedAt : 0,
+      selectedWalletId: typeof candidate.selectedWalletId === "string" ? candidate.selectedWalletId : null,
     };
   } catch {
     return null;
