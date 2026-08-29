@@ -1,6 +1,6 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, CreditCard, Building2, ExternalLink, Loader2, Copy, Check, X, Download, Wallet } from "lucide-react";
-import type { BridgeTransactionData, BridgeTransactionStatus } from "@/lib/types";
+import React, { memo, useMemo, useState, useEffect } from "react";
+import { ArrowLeftRight, CreditCard, Building2, ExternalLink, Loader2, Copy, Check, X, Search } from "lucide-react";
+import type { BridgeTransactionData } from "@/lib/types";
 import { getExplorerUrl } from "@/lib/stellar";
 import type { StellarNetwork } from "@/lib/types";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
@@ -192,130 +192,134 @@ const TransactionItem = memo(function TransactionItem({
   );
 });
 
-function TransactionHistory({ transactions, loading, network, address }: Props) {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | BridgeTransactionStatus>("all");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [confirmingClaim, setConfirmingClaim] = useState(false);
-  const [statusMessage, setStatusMessage] = useState("");
+function parseDateToTimestamp(dateStr: string, endOfDay = false): number {
+  if (!dateStr) return 0;
+  const [year, month, day] = dateStr.split("-").map(Number);
+  if (endOfDay) {
+    return new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
+  }
+  return new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
+}
 
-  const isFiltered = searchQuery.trim() !== "" || statusFilter !== "all";
+function useDebounceValue<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+function getInitialUrlState() {
+  if (typeof window === "undefined") {
+    return {
+      q: "",
+      status: "all",
+      asset: "all",
+      direction: "all",
+      from: "",
+      to: "",
+    };
+  }
+  const params = new URLSearchParams(window.location.search);
+  return {
+    q: params.get("q") || "",
+    status: params.get("status") || "all",
+    asset: params.get("asset") || "all",
+    direction: params.get("direction") || "all",
+    from: params.get("from") || "",
+    to: params.get("to") || "",
+  };
+}
+
+function TransactionHistory({ transactions, loading, network, address }: Props) {
+  const initial = getInitialUrlState();
+  const [searchQuery, setSearchQuery] = useState(initial.q);
+  const [statusFilter, setStatusFilter] = useState(initial.status);
+  const [assetFilter, setAssetFilter] = useState(initial.asset);
+  const [directionFilter, setDirectionFilter] = useState(initial.direction);
+  const [dateFrom, setDateFrom] = useState(initial.from);
+  const [dateTo, setDateTo] = useState(initial.to);
+
+  const debouncedSearchQuery = useDebounceValue(searchQuery, 300);
+
+  const uniqueAssets = useMemo(() => {
+    const assets = new Set<string>();
+    for (const tx of transactions) {
+      assets.add(tx.asset);
+    }
+    return Array.from(assets).sort();
+  }, [transactions]);
+
+  const hasActiveFilters =
+    debouncedSearchQuery ||
+    statusFilter !== "all" ||
+    assetFilter !== "all" ||
+    directionFilter !== "all" ||
+    dateFrom ||
+    dateTo;
+
+  const clearAllFilters = () => {
+    setSearchQuery("");
+    setStatusFilter("all");
+    setAssetFilter("all");
+    setDirectionFilter("all");
+    setDateFrom("");
+    setDateTo("");
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (debouncedSearchQuery) params.set("q", debouncedSearchQuery);
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (assetFilter !== "all") params.set("asset", assetFilter);
+    if (directionFilter !== "all") params.set("direction", directionFilter);
+    if (dateFrom) params.set("from", dateFrom);
+    if (dateTo) params.set("to", dateTo);
+
+    const queryString = params.toString();
+    const newUrl = queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname;
+    window.history.replaceState({}, "", newUrl);
+  }, [debouncedSearchQuery, statusFilter, assetFilter, directionFilter, dateFrom, dateTo]);
 
   const filteredTransactions = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
     return transactions.filter((tx) => {
-      if (statusFilter !== "all" && tx.status !== statusFilter) return false;
-      if (!q) return true;
-      const haystack = [tx.asset, tx.type, typeConfig[tx.type]?.label ?? "", tx.toAddress, tx.hash ?? ""]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [transactions, searchQuery, statusFilter]);
-
-  const filteredIds = useMemo(() => filteredTransactions.map((t) => t.id), [filteredTransactions]);
-
-  const selectedFilteredCount = useMemo(
-    () => filteredIds.reduce((n, id) => n + (selectedIds.has(id) ? 1 : 0), 0),
-    [filteredIds, selectedIds]
-  );
-
-  const allFilteredSelected = filteredIds.length > 0 && selectedFilteredCount === filteredIds.length;
-  const someFilteredSelected = selectedFilteredCount > 0 && !allFilteredSelected;
-
-  const selectAllRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (selectAllRef.current) selectAllRef.current.indeterminate = someFilteredSelected;
-  }, [someFilteredSelected]);
-
-  // Selection persists across filter/search changes (like an inbox), so
-  // narrowing then widening the filter doesn't silently drop a choice made
-  // earlier. The header checkbox only ever acts on the *currently filtered*
-  // set — selecting "all" while a filter is active never touches hidden rows.
-  const toggleRow = useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const toggleSelectAllFiltered = useCallback(() => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (allFilteredSelected) {
-        filteredIds.forEach((id) => next.delete(id));
-      } else {
-        filteredIds.forEach((id) => next.add(id));
+      if (debouncedSearchQuery) {
+        const q = debouncedSearchQuery.toLowerCase();
+        const matchHash = tx.hash?.toLowerCase().includes(q);
+        const matchFrom = tx.fromAddress.toLowerCase().includes(q);
+        const matchTo = tx.toAddress.toLowerCase().includes(q);
+        const matchMemo = tx.memo?.toLowerCase().includes(q);
+        if (!matchHash && !matchFrom && !matchTo && !matchMemo) return false;
       }
-      return next;
+
+      if (statusFilter !== "all" && tx.status !== statusFilter) return false;
+      if (assetFilter !== "all" && tx.asset !== assetFilter) return false;
+
+      if (directionFilter !== "all" && address) {
+        if (directionFilter === "incoming" && tx.toAddress !== address) return false;
+        if (directionFilter === "outgoing" && tx.fromAddress !== address) return false;
+      }
+
+      const fromTimestamp = parseDateToTimestamp(dateFrom, false);
+      const toTimestamp = parseDateToTimestamp(dateTo, true);
+
+      if (fromTimestamp && tx.timestamp < fromTimestamp) return false;
+      if (toTimestamp && tx.timestamp > toTimestamp) return false;
+
+      return true;
     });
-  }, [allFilteredSelected, filteredIds]);
-
-  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
-
-  const selectedTransactions = useMemo(
-    () => transactions.filter((t) => selectedIds.has(t.id)),
-    [transactions, selectedIds]
-  );
-  const selectedCount = selectedTransactions.length;
-
-  const claimIneligibleCount = useMemo(
-    () => selectedTransactions.filter((t) => !isClaimEligible(t)).length,
-    [selectedTransactions]
-  );
-  const canExport = selectedCount > 0;
-  const canClaim = selectedCount > 0 && claimIneligibleCount === 0;
-  const claimDisabledReason =
-    selectedCount > 0 && claimIneligibleCount > 0
-      ? `${claimIneligibleCount} of ${selectedCount} selected transaction${selectedCount === 1 ? "" : "s"} can't be claimed — only confirmed G → C bridge transactions are eligible. Adjust your selection to claim the rest.`
-      : "";
-
-  const handleExport = useCallback(() => {
-    if (!canExport) return;
-    const csv = buildTransactionsCsv(selectedTransactions);
-    downloadCsv(csv, `transactions-${new Date().toISOString().slice(0, 10)}.csv`);
-    setStatusMessage(`Exported ${selectedCount} transaction${selectedCount === 1 ? "" : "s"}.`);
-  }, [canExport, selectedTransactions, selectedCount]);
-
-  const handleClaimClick = useCallback(() => {
-    if (!canClaim) return;
-    setConfirmingClaim(true);
-  }, [canClaim]);
-
-  const handleCancelClaim = useCallback(() => setConfirmingClaim(false), []);
-
-  const handleConfirmClaim = useCallback(() => {
-    setStatusMessage(`Claimed ${selectedCount} transaction${selectedCount === 1 ? "" : "s"}.`);
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      selectedTransactions.forEach((t) => next.delete(t.id));
-      return next;
-    });
-    setConfirmingClaim(false);
-  }, [selectedCount, selectedTransactions]);
-
-  const handleDialogKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Escape") handleCancelClaim();
-    },
-    [handleCancelClaim]
-  );
+  }, [transactions, debouncedSearchQuery, statusFilter, assetFilter, directionFilter, dateFrom, dateTo, address]);
 
   const items = useMemo(
-    () =>
-      filteredTransactions.map((tx) => (
-        <TransactionItem
-          key={tx.id}
-          tx={tx}
-          network={network}
-          selected={selectedIds.has(tx.id)}
-          onToggleSelected={toggleRow}
-        />
-      )),
-    [filteredTransactions, network, selectedIds, toggleRow]
+    () => filteredTransactions.map((tx) => <TransactionItem key={tx.id} tx={tx} network={network} />),
+    [filteredTransactions, network]
   );
+
+  const showFilteredEmpty = !loading && hasActiveFilters && filteredTransactions.length === 0;
+  const showEmpty = !loading && !hasActiveFilters && transactions.length === 0;
 
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]">
@@ -323,114 +327,100 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
         <h3 className="font-semibold">Recent Transactions</h3>
       </div>
 
-      {!loading && transactions.length > 0 && (
-        <div className="p-4 border-b border-[var(--border)] flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-2">
+      <div className="p-4 border-b border-[var(--border)] space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-[var(--text-muted)]" />
             <input
-              type="search"
+              type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by asset, address or hash"
+              placeholder="Search hash, address, memo..."
               aria-label="Search transactions"
-              className="flex-1 min-w-[160px] px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
+              className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
             />
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as "all" | BridgeTransactionStatus)}
-              aria-label="Filter by status"
-              className="px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            aria-label="Filter by status"
+            className="px-3 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+          >
+            <option value="all">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="failed">Failed</option>
+          </select>
+          <select
+            value={assetFilter}
+            onChange={(e) => setAssetFilter(e.target.value)}
+            aria-label="Filter by asset"
+            className="px-3 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+          >
+            <option value="all">All assets</option>
+            {uniqueAssets.map((asset) => (
+              <option key={asset} value={asset}>
+                {asset}
+              </option>
+            ))}
+          </select>
+          <select
+            value={directionFilter}
+            onChange={(e) => setDirectionFilter(e.target.value)}
+            aria-label="Filter by direction"
+            className="px-3 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+          >
+            <option value="all">All directions</option>
+            <option value="incoming">Incoming</option>
+            <option value="outgoing">Outgoing</option>
+          </select>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            aria-label="From date"
+            className="px-3 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+          />
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            aria-label="To date"
+            className="px-3 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+          />
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-[var(--error)] hover:bg-[var(--error)]/10 rounded-lg transition-colors"
             >
-              {STATUS_FILTERS.map((f) => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                ref={selectAllRef}
-                type="checkbox"
-                checked={allFilteredSelected}
-                onChange={toggleSelectAllFiltered}
-                disabled={filteredIds.length === 0}
-                aria-label={
-                  isFiltered
-                    ? `Select all ${filteredIds.length} filtered transactions`
-                    : `Select all ${filteredIds.length} transactions`
-                }
-                className="w-4 h-4 accent-[var(--primary)]"
-              />
-              <span className="text-[var(--text-muted)]">
-                {isFiltered ? `Select all ${filteredIds.length} filtered` : `Select all ${filteredIds.length}`}
-              </span>
-            </label>
-
-            {selectedCount > 0 && (
-              <>
-                <span className="text-sm font-medium" data-testid="selection-count">
-                  {selectedCount} selected
-                </span>
-                <button
-                  type="button"
-                  onClick={clearSelection}
-                  className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)] transition-colors"
-                >
-                  Clear selection
-                </button>
-
-                <div className="flex items-center gap-2 ml-auto">
-                  <button
-                    type="button"
-                    onClick={handleExport}
-                    disabled={!canExport}
-                    title={`Export ${selectedCount} selected transaction${selectedCount === 1 ? "" : "s"} as CSV`}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-sm hover:bg-[var(--surface-2)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Export
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleClaimClick}
-                    disabled={!canClaim}
-                    title={
-                      canClaim
-                        ? `Claim ${selectedCount} selected transaction${selectedCount === 1 ? "" : "s"}`
-                        : claimDisabledReason
-                    }
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--primary)] text-white text-sm hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Wallet className="w-3.5 h-3.5" />
-                    Claim
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-
-          {claimDisabledReason && (
-            <p className="text-xs text-[var(--text-muted)]" role="note">
-              {claimDisabledReason}
-            </p>
+              <X className="w-4 h-4" />
+              Clear all
+            </button>
           )}
         </div>
-      )}
+      </div>
 
       {loading ? (
-        // The spinner is the only loading indicator, and lucide marks its svg
-        // aria-hidden, so this panel was an empty box to a screen reader: no
-        // announcement on entering the loading state and no text to find when
-        // navigating into it. role="status" plus a hidden label fixes both.
         <div role="status" className="p-12 flex items-center justify-center">
           <Loader2 className="w-6 h-6 animate-spin motion-reduce:animate-none text-[var(--text-muted)]" />
           <span className="sr-only">Loading recent transactions…</span>
         </div>
-      ) : transactions.length === 0 ? (
+      ) : showEmpty ? (
         <div className="p-12 text-center">
-          <p className="text-sm text-[var(--text-muted)]">No transactions found for this account.</p>
+          <p className="text-sm text-[var(--text-muted)]">No transactions found</p>
+        </div>
+      ) : showFilteredEmpty ? (
+        <div className="p-12 text-center">
+          <p className="text-sm text-[var(--text-muted)]">No transactions match your filters.</p>
+          <button
+            type="button"
+            onClick={clearAllFilters}
+            className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-[var(--primary)] hover:bg-[var(--primary)]/10 rounded-lg transition-colors"
+          >
+            <X className="w-4 h-4" />
+            Clear all filters
+          </button>
         </div>
       ) : filteredTransactions.length === 0 ? (
         <div className="p-12 text-center">
