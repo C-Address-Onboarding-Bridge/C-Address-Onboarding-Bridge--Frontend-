@@ -4,6 +4,7 @@ import {
   DISPLAY_NAME_MAX_LENGTH,
   displayNameStorageKey,
   isRenderableDisplayName,
+  loadDisplayName,
   validateDisplayName,
 } from "@/lib/profile";
 
@@ -69,5 +70,37 @@ describe("isRenderableDisplayName (#524)", () => {
       // Type guard narrows `unknown` to `string`.
       expect(value.toUpperCase()).toBe("ALICE");
     }
+  });
+});
+
+describe("loadDisplayName (#525)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("returns null when address is missing", () => {
+    expect(loadDisplayName(null)).toBeNull();
+    expect(loadDisplayName(undefined)).toBeNull();
+    expect(loadDisplayName("")).toBeNull();
+  });
+
+  it("returns null when nothing is stored for the address", () => {
+    expect(loadDisplayName(ADDRESS_A)).toBeNull();
+  });
+
+  it("returns the stored name when present and valid", () => {
+    localStorage.setItem(displayNameStorageKey(ADDRESS_A), "Alice");
+    expect(loadDisplayName(ADDRESS_A)).toBe("Alice");
+  });
+
+  it("returns null instead of throwing when stored value is tampered/invalid", () => {
+    // Not trimmed — fails isRenderableDisplayName even though it's a string.
+    localStorage.setItem(displayNameStorageKey(ADDRESS_A), " Alice ");
+    expect(loadDisplayName(ADDRESS_A)).toBeNull();
+  });
+
+  it("scopes names per address", () => {
+    localStorage.setItem(displayNameStorageKey(ADDRESS_A), "Alice");
+    expect(loadDisplayName("CDIFFERENTADDRESS")).toBeNull();
   });
 });
