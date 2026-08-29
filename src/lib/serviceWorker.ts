@@ -119,7 +119,7 @@ export function isCacheableResponse(response: {
 
 /** Registration is opt-in, so a stale cached shell can never surprise a deploy. */
 export function isServiceWorkerEnabled(): boolean {
-  throw new Error('Not implemented: isServiceWorkerEnabled');
+  return process.env.NEXT_PUBLIC_ENABLE_SW === "true";
 }
 
 interface NavigatorLike {
