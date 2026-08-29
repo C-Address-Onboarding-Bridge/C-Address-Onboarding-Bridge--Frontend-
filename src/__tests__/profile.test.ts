@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   DISPLAY_NAME_MAX_LENGTH,
   displayNameStorageKey,
+  isRenderableDisplayName,
   validateDisplayName,
 } from "@/lib/profile";
 
@@ -39,5 +40,34 @@ describe("validateDisplayName (#523)", () => {
   it("rejects control characters and bidi overrides", () => {
     expect(validateDisplayName("Alice\nBob").ok).toBe(false);
     expect(validateDisplayName("Alice‮cve.exe").ok).toBe(false);
+  });
+});
+
+describe("isRenderableDisplayName (#524)", () => {
+  it("rejects non-string values from tampered storage", () => {
+    expect(isRenderableDisplayName(null)).toBe(false);
+    expect(isRenderableDisplayName(undefined)).toBe(false);
+    expect(isRenderableDisplayName(42)).toBe(false);
+    expect(isRenderableDisplayName({ name: "Alice" })).toBe(false);
+  });
+
+  it("rejects a value with leading/trailing whitespace (not pre-trimmed)", () => {
+    expect(isRenderableDisplayName(" Alice")).toBe(false);
+    expect(isRenderableDisplayName("Alice ")).toBe(false);
+  });
+
+  it("rejects a value that fails validateDisplayName (e.g. control chars, too long)", () => {
+    expect(isRenderableDisplayName("Alice\nBob")).toBe(false);
+    expect(isRenderableDisplayName("a".repeat(DISPLAY_NAME_MAX_LENGTH + 1))).toBe(false);
+    expect(isRenderableDisplayName("")).toBe(false);
+  });
+
+  it("accepts a trimmed, valid string and narrows the type", () => {
+    const value: unknown = "Alice";
+    expect(isRenderableDisplayName(value)).toBe(true);
+    if (isRenderableDisplayName(value)) {
+      // Type guard narrows `unknown` to `string`.
+      expect(value.toUpperCase()).toBe("ALICE");
+    }
   });
 });
