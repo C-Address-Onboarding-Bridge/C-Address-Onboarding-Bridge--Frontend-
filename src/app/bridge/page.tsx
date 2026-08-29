@@ -12,6 +12,7 @@ import { useStepTransition } from "@/hooks/useStepTransition";
 import LiveRegion from "@/components/live-region";
 import BatchFundingForm from "@/components/BatchFundingForm";
 import { submitBatchFunding } from "@/lib/api";
+import { useHelp } from "@/contexts/HelpContext";
 
 type FlowMode = "single" | "batch";
 type Step = "form" | "review" | "confirm";
@@ -294,6 +295,14 @@ export default function BridgePage() {
       setStep("review");
     }
   };
+
+  useEffect(() => {
+    if (!amount) return;
+    const normalized = normalizeAmountInput(amount, assetDecimals);
+    if (normalized !== amount) {
+      setAmount(normalized);
+    }
+  }, [asset, assetDecimals, amount]);
 
   const handleConfirm = async () => {
     if (!fromAddress || !toAddress || !amount) return;
@@ -659,7 +668,7 @@ export default function BridgePage() {
                         inputMode="decimal"
                         pattern="[0-9]*\.?[0-9]*"
                         value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
+                        onChange={(e) => setAmount(normalizeAmountInput(e.target.value, assetDecimals))}
                         placeholder="0.00"
                         aria-invalid={(!validAmount && !!amount) || insufficientBalance}
                         aria-describedby={

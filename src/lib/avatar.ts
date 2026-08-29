@@ -42,7 +42,9 @@ export type AvatarValidation = { ok: true } | { ok: false; error: string };
 
 /** Human-readable size for error messages, e.g. "512 KB" or "1.4 MB". */
 export function formatBytes(bytes: number): string {
-  throw new Error('Not implemented: formatBytes');
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
 }
 
 /**
@@ -50,7 +52,16 @@ export function formatBytes(bytes: number): string {
  * `File` it needs so it can be unit-tested without a DOM `File`.
  */
 export function validateAvatarFile(file: Pick<File, "type" | "size">): AvatarValidation {
-  throw new Error('Not implemented: validateAvatarFile');
+  if (!ACCEPTED_AVATAR_TYPES.includes(file.type as (typeof ACCEPTED_AVATAR_TYPES)[number])) {
+    return { ok: false, error: "Choose a PNG, JPEG, WebP or GIF image." };
+  }
+  if (file.size <= 0) {
+    return { ok: false, error: "The selected image is empty." };
+  }
+  if (file.size > AVATAR_MAX_BYTES) {
+    return { ok: false, error: `Choose an image up to ${formatBytes(AVATAR_MAX_BYTES)}.` };
+  }
+  return { ok: true };
 }
 
 /** True when `value` is a base64 image data URL that is safe to render. */
