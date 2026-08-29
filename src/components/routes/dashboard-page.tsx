@@ -14,6 +14,28 @@ import { getFeeTierPreview } from "@/lib/api";
 import type { FeeTierStatus } from "@/lib/feeTiers";
 import FeeTierDisplay from "@/components/fee-tier-display";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
+import { useDelayedLoading } from "@/hooks/useDelayedLoading";
+
+/**
+ * Reserves the same two-line footprint as the loaded stat value (a bold
+ * number plus a small label) so a card never resizes when data arrives.
+ * `visible` gates only the pulse animation's visibility — the space is
+ * claimed for the whole loading state so there is no shift either way.
+ * (#485)
+ */
+function StatSkeleton({ visible, label }: { visible: boolean; label: string }) {
+  return (
+    <>
+      <div role="status" className="sr-only">
+        {label}
+      </div>
+      <div aria-hidden="true" className={`space-y-2 ${visible ? "" : "invisible"}`}>
+        <div className="h-7 w-20 rounded bg-[var(--surface-2)] animate-pulse motion-reduce:animate-none" />
+        <div className="h-3 w-10 rounded bg-[var(--surface-2)] animate-pulse motion-reduce:animate-none" />
+      </div>
+    </>
+  );
+}
 
 /** How often the dashboard polls for updated balances and transactions. */
 const DASHBOARD_POLL_INTERVAL_MS = 30_000;
@@ -384,6 +406,9 @@ export default function DashboardPage() {
   const shownBalance = isNetworkSupported ? balance : null;
   const shownFeeTierStatus = isNetworkSupported ? feeTierStatus : null;
   const showLoading = loading && isNetworkSupported;
+  // Waits ~200ms of continuous loading before the stat card skeletons become
+  // visible, so a fast/cached fetch never flashes them. (#485)
+  const showStatSkeleton = useDelayedLoading(showLoading, 200);
 
   const confirmedCount = shownTransactions.filter((t) => t.status === "confirmed").length;
   const pendingCount = shownTransactions.filter((t) => t.status === "pending").length;
@@ -544,10 +569,7 @@ export default function DashboardPage() {
         <div className="card p-5">
           <div className="text-xs text-[var(--text-muted)] mb-1">XLM Balance</div>
           {showLoading ? (
-            <div className="flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none text-[var(--text-muted)]" />
-              <span className="text-xs text-[var(--text-muted)]">Loading...</span>
-            </div>
+            <StatSkeleton visible={showStatSkeleton} label="Loading balance…" />
           ) : (
             <>
               <div className="text-2xl font-bold mb-1">
@@ -585,10 +607,7 @@ export default function DashboardPage() {
         <div className="card p-5">
           <div className="text-xs text-[var(--text-muted)] mb-1">Transactions</div>
           {showLoading ? (
-            <div className="flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none text-[var(--text-muted)]" />
-              <span className="text-xs text-[var(--text-muted)]">Loading...</span>
-            </div>
+            <StatSkeleton visible={showStatSkeleton} label="Loading transaction count…" />
           ) : (
             <>
               <div className="text-2xl font-bold mb-1">{shownTransactions.length}</div>
