@@ -246,6 +246,10 @@ describe("sequenceManager", () => {
   });
 
   describe("invalidateSequenceCache", () => {
+    it("is a no-op when the account/network was never cached (#530)", () => {
+      expect(() => invalidateSequenceCache(testAccountId, "TESTNET")).not.toThrow();
+    });
+
     it("causes refetch on next call", async () => {
       const mockAccount = { sequenceNumber: () => "100" };
       (mockHorizonServer.loadAccount as Mock).mockResolvedValue(mockAccount);
