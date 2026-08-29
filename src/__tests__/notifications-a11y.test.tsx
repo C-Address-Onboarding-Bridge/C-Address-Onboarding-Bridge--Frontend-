@@ -32,8 +32,13 @@ vi.mock("@/lib/stellar", async (importOriginal) => {
     ...actual,
     getAccountBalances: (...args: unknown[]) => getAccountBalances(...args),
     fetchRecentTransactions: (...args: unknown[]) => fetchRecentTransactions(...args),
+    getExplorerUrl: (_network: unknown, _type: unknown, id: string) => `https://stellar.expert/explorer/testnet/tx/${id}`,
   };
 });
+
+vi.mock("@/hooks/useCopyToClipboard", () => ({
+  useCopyToClipboard: () => ({ status: "idle", copy: vi.fn(), reset: vi.fn() }),
+}));
 
 const wallet = {
   isConnected: true,

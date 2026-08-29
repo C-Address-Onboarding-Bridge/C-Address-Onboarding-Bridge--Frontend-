@@ -11,6 +11,7 @@ import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
 import { OfflineBanner } from "@/components/offline-banner";
+import { HelpProvider } from "@/contexts/HelpContext";
 
 const geist = Geist({
   subsets: ["latin"],
@@ -105,35 +106,29 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="antialiased">
-        {/* App-wide boundaries (#473): every unexpected error is reported
-            through the central handleError path and renders a recoverable
-            fallback instead of a white screen. The wallet layer gets its own
-            boundary so wallet-specific failures surface a targeted message. */}
-        <ErrorBoundary context="app">
-          <FeatureFlagProvider>
-            <WalletErrorBoundary>
-              <WalletProvider>
-                <StatusBanner />
-                <div className="min-h-screen flex flex-col">
-                  <a
-                    href="#main-content"
-                    className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-[var(--primary)] focus:text-white focus:font-medium focus:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-light)]"
-                  >
-                    Skip to main content
-                  </a>
-                  <Navbar />
-                  <main id="main-content" tabIndex={-1} className="flex-1 pt-16">
-                    {children}
-                  </main>
-                  <Footer />
-                </div>
-                <FeatureFlagPanel />
-                <ServiceWorkerRegistrar />
-                <OfflineBanner />
-              </WalletProvider>
-            </WalletErrorBoundary>
-          </FeatureFlagProvider>
-        </ErrorBoundary>
+        <FeatureFlagProvider>
+          <WalletProvider>
+            <HelpProvider>
+              <StatusBanner />
+            <div className="min-h-screen flex flex-col">
+              <a
+                href="#main-content"
+                className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-[var(--primary)] focus:text-white focus:font-medium focus:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-light)]"
+              >
+                Skip to main content
+              </a>
+              <Navbar />
+              <main id="main-content" tabIndex={-1} className="flex-1 pt-16">
+                {children}
+              </main>
+              <Footer />
+            </div>
+            <FeatureFlagPanel />
+              <ServiceWorkerRegistrar />
+              <OfflineBanner />
+            </HelpProvider>
+          </WalletProvider>
+        </FeatureFlagProvider>
       </body>
     </html>
   );

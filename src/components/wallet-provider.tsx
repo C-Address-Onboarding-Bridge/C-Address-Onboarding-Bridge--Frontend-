@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
-import { connectWallet, checkConnection, getWalletAddress, getWalletNetwork } from "@/lib/stellar";
+import { connectWallet, checkConnection, getWalletAddress, getWalletNetwork, switchWalletNetwork, type SwitchNetworkResult } from "@/lib/stellar";
 import { APP_NETWORK, isSupportedNetwork, type StellarNetwork, type WalletNetworkState } from "@/lib/types";
 import { loadSession, markConnected, markDisconnected } from "@/lib/session";
 import { handleError } from "@/lib/errors";
@@ -36,6 +36,16 @@ interface WalletContextType {
   networkMismatch: boolean;
   /** Call to dismiss the network-mismatch banner for the current session. */
   dismissNetworkMismatch: () => void;
+  /** Epoch ms of the last network change, or null when none this session. (#480) */
+  networkChangedAt: number | null;
+  /** True when the network changed within the last few seconds. (#480) */
+  recentlyChangedNetwork: boolean;
+  /**
+   * Requests a network change through the wallet. Resolves with "switched"
+   * when the wallet confirmed, "cancelled" when it declined, or "manual"
+   * when the wallet has no programmatic switch API. (#480)
+   */
+  switchNetwork: (target: "PUBLIC" | "TESTNET") => Promise<SwitchNetworkResult>;
   connect: () => Promise<void>;
   disconnect: () => void;
   /** True when the browser reports an active network connection. (#475) */
@@ -60,6 +70,11 @@ const FAST_INTERVAL = 3000;
 const SLOW_INTERVAL = 10000;
 /** Time before backing off from fast to slow interval. */
 const BACKOFF_THRESHOLD_MS = 30000;
+/**
+ * Window during which a network change is treated as "recent" so mainnet
+ * actions are warned about. (#480)
+ */
+const RECENT_NETWORK_CHANGE_MS = 60_000;
 
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
@@ -82,6 +97,18 @@ export function WalletProvider({ children }: { children: ReactNode }) {
    *   - explicit dismissal via dismissNetworkMismatch()
    */
   const [networkMismatch, setNetworkMismatch] = useState(false);
+  /**
+   * When the wallet's network last changed, so the UI can warn before a
+   * mainnet action initiated shortly after a switch. null = no change yet.
+   * (#480)
+   */
+  const [networkChangedAt, setNetworkChangedAt] = useState<number | null>(null);
+  // Mirrors `networkChangedAt` as a boolean that clears itself after
+  // RECENT_NETWORK_CHANGE_MS, so the provider value never has to call
+  // Date.now() during render (react-hooks/purity). (#480)
+  const [networkChangedRecently, setNetworkChangedRecently] = useState(false);
+  const recentChangeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousNetworkStatusRef = useRef<WalletNetworkState>(APP_NETWORK);
   /**
    * The network that was active at connection time. Used to detect changes.
    * null means no connection has been established yet this session.
@@ -227,6 +254,22 @@ export function WalletProvider({ children }: { children: ReactNode }) {
    * through `networkStatus` so callers block rather than transact on a guess.
    */
   const applyNetwork = useCallback((status: WalletNetworkState, name: string | null) => {
+    // Record the moment the active network changes so callers can warn on
+    // mainnet actions initiated right after a switch (#480). Uses a ref
+    // comparison rather than an updater so the timestamp write stays out of
+    // the state updater.
+    if (previousNetworkStatusRef.current !== status) {
+      previousNetworkStatusRef.current = status;
+      setNetworkChangedAt(Date.now());
+      // Flag the change as recent for the mainnet-action warning window, and
+      // clear it once the window elapses.
+      setNetworkChangedRecently(true);
+      if (recentChangeTimerRef.current) clearTimeout(recentChangeTimerRef.current);
+      recentChangeTimerRef.current = setTimeout(
+        () => setNetworkChangedRecently(false),
+        RECENT_NETWORK_CHANGE_MS
+      );
+    }
     setNetworkStatus(status);
     setWalletNetworkName(name);
     if (isSupportedNetwork(status)) {
@@ -271,13 +314,31 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         setNetworkStatus(APP_NETWORK);
         setWalletNetworkName(null);
       }
-    } catch (e) {
-      // The poller drives this every few seconds and uses `.finally`, so an
-      // unhandled rejection here would just become console noise. Report it
-      // through the central path and let the next poll try again. (#473)
-      handleError(e, "wallet:updateConnection");
+    } else {
+      setAddress(null);
+      // Reset mismatch tracking when wallet disconnects.
+      initialNetworkRef.current = null;
+      dismissedRef.current = false;
+      setNetworkMismatch(false);
+      setNetworkStatus(APP_NETWORK);
+      setWalletNetworkName(null);
+      previousNetworkStatusRef.current = APP_NETWORK;
+      setNetworkChangedAt(null);
+      setNetworkChangedRecently(false);
+      if (recentChangeTimerRef.current) clearTimeout(recentChangeTimerRef.current);
     }
   }, [applyNetwork, isManuallyDisconnected]);
+
+  const switchNetwork = useCallback(
+    async (target: "PUBLIC" | "TESTNET"): Promise<SwitchNetworkResult> => {
+      const result = await switchWalletNetwork(target);
+      // Re-read the wallet so address/network state reflects the outcome;
+      // applyNetwork records the change (if any) for the mainnet warning.
+      await updateConnection();
+      return result;
+    },
+    [updateConnection]
+  );
 
   const connect = useCallback(async () => {
     // An explicit connect clears the sticky disconnect so polling resumes. (#288)
@@ -324,6 +385,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setNetworkMismatch(false);
     setNetworkStatus(APP_NETWORK);
     setWalletNetworkName(null);
+    previousNetworkStatusRef.current = APP_NETWORK;
+    setNetworkChangedAt(null);
+    setNetworkChangedRecently(false);
+    if (recentChangeTimerRef.current) clearTimeout(recentChangeTimerRef.current);
   }, [address]);
 
   // Polling with backoff + visibility awareness
@@ -404,6 +469,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         isConnecting,
         networkMismatch,
         dismissNetworkMismatch,
+        networkChangedAt,
+        recentlyChangedNetwork: networkChangedRecently,
+        switchNetwork,
         connect,
         disconnect,
         isOnline,

@@ -46,7 +46,7 @@ function storage(): Storage | null {
 
 /** True when `session` is older than the TTL and should be discarded. */
 export function isSessionExpired(session: WalletSession, now: number = Date.now()): boolean {
-  throw new Error('Not implemented: isSessionExpired');
+  return now - session.updatedAt > SESSION_TTL_MS;
 }
 
 function parseSession(raw: string | null): WalletSession | null {
@@ -71,7 +71,18 @@ function parseSession(raw: string | null): WalletSession | null {
  * is not re-parsed on every call.
  */
 export function loadSession(now: number = Date.now()): WalletSession {
-  throw new Error('Not implemented: loadSession');
+  const store = storage();
+  if (!store) return freshSession(now);
+
+  const raw = store.getItem(SESSION_STORAGE_KEY);
+  const session = parseSession(raw);
+
+  if (!session || isSessionExpired(session, now)) {
+    if (raw !== null) store.removeItem(SESSION_STORAGE_KEY);
+    return freshSession(now);
+  }
+
+  return session;
 }
 
 function writeSession(session: WalletSession): WalletSession {
@@ -88,7 +99,12 @@ function writeSession(session: WalletSession): WalletSession {
 
 /** Records an explicit connect, clearing any sticky disconnect. */
 export function markConnected(address: string | null, now: number = Date.now()): WalletSession {
-  throw new Error('Not implemented: markConnected');
+  const session: WalletSession = {
+    address: address ?? null,
+    manuallyDisconnected: false,
+    updatedAt: now,
+  };
+  return writeSession(session);
 }
 
 /**
@@ -96,10 +112,21 @@ export function markConnected(address: string | null, now: number = Date.now()):
  * debugging session) can tell which account was dropped.
  */
 export function markDisconnected(address: string | null = null, now: number = Date.now()): WalletSession {
-  throw new Error('Not implemented: markDisconnected');
+  const session: WalletSession = {
+    address: address ?? null,
+    manuallyDisconnected: true,
+    updatedAt: now,
+  };
+  return writeSession(session);
 }
 
 /** Removes the stored session entirely. */
 export function clearSession(): void {
-  throw new Error('Not implemented: clearSession');
+  const store = storage();
+  if (!store) return;
+  try {
+    store.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore errors in privacy mode
+  }
 }

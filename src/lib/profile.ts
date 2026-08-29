@@ -29,8 +29,11 @@ const NAME_SUFFIX = ":name";
  * embedding override. A newline or an RTL override pasted into the field would
  * break the layout around it. Checked by code point rather than a regex so no
  * literal control characters have to live in this source file.
+ *
+ * Exported so other per-address text stores (e.g. `src/lib/addressBook.ts`
+ * recipient labels, #466) can reuse the same check instead of re-deriving it.
  */
-function hasControlChars(value: string): boolean {
+export function hasControlChars(value: string): boolean {
   for (const char of value) {
     const code = char.codePointAt(0) ?? 0;
     if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;

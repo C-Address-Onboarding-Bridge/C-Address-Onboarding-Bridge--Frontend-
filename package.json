@@ -13,6 +13,11 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --debug",
+    "storybook": "storybook dev -p 6006",
+    "storybook:build": "storybook build",
+    "storybook:test": "test-storybook",
+    "visual-regression:capture": "playwright install && storybook build && node scripts/capture-visual-regression.js",
+    "visual-regression:update": "percy exec -- node scripts/capture-visual-regression.js",
     "prepare": "husky"
   },
   "dependencies": {
@@ -26,6 +31,9 @@
   "devDependencies": {
     "@next/bundle-analyzer": "^16.2.7",
     "@playwright/test": "^1.40.0",
+    "@storybook/nextjs": "^8.0.0",
+    "@storybook/react": "^8.0.0",
+    "@storybook/test-runner": "^0.16.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
@@ -38,6 +46,8 @@
     "eslint-config-next": "16.2.7",
     "husky": "^9.1.7",
     "jsdom": "^29.1.1",
+    "percy-cli": "^1.28.0",
+    "storybook": "^8.0.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.10"
