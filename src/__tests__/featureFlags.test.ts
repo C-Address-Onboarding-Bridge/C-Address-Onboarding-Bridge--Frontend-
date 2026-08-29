@@ -101,6 +101,7 @@ describe('featureFlags', () => {
     });
 
     it('returns overrides from localStorage', () => {
+      vi.stubEnv('NODE_ENV', 'development');
       setDevOverride('new_onboarding_flow', true);
       setDevOverride('advanced_address_validation', false);
       
@@ -114,6 +115,7 @@ describe('featureFlags', () => {
 
   describe('setDevOverride', () => {
     it('persists override to localStorage', () => {
+      vi.stubEnv('NODE_ENV', 'development');
       setDevOverride('new_onboarding_flow', true);
       
       const stored = localStorage.getItem('ff_dev_overrides');
@@ -123,6 +125,7 @@ describe('featureFlags', () => {
     });
 
     it('updates existing override', () => {
+      vi.stubEnv('NODE_ENV', 'development');
       setDevOverride('new_onboarding_flow', true);
       setDevOverride('new_onboarding_flow', false);
       
@@ -133,6 +136,7 @@ describe('featureFlags', () => {
 
   describe('clearDevOverride', () => {
     it('removes override from localStorage', () => {
+      vi.stubEnv('NODE_ENV', 'development');
       setDevOverride('new_onboarding_flow', true);
       clearDevOverride('new_onboarding_flow');
       
@@ -141,6 +145,7 @@ describe('featureFlags', () => {
     });
 
     it('does not affect other overrides', () => {
+      vi.stubEnv('NODE_ENV', 'development');
       setDevOverride('new_onboarding_flow', true);
       setDevOverride('advanced_address_validation', true);
       
@@ -149,6 +154,123 @@ describe('featureFlags', () => {
       const result = getDevOverrides();
       expect(result.new_onboarding_flow).toBeUndefined();
       expect(result.advanced_address_validation).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // #240 — defense-in-depth: NODE_ENV guard inside set/clear
+  // -------------------------------------------------------------------------
+  describe('setDevOverride / clearDevOverride are no-ops outside development', () => {
+    it('setDevOverride does not write to localStorage in production', () => {
+      vi.stubEnv('NODE_ENV', 'production');
+
+      setDevOverride('new_onboarding_flow', true);
+
+      // localStorage must remain empty — the guard fired before writing.
+      expect(localStorage.getItem('ff_dev_overrides')).toBeNull();
+    });
+
+    it('clearDevOverride does not write to localStorage in production', () => {
+      // Pre-seed via raw localStorage so we bypass the guard on write.
+      vi.stubEnv('NODE_ENV', 'development');
+      setDevOverride('new_onboarding_flow', true);
+
+      vi.stubEnv('NODE_ENV', 'production');
+      clearDevOverride('new_onboarding_flow');
+
+      // The key should still be present — clearDevOverride was a no-op.
+      const stored = localStorage.getItem('ff_dev_overrides');
+      expect(stored).not.toBeNull();
+      const parsed = JSON.parse(stored!);
+      expect(parsed.new_onboarding_flow).toBe(true);
+    });
+
+    it('setDevOverride does not write in test environment', () => {
+      // NODE_ENV is 'test' by default in Vitest.
+      vi.stubEnv('NODE_ENV', 'test');
+      setDevOverride('new_onboarding_flow', true);
+      expect(localStorage.getItem('ff_dev_overrides')).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // #240 — getDevOverrides: graceful degradation on malformed localStorage
+  // -------------------------------------------------------------------------
+  describe('getDevOverrides degrades safely on malformed localStorage content', () => {
+    it('returns {} for a non-JSON string', () => {
+      localStorage.setItem('ff_dev_overrides', 'this is not json!!!');
+      expect(getDevOverrides()).toEqual({});
+    });
+
+    it('returns {} for a JSON array', () => {
+      localStorage.setItem('ff_dev_overrides', JSON.stringify([true, false]));
+      expect(getDevOverrides()).toEqual({});
+    });
+
+    it('returns {} for a JSON primitive (boolean)', () => {
+      localStorage.setItem('ff_dev_overrides', 'true');
+      expect(getDevOverrides()).toEqual({});
+    });
+
+    it('returns {} for a JSON primitive (number)', () => {
+      localStorage.setItem('ff_dev_overrides', '42');
+      expect(getDevOverrides()).toEqual({});
+    });
+
+    it('returns {} for a JSON null', () => {
+      localStorage.setItem('ff_dev_overrides', 'null');
+      expect(getDevOverrides()).toEqual({});
+    });
+
+    it('returns {} for an object with non-boolean values (strings)', () => {
+      localStorage.setItem(
+        'ff_dev_overrides',
+        JSON.stringify({ new_onboarding_flow: 'yes' })
+      );
+      expect(getDevOverrides()).toEqual({});
+    });
+
+    it('returns {} for an object with non-boolean values (numbers)', () => {
+      localStorage.setItem(
+        'ff_dev_overrides',
+        JSON.stringify({ new_onboarding_flow: 1 })
+      );
+      expect(getDevOverrides()).toEqual({});
+    });
+
+    it('returns {} for an object with nested object values', () => {
+      localStorage.setItem(
+        'ff_dev_overrides',
+        JSON.stringify({ new_onboarding_flow: { enabled: true } })
+      );
+      expect(getDevOverrides()).toEqual({});
+    });
+
+    it('returns {} for an object with a null value', () => {
+      localStorage.setItem(
+        'ff_dev_overrides',
+        JSON.stringify({ new_onboarding_flow: null })
+      );
+      expect(getDevOverrides()).toEqual({});
+    });
+
+    it('returns a valid overrides object when all values are booleans', () => {
+      localStorage.setItem(
+        'ff_dev_overrides',
+        JSON.stringify({ new_onboarding_flow: true, advanced_address_validation: false })
+      );
+      expect(getDevOverrides()).toEqual({
+        new_onboarding_flow: true,
+        advanced_address_validation: false,
+      });
+    });
+
+    it('isFeatureEnabled falls back to default when localStorage is malformed', () => {
+      vi.stubEnv('NODE_ENV', 'development');
+      // Plant an array — getDevOverrides should return {} so no override fires.
+      localStorage.setItem('ff_dev_overrides', JSON.stringify(['oops']));
+      // The flag's defaultEnabled is false; with no override it stays false.
+      expect(isFeatureEnabled('new_onboarding_flow')).toBe(false);
     });
   });
 

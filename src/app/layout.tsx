@@ -1,12 +1,17 @@
 import type { Metadata } from "next";
 import { Geist, JetBrains_Mono } from "next/font/google";
-import { headers } from "next/headers";
+import Script from "next/script";
 import "./globals.css";
 import { WalletProvider } from "@/components/wallet-provider";
+import { ErrorBoundary, WalletErrorBoundary } from "@/components/error-boundary";
 import { FeatureFlagProvider } from "@/contexts/FeatureFlagContext";
 import { FeatureFlagPanel } from "@/components/FeatureFlagPanel";
+import { StatusBanner } from "@/components/status-banner";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
+import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
+import { OfflineBanner } from "@/components/offline-banner";
+import { HelpProvider } from "@/contexts/HelpContext";
 
 const geist = Geist({
   subsets: ["latin"],
@@ -22,24 +27,89 @@ export const metadata: Metadata = {
   title: "C-Address Bridge | Soroban Onboarding Protocol",
   description:
     "Fund any Soroban smart account (C-address) directly — from a CEX withdrawal, a credit card, or an existing G-address.",
+  keywords: [
+    "Soroban",
+    "Stellar",
+    "C-address",
+    "smart contract",
+    "blockchain",
+    "bridge",
+    "onboarding",
+  ],
+  openGraph: {
+    title: "C-Address Bridge",
+    description:
+      "Fund any Soroban smart account (C-address) directly from a CEX withdrawal, a credit card, or an existing G-address.",
+    url: "https://c-address-bridge.example.com",
+    type: "website",
+    siteName: "C-Address Bridge",
+    images: [
+      {
+        url: "https://c-address-bridge.example.com/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "C-Address Bridge - Fund Soroban Smart Accounts",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "C-Address Bridge",
+    description:
+      "Fund Soroban smart accounts directly from CEX, credit card, or G-address.",
+    images: ["https://c-address-bridge.example.com/og-image.png"],
+    creator: "@stellar",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    "max-image-preview": "large",
+    "max-snippet": -1,
+    "max-video-preview": -1,
+  },
+  alternates: {
+    canonical: "https://c-address-bridge.example.com",
+  },
 };
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // Read the per-request nonce injected by middleware so Next.js can attach it
-  // to inline scripts it generates (hydration bootstrap, etc.). (#457)
-  const headersList = await headers();
-  const nonce = headersList.get("x-nonce") ?? undefined;
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    name: "C-Address Bridge",
+    description:
+      "Fund any Soroban smart account (C-address) directly from a CEX withdrawal, a credit card, or an existing G-address.",
+    url: "https://c-address-bridge.example.com",
+    applicationCategory: "FinanceApplication",
+    operatingSystem: "Web",
+    offers: {
+      "@type": "Offer",
+      priceCurrency: "XLM",
+      price: "0",
+    },
+    author: {
+      "@type": "Organization",
+      name: "Stellar Development Foundation",
+      url: "https://stellar.org",
+    },
+  };
 
   return (
     <html lang="en" className={`${geist.variable} ${jetbrainsMono.variable}`}>
       <head>
-        {/* Pass the nonce to Next.js inline script injection via the meta tag.
-            Next.js reads this during SSR to nonce-tag its own inline scripts. */}
-        {nonce && <meta name="x-nonce" content={nonce} />}
+        <Script
+          id="structured-data"
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(structuredData),
+          }}
+        />
       </head>
       <body className="antialiased">
         <FeatureFlagProvider>
           <WalletProvider>
+            <HelpProvider>
+              <StatusBanner />
             <div className="min-h-screen flex flex-col">
               <a
                 href="#main-content"
@@ -54,6 +124,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <Footer />
             </div>
             <FeatureFlagPanel />
+              <ServiceWorkerRegistrar />
+              <OfflineBanner />
+            </HelpProvider>
           </WalletProvider>
         </FeatureFlagProvider>
       </body>

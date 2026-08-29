@@ -86,14 +86,19 @@ src/
 │   ├── dashboard/         # Wallet dashboard with live balances
 │   └── onramp/            # Fiat onramp (Moonpay/Transak)
 ├── components/
+│   ├── avatar-upload.tsx  # Local (browser-only) profile avatar
 │   ├── footer.tsx
 │   ├── navbar.tsx
 │   ├── transaction-history.tsx
 │   └── wallet-provider.tsx  # Wallet context provider
 └── lib/
+    ├── avatar.ts          # Avatar validation + localStorage helpers
+    ├── session.ts         # Persisted wallet session state
     ├── stellar.ts         # Stellar SDK + Freighter integration
     └── types.ts           # TypeScript types and constants
 ```
+
+Caching and browser-storage behaviour is documented in [Caching & Client Storage](docs/caching.md).
 
 ## Testing against Testnet
 

@@ -1,0 +1,33 @@
+# Dependabot configuration for automated dependency updates.
+#
+# This app handles wallet integration and financial transactions via
+# @stellar/freighter-api and @stellar/stellar-sdk — a known-vulnerable
+# transitive dependency here is a materially higher-stakes risk than in a
+# typical marketing site.  Weekly PRs ensure both direct and transitive
+# dependencies are kept current and any advisories surface promptly. (#243)
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: UTC
+    # Group all non-breaking (patch + minor) updates into a single PR to reduce
+    # noise while still keeping dependencies current.  Major version bumps open
+    # a separate PR each so they can be reviewed individually.
+    groups:
+      non-breaking:
+        update-types:
+          - minor
+          - patch
+    # Security updates are always opened as standalone PRs regardless of
+    # grouping, so they never get delayed behind a batch.
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope

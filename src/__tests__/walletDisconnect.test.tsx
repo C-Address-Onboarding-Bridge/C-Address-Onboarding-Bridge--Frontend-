@@ -43,6 +43,9 @@ describe("Wallet disconnect control (#288)", () => {
   const query = <T extends Element>(selector: string) => container.querySelector<T>(selector);
 
   beforeEach(async () => {
+    // The disconnect decision is persisted now (#343), so it has to be reset
+    // between cases or one test's disconnect starts the next one signed out.
+    localStorage.clear();
     vi.useFakeTimers();
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -138,6 +141,44 @@ describe("Wallet disconnect control (#288)", () => {
     // …and polling resumes: connect() cleared the sticky flag rather than
     // merely bypassing it once.
     await advance(10_000);
+    expect(container.textContent).toContain(CHIP);
+  });
+
+  // #343: the flag used to live only in a ref, so a reload re-adopted the
+  // still-connected Freighter account and undid the disconnect.
+  it("stays disconnected across a remount (page reload)", async () => {
+    await click(query('button[aria-label="Disconnect wallet"]'));
+    expect(container.textContent).not.toContain(CHIP);
+
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <WalletProvider>
+          <Navbar />
+        </WalletProvider>
+      );
+    });
+    await advance(15_000);
+
+    expect(container.textContent).not.toContain(CHIP);
+    expect(container.textContent).toContain("Connect Wallet");
+  });
+
+  it("reconnects normally on a remount when the user never disconnected", async () => {
+    expect(container.textContent).toContain(CHIP);
+
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <WalletProvider>
+          <Navbar />
+        </WalletProvider>
+      );
+    });
+    await advance(3_000);
+
     expect(container.textContent).toContain(CHIP);
   });
 });

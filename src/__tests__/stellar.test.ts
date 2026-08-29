@@ -1,6 +1,33 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Keypair, StrKey } from "@stellar/stellar-sdk";
-import { isValidStellarAddress, isCAddress, isGAddress } from "@/lib/stellar";
+import {
+  isValidStellarAddress,
+  isCAddress,
+  isGAddress,
+  isValidStellarAmount,
+  getAccountBalances,
+  clearAccountBalancesCache,
+} from "@/lib/stellar";
+
+// Horizon's network call is the only thing stubbed; every other SDK export
+// (Keypair, StrKey, ...) stays real so the address fixtures below are genuine
+// checksum-valid StrKeys rather than hand-rolled look-alikes.
+const loadAccount = vi.fn();
+
+vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@stellar/stellar-sdk")>();
+  return {
+    ...actual,
+    Horizon: {
+      ...actual.Horizon,
+      Server: vi.fn().mockImplementation(function MockHorizonServer(this: {
+        loadAccount: typeof loadAccount;
+      }) {
+        this.loadAccount = loadAccount;
+      }),
+    },
+  };
+});
 
 // Real, checksum-valid StrKeys derived from the SDK — not hardcoded strings
 // that merely "look" the right length/prefix. The G-address is a genuine
@@ -228,6 +255,19 @@ describe("getAccountBalances cache", () => {
     const recovered = await getAccountBalances(G_ADDRESS, "TESTNET");
 
     expect(recovered.total).toBe("50");
+    expect(loadAccount).toHaveBeenCalledTimes(2);
+  });
+
+  it("marks 404 account misses as unfunded and retries on the next call", async () => {
+    loadAccount.mockRejectedValueOnce({ response: { status: 404 } });
+
+    const unfunded = await getAccountBalances(G_ADDRESS, "TESTNET");
+    expect(unfunded).toEqual({ total: "0", balances: [], unfunded: true });
+
+    loadAccount.mockResolvedValue(account("25"));
+    const recovered = await getAccountBalances(G_ADDRESS, "TESTNET");
+
+    expect(recovered.total).toBe("25");
     expect(loadAccount).toHaveBeenCalledTimes(2);
   });
 

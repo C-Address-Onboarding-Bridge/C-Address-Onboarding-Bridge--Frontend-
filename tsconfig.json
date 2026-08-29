@@ -13,6 +13,7 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
+    "tsBuildInfoFile": "./node_modules/.cache/typescript/tsconfig.tsbuildinfo",
     "plugins": [
       {
         "name": "next"
@@ -30,5 +31,11 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    // Storybook is not a dependency of this project and is not run in CI, so
+    // `@storybook/react` does not resolve and every story file fails
+    // `npm run typecheck`. Drop this entry if Storybook is ever installed.
+    "src/stories"
+  ]
 }

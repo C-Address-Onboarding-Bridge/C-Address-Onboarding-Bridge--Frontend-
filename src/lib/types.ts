@@ -7,15 +7,31 @@ export interface WalletState {
   isConnected: boolean;
 }
 
+/**
+ * Lifecycle state of a bridge transaction.
+ *
+ * Named rather than inlined so every producer and consumer references one
+ * cached union instead of re-declaring (and making the checker re-instantiate)
+ * a structurally identical anonymous one. It also means adding a state is a
+ * one-line change that the compiler propagates everywhere. (#346)
+ */
+export type BridgeTransactionStatus = "pending" | "confirmed" | "failed";
+
+/** How funds reached the destination C-address. */
+export type BridgeTransactionKind = "g-to-c" | "fiat" | "cex";
+
+/** Fiat on-ramp providers the app can quote against. */
+export type OnrampProvider = "moonpay" | "transak";
+
 export interface BridgeTransactionData {
   id: string;
   fromAddress: string;
   toAddress: string;
   amount: string;
   asset: string;
-  status: "pending" | "confirmed" | "failed";
+  status: BridgeTransactionStatus;
   timestamp: number;
-  type: "g-to-c" | "fiat" | "cex";
+  type: BridgeTransactionKind;
   hash?: string;
   memo?: string;
 }
@@ -30,18 +46,18 @@ export interface OnrampQuote {
   sourceAmount: string;
   destinationAmount: string;
   fee: string;
-  provider: "moonpay" | "transak";
+  provider: OnrampProvider;
   fiatCurrency: string;
   cryptoCurrency: string;
 }
 
 export interface CexConfig {
-  name: string;
-  logo: string;
-  supportedNetworks: string[];
-  minWithdrawal: string;
-  fee: string;
-  withdrawalUrl: string;
+  readonly name: string;
+  readonly logo: string;
+  readonly supportedNetworks: readonly string[];
+  readonly minWithdrawal: string;
+  readonly fee: string;
+  readonly withdrawalUrl: string;
 }
 
 export const STELLAR_NETWORK = {
@@ -96,6 +112,18 @@ export const HORIZON_URL = {
 export const BRIDGE_CONTRACT_ID = process.env.NEXT_PUBLIC_BRIDGE_CONTRACT_ID || "";
 
 /**
+ * Maximum number of recipients accepted in a single batch_fund_c_address
+ * call (#465).
+ *
+ * TODO: this is a placeholder. This repo does not vendor the batch contract
+ * source or the batch API client, and no existing constant defines the real
+ * cap — replace this with the actual contract/API limit once it's available,
+ * and update the UI copy that references it (currently derived from this
+ * constant, so no other change should be needed).
+ */
+export const MAX_BATCH_RECIPIENTS = 25;
+
+/**
  * The Stellar network the app connects to. Driven by the `NEXT_PUBLIC_STELLAR_NETWORK`
  * environment variable. Any value other than `"PUBLIC"` (exact, case-sensitive)
  * falls back to `"TESTNET"` so misconfigured deployments never silently send
@@ -108,7 +136,16 @@ export const BRIDGE_CONTRACT_ID = process.env.NEXT_PUBLIC_BRIDGE_CONTRACT_ID || 
 export const APP_NETWORK: "PUBLIC" | "TESTNET" =
   process.env.NEXT_PUBLIC_STELLAR_NETWORK === "PUBLIC" ? "PUBLIC" : "TESTNET";
 
-export const CEX_LIST: CexConfig[] = [
+/**
+ * The exchanges shown on /cex.
+ *
+ * `as const satisfies` rather than a `: CexConfig[]` annotation: the shape is
+ * still checked against {@link CexConfig}, but the literal types survive, so
+ * `CEX_LIST[0].name` is `"Binance"` instead of `string`, and the whole
+ * structure is frozen at the type level — no widening pass, no accidental
+ * `CEX_LIST.push(...)` from a component. (#346)
+ */
+export const CEX_LIST = [
   {
     name: "Binance",
     logo: "/cex/binance.svg",
@@ -133,4 +170,4 @@ export const CEX_LIST: CexConfig[] = [
     fee: "0.15 USDC",
     withdrawalUrl: "https://www.kraken.com/withdraw",
   },
-];
+] as const satisfies readonly CexConfig[];
