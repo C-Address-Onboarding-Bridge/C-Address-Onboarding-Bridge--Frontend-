@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from "vitest";
-import { clearDisplayName, displayNameStorageKey, saveDisplayName } from "@/lib/profile";
+import {
+  clearDisplayName,
+  displayNameStorageKey,
+  saveDisplayName,
+  shortenAddress,
+} from "@/lib/profile";
 
 const ADDRESS_A = "GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW";
 const ADDRESS_B = "CABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW";
@@ -37,5 +42,30 @@ describe("clearDisplayName (#527)", () => {
   it("is a no-op when nothing was ever stored for the address", () => {
     expect(() => clearDisplayName(ADDRESS_A)).not.toThrow();
     expect(window.localStorage.getItem(displayNameStorageKey(ADDRESS_A))).toBeNull();
+  });
+});
+
+describe("shortenAddress (#528)", () => {
+  it("keeps the first 6 and last 6 characters, joined by an ellipsis", () => {
+    const result = shortenAddress(ADDRESS_A);
+    expect(result).toBe(`${ADDRESS_A.slice(0, 6)}…${ADDRESS_A.slice(-6)}`);
+    expect(result.startsWith(ADDRESS_A.slice(0, 6))).toBe(true);
+    expect(result.endsWith(ADDRESS_A.slice(-6))).toBe(true);
+  });
+
+  it("returns strings of 12 characters or fewer unchanged", () => {
+    expect(shortenAddress("123456789012")).toBe("123456789012"); // exactly 12
+    expect(shortenAddress("short")).toBe("short");
+    expect(shortenAddress("")).toBe("");
+  });
+
+  it("shortens strings of 13 characters or more", () => {
+    const address = "1234567890123"; // 13 chars
+    expect(shortenAddress(address)).toBe("123456…890123");
+  });
+
+  it("returns an empty string for null/undefined input", () => {
+    expect(shortenAddress(null)).toBe("");
+    expect(shortenAddress(undefined)).toBe("");
   });
 });
