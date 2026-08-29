@@ -55,12 +55,12 @@ export function validateAvatarFile(file: Pick<File, "type" | "size">): AvatarVal
 
 /** True when `value` is a base64 image data URL that is safe to render. */
 export function isRenderableAvatar(value: unknown): value is string {
-  throw new Error('Not implemented: isRenderableAvatar');
+  return typeof value === "string" && DATA_URL_PATTERN.test(value);
 }
 
 /** Storage key for an address. Exported so tests and docs can reference it. */
 export function avatarStorageKey(address: string): string {
-  throw new Error('Not implemented: avatarStorageKey');
+  return `${STORAGE_PREFIX}${address}`;
 }
 
 function storage(): Storage | null {
@@ -75,7 +75,15 @@ function storage(): Storage | null {
 
 /** Reads the stored avatar for `address`, or null when absent/invalid. */
 export function loadAvatar(address: string | null | undefined): string | null {
-  throw new Error('Not implemented: loadAvatar');
+  if (!address) return null;
+  const store = storage();
+  if (!store) return null;
+  try {
+    const value = store.getItem(avatarStorageKey(address));
+    return isRenderableAvatar(value) ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -84,7 +92,15 @@ export function loadAvatar(address: string | null | undefined): string | null {
  * surface a message instead of silently losing the image.
  */
 export function saveAvatar(address: string | null | undefined, dataUrl: string): boolean {
-  throw new Error('Not implemented: saveAvatar');
+  if (!address || !isRenderableAvatar(dataUrl)) return false;
+  const store = storage();
+  if (!store) return false;
+  try {
+    store.setItem(avatarStorageKey(address), dataUrl);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Removes the stored avatar for `address`. */

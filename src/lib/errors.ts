@@ -69,15 +69,19 @@ export function createAppError(
   message?: string,
   details?: unknown,
 ): AppError {
+  const retryable = [
+    ErrorCode.WALLET_CONNECTION_FAILED,
+    ErrorCode.TRANSACTION_FAILED,
+    ErrorCode.API_ERROR,
+    ErrorCode.TIMEOUT,
+  ].includes(code);
+
   return new AppError({
     code,
-    message: message ?? code,
+    message: message || USER_MESSAGES[code],
     userMessage: USER_MESSAGES[code],
     details,
-    retryable:
-      code === ErrorCode.API_ERROR ||
-      code === ErrorCode.TIMEOUT ||
-      code === ErrorCode.TRANSACTION_FAILED,
+    retryable,
   });
 }
 
@@ -88,33 +92,29 @@ export function createAppError(
 export function parseError(error: unknown): AppError {
   if (error instanceof AppError) return error;
 
-  const message =
-    error instanceof Error ? error.message : typeof error === "string" ? error : String(error ?? "Unknown error");
+  const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
 
-  if (lower.includes("freighter not detected") || lower.includes("wallet not found")) {
+  if (lower.includes('freighter not detected') || lower.includes('not installed')) {
     return createAppError(ErrorCode.WALLET_NOT_FOUND, message, error);
   }
-  if (lower.includes("connect wallet") || lower.includes("wallet connection") || lower.includes("connection refused")) {
+  if (lower.includes('connect') || lower.includes('wallet')) {
     return createAppError(ErrorCode.WALLET_CONNECTION_FAILED, message, error);
   }
-  if (lower.includes("wrong network") || lower.includes("network mismatch") || lower.includes("passphrase")) {
+  if (lower.includes('network') || lower.includes('passphrase')) {
     return createAppError(ErrorCode.NETWORK_MISMATCH, message, error);
   }
-  if (lower.includes("rejected")) {
+  if (lower.includes('rejected') || lower.includes('denied') || lower.includes('cancelled')) {
     return createAppError(ErrorCode.TRANSACTION_REJECTED, message, error);
   }
-  if (lower.includes("insufficient balance")) {
+  if (lower.includes('insufficient') || lower.includes('balance')) {
     return createAppError(ErrorCode.INSUFFICIENT_BALANCE, message, error);
   }
-  if (lower.includes("timed out") || lower.includes("timeout")) {
+  if (lower.includes('timeout') || lower.includes('timed out')) {
     return createAppError(ErrorCode.TIMEOUT, message, error);
   }
-  if (lower.includes("invalid address")) {
+  if (lower.includes('invalid') && lower.includes('address')) {
     return createAppError(ErrorCode.INVALID_ADDRESS, message, error);
-  }
-  if (lower.includes("api") || lower.includes("server error") || lower.includes("status 5")) {
-    return createAppError(ErrorCode.API_ERROR, message, error);
   }
 
   return createAppError(ErrorCode.UNKNOWN, message, error);
@@ -125,5 +125,9 @@ export function parseError(error: unknown): AppError {
  * Never throws — safe to use in catch blocks.
  */
 export function handleError(error: unknown, context?: string): AppError {
-  throw new Error('Not implemented: handleError');
+  const appError = parseError(error);
+  console.error(
+    `[${appError.code}]${context ? ` ${context}:` : ''} ${appError.message}`,
+  );
+  return appError;
 }

@@ -1,11 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Wallet, Copy, Check, X, Save, Trash2 } from "lucide-react";
+import { Wallet, Copy, Check, X, Save, Trash2, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useWallet } from "@/components/wallet-provider";
 import AvatarUpload from "@/components/avatar-upload";
 import LiveRegion from "@/components/live-region";
+import OnboardingModal from "@/components/OnboardingModal";
+import {
+  GUIDED_STEPS,
+  ONBOARDING_STORAGE_KEY,
+} from "@/components/onboarding-flow";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { formatNetworkLabel } from "@/lib/stellar";
 import {
@@ -45,6 +50,9 @@ export default function ProfilePage() {
   const [savedName, setSavedName] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [nameNotice, setNameNotice] = useState("");
+  // Controls the "reopen onboarding" modal (#472); the guide is reachable again
+  // from the profile page even after it was completed or skipped.
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
 
   // Read from storage after mount only: touching localStorage during render
   // would produce different server and client output and break hydration.
@@ -252,12 +260,47 @@ export default function ProfilePage() {
         </dl>
       </section>
 
+      <section aria-labelledby="profile-guide" className="card p-6 mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 id="profile-guide" className="text-lg font-semibold mb-1">
+              Onboarding guide
+            </h2>
+            <p className="text-sm text-[var(--text-muted)]">
+              Revisit the walkthrough that explains C-addresses and picks a
+              funding route. Progress is saved, so you resume where you left
+              off.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setOnboardingOpen(true)}
+            data-testid="reopen-onboarding"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--primary)] text-white text-sm font-medium hover:bg-[var(--primary)]/90 transition-colors"
+          >
+            <Sparkles className="w-4 h-4" />
+            Open guide
+          </button>
+        </div>
+      </section>
+
       <Link
         href="/dashboard"
         className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-sm font-medium hover:border-[var(--text-muted)] transition-colors"
       >
         Back to dashboard
       </Link>
+
+      {/* Reopening uses the same persisted progress as the landing-page flow,
+          so skipping mid-way resumes here instead of restarting. Finishing
+          re-writes "completed" and keeps the landing page quiet. (#472) */}
+      <OnboardingModal
+        isOpen={onboardingOpen}
+        onClose={() => setOnboardingOpen(false)}
+        onComplete={() => setOnboardingOpen(false)}
+        steps={GUIDED_STEPS}
+        storageKey={ONBOARDING_STORAGE_KEY}
+      />
     </div>
   );
 }
