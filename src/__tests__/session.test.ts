@@ -62,6 +62,25 @@ describe("wallet session persistence (#343)", () => {
     }
   });
 
+  it("loadSession defaults selectedWalletId to null on a fresh session", () => {
+    expect(loadSession(NOW).selectedWalletId).toBeNull();
+  });
+
+  it("loadSession returns a fresh session when the stored record is a JSON array", () => {
+    localStorage.setItem(SESSION_STORAGE_KEY, "[1,2,3]");
+    const session = loadSession(NOW);
+    expect(session.manuallyDisconnected).toBe(false);
+    expect(session.address).toBeNull();
+    // The unparseable-as-a-session record must not be re-parsed on later calls.
+    expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+  });
+
+  it("loadSession is idempotent: reading twice does not itself expire a fresh record", () => {
+    markDisconnected(ADDRESS, NOW);
+    expect(loadSession(NOW + 1).manuallyDisconnected).toBe(true);
+    expect(loadSession(NOW + 2).manuallyDisconnected).toBe(true);
+  });
+
   it("clearSession removes the record", () => {
     markDisconnected(ADDRESS, NOW);
     clearSession();
