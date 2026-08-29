@@ -20,6 +20,8 @@ vi.mock("@/lib/stellar", async (importOriginal) => {
     getWalletAddress: vi.fn(async () => ADDRESS),
     getWalletNetwork: vi.fn(async () => ({ status: "TESTNET", name: "TESTNET" })),
     connectWallet: vi.fn(async () => ADDRESS),
+    initWalletKit: vi.fn(async () => undefined),
+    openWalletSelectionModal: vi.fn(async () => ({ address: ADDRESS, walletId: "freighter" })),
   };
 });
 

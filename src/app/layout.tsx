@@ -3,6 +3,7 @@ import { Geist, JetBrains_Mono } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import { WalletProvider } from "@/components/wallet-provider";
+import { ErrorBoundary, WalletErrorBoundary } from "@/components/error-boundary";
 import { FeatureFlagProvider } from "@/contexts/FeatureFlagContext";
 import { FeatureFlagPanel } from "@/components/FeatureFlagPanel";
 import { StatusBanner } from "@/components/status-banner";
@@ -10,6 +11,7 @@ import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
 import { OfflineBanner } from "@/components/offline-banner";
+import { HelpProvider } from "@/contexts/HelpContext";
 
 const geist = Geist({
   subsets: ["latin"],
@@ -106,7 +108,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="antialiased">
         <FeatureFlagProvider>
           <WalletProvider>
-            <StatusBanner />
+            <HelpProvider>
+              <StatusBanner />
             <div className="min-h-screen flex flex-col">
               <a
                 href="#main-content"
@@ -121,8 +124,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Footer />
             </div>
             <FeatureFlagPanel />
-            <ServiceWorkerRegistrar />
-            <OfflineBanner />
+              <ServiceWorkerRegistrar />
+              <OfflineBanner />
+            </HelpProvider>
           </WalletProvider>
         </FeatureFlagProvider>
       </body>

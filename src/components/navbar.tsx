@@ -12,16 +12,19 @@
 import React, { memo, useState, useCallback, useMemo, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Wallet, ArrowLeftRight, CreditCard, Building2, LayoutDashboard, UserRound, Menu, X, AlertTriangle, LogOut } from "lucide-react";
+import { Wallet, ArrowLeftRight, CreditCard, Building2, LayoutDashboard, UserRound, BookUser, Menu, X, AlertTriangle, LogOut } from "lucide-react";
 import { useWallet } from "./wallet-provider";
 import { PrefetchLink } from "./prefetch-link";
+import NotificationCentre from "./notification-centre";
 import { formatNetworkLabel } from "@/lib/stellar";
+import { useHelp } from "@/contexts/HelpContext";
 
 const navLinks = [
   { href: "/bridge", label: "Bridge", icon: ArrowLeftRight },
   { href: "/onramp", label: "Onramp", icon: CreditCard },
   { href: "/cex", label: "CEX", icon: Building2 },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/address-book", label: "Address Book", icon: BookUser },
   { href: "/profile", label: "Profile", icon: UserRound },
 ];
 
@@ -56,12 +59,21 @@ const Navbar = () => {
     isConnecting,
     networkMismatch,
     dismissNetworkMismatch,
+    switchNetwork,
   } = useWallet();
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Network switcher state (#480): a persistent indicator (always visible,
+  // visually distinct for non-mainnet) plus a menu that requests the change
+  // through the wallet.
+  const [networkMenuOpen, setNetworkMenuOpen] = useState(false);
+  const [switchingTo, setSwitchingTo] = useState<StellarNetwork | null>(null);
+  const [switchHint, setSwitchHint] = useState<string | null>(null);
 
   const toggleButtonRef = useRef<HTMLButtonElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const wasOpenRef = useRef(false);
+
+  const { openHelp } = useHelp();
 
   const toggleMobile = useCallback(() => setMobileOpen((v) => !v), []);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
@@ -90,6 +102,18 @@ const Navbar = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [mobileOpen]);
 
+  // Escape also closes the network switcher menu.
+  useEffect(() => {
+    if (!networkMenuOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setNetworkMenuOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [networkMenuOpen]);
+
   // Focus management: Move focus into menu on open, return focus to toggle on close
   useEffect(() => {
     if (mobileOpen) {
@@ -108,6 +132,44 @@ const Navbar = () => {
   }, [mobileOpen]);
 
   const addressDisplay = useMemo(() => (address ? `${address.slice(0, 4)}...${address.slice(-4)}` : null), [address]);
+
+  // The indicator reports the wallet's actual network — or the app's target
+  // network before a wallet is connected / while its network is unreadable —
+  // so users always know which chain they are on. It is persistent (rendered
+  // connected or not) and visually distinct for non-mainnet networks. (#480)
+  // `networkStatus ?? APP_NETWORK` guards the partial mocks used in tests.
+  const displayNetworkStatus: WalletNetworkState = networkStatus ?? APP_NETWORK;
+  const switcherBadge = useMemo(() => {
+    const label = formatNetworkLabel(displayNetworkStatus, walletNetworkName);
+    if (displayNetworkStatus === "PUBLIC") {
+      return { label, className: "bg-[var(--success)]/15 text-[var(--success)]" };
+    }
+    if (displayNetworkStatus === "TESTNET") {
+      return { label, className: "bg-yellow-500/15 text-yellow-400" };
+    }
+    if (displayNetworkStatus === "UNSUPPORTED") {
+      return { label, className: "bg-[var(--error)]/15 text-[var(--error)]" };
+    }
+    return { label, className: "bg-[var(--surface-2)] text-[var(--text-muted)]" };
+  }, [displayNetworkStatus, walletNetworkName]);
+
+  const handleSwitchNetwork = useCallback(
+    async (target: StellarNetwork) => {
+      if (typeof switchNetwork !== "function") return;
+      setSwitchingTo(target);
+      setSwitchHint(null);
+      const result = await switchNetwork(target);
+      setSwitchingTo(null);
+      if (result === "switched") {
+        setNetworkMenuOpen(false);
+      } else if (result === "manual") {
+        setSwitchHint("Change the network in Freighter — this app will update automatically.");
+      } else {
+        setSwitchHint("The network change was cancelled in the wallet.");
+      }
+    },
+    [switchNetwork]
+  );
 
   // The badge reports what the wallet is actually on, including networks the
   // app can't use. Rendering an unsupported network as "Testnet" is what made
@@ -163,6 +225,14 @@ const Navbar = () => {
           </div>
 
           <div className="flex items-center gap-3">
+            <button
+              onClick={openHelp}
+              aria-label="Open help centre"
+              title="Help"
+              className="hidden sm:flex p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
             {isConnected ? (
               <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
                 <div className="w-2 h-2 rounded-full bg-[var(--success)]" />
@@ -286,6 +356,37 @@ const Navbar = () => {
                 </PrefetchLink>
               );
             })}
+            <div className="pt-2 mt-2 border-t border-[var(--border)]">
+              <div className="flex items-center justify-between px-3 py-1">
+                <span className="text-xs text-[var(--text-muted)]">Network</span>
+                <span
+                  className={`text-[0.6rem] font-semibold px-1.5 py-0.5 rounded-full uppercase tracking-wide ${switcherBadge.className}`}
+                >
+                  {switcherBadge.label}
+                </span>
+              </div>
+              <div className="flex gap-2 px-3 pt-1">
+                {(["TESTNET", "PUBLIC"] as StellarNetwork[]).map((target) => {
+                  const isCurrent = isNetworkSupported && networkStatus === target;
+                  return (
+                    <button
+                      key={target}
+                      type="button"
+                      onClick={() => handleSwitchNetwork(target)}
+                      disabled={switchingTo !== null || isCurrent}
+                      className="flex-1 px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors disabled:opacity-40"
+                    >
+                      {target === "PUBLIC" ? "Mainnet" : "Testnet"}
+                    </button>
+                  );
+                })}
+              </div>
+              {switchHint && (
+                <p role="status" className="px-3 pt-2 text-xs text-[var(--text-muted)]">
+                  {switchHint}
+                </p>
+              )}
+            </div>
             {isConnected ? (
               <div className="pt-2 mt-2 border-t border-[var(--border)] space-y-2">
                 <div className="flex items-center gap-2 px-3">

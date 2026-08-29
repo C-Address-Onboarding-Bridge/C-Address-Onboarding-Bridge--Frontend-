@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, Copy, Check, ExternalLink, Wallet, X, Clock } from "lucide-react";
+import { Building2, Copy, Check, ExternalLink, Wallet, X, Clock, HelpCircle } from "lucide-react";
 import { CEX_LIST, type CexConfig } from "@/lib/types";
 import { isCAddress } from "@/lib/stellar";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { useDebounce } from "@/hooks/useDebounce";
 import LiveRegion from "@/components/live-region";
+import { useHelp } from "@/contexts/HelpContext";
 
 /**
  * CexPage — CEX withdrawal routing to C-addresses.
@@ -22,6 +23,7 @@ import LiveRegion from "@/components/live-region";
  *   in the error state instead of a success checkmark. (#300)
  */
 export default function CexPage() {
+  const { openHelp } = useHelp();
   // Annotated with CexConfig rather than inferred: CEX_LIST is `as const`, so
   // the inferred type would be the literal type of Binance alone and selecting
   // any other exchange would not type-check. (#346)
@@ -57,11 +59,21 @@ export default function CexPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">CEX Withdrawal Routing</h1>
-        <p className="text-[var(--text-muted)]">
-          Route your centralized exchange withdrawals directly to a Soroban C-address.
-        </p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold mb-2">CEX Withdrawal Routing</h1>
+          <p className="text-[var(--text-muted)]">
+            Route your centralized exchange withdrawals directly to a Soroban C-address.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={openHelp}
+          className="hidden sm:flex p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors"
+          aria-label="Open help centre"
+        >
+          <HelpCircle className="w-5 h-5" />
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

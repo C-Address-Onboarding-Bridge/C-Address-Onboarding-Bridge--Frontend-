@@ -1,0 +1,97 @@
+name: Visual Regression Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: visual-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  visual-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Storybook
+        run: npm run storybook:build
+
+      - name: Run Percy visual regression tests
+        run: npx percy exec -- npm run visual-regression:capture
+        env:
+          PERCY_TOKEN: ${{ secrets.PERCY_TOKEN }}
+          CI: true
+
+      - name: Upload coverage on failure
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: storybook-build
+          path: storybook-static/
+          retention-days: 5
+
+  visual-regression-affected-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Detect affected stories
+        id: affected
+        run: |
+          # Get changed files in this PR
+          CHANGED_FILES=$(git diff origin/main...HEAD --name-only | grep -E '\.(tsx?|jsx?)$' | tr '\n' ',' | sed 's/,$//')
+          echo "files=${CHANGED_FILES}" >> $GITHUB_OUTPUT
+
+      - name: Build Storybook
+        run: npm run storybook:build
+
+      - name: Run Percy for affected stories
+        if: steps.affected.outputs.files != ''
+        run: npx percy exec -- npm run visual-regression:capture
+        env:
+          PERCY_TOKEN: ${{ secrets.PERCY_TOKEN }}
+          AFFECTED_FILES: ${{ steps.affected.outputs.files }}
+          CI: true
+
+      - name: Comment PR with visual regression results
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const percyUrl = `https://percy.io/github/${context.payload.repository.full_name}/builds/${process.env.PERCY_BUILD_ID}`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🎨 Visual Regression Report\n\n[View Percy Report](${percyUrl})\n\nStorybook stories have been captured across multiple viewports and themes.`
+            });
+        continue-on-error: true
+        env:
+          PERCY_BUILD_ID: ${{ env.PERCY_BUILD_ID }}

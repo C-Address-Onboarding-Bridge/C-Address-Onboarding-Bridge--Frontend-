@@ -1,11 +1,26 @@
 'use client';
 
 import React, { useState, useCallback, useEffect } from 'react';
+import { ArrowRight } from 'lucide-react';
+
+export interface OnboardingOption {
+  id: string;
+  label: string;
+  description?: string;
+  /** Route to hand off to when chosen; the flow completes and navigates. (#472) */
+  href?: string;
+  /** Step to jump to when chosen; defaults to the next step. (#472) */
+  nextStep?: number;
+}
 
 export interface OnboardingStep {
   title: string;
   description: string;
   icon?: React.ReactNode;
+  /** Optional choices rendered in place of the plain Next button. (#472) */
+  options?: OnboardingOption[];
+  /** Overrides the final button label on the last step (defaults to "Get Started"). (#472) */
+  nextLabel?: string;
 }
 
 export interface OnboardingModalProps {
@@ -19,6 +34,16 @@ export interface OnboardingModalProps {
   steps: OnboardingStep[];
   /** Optional initial step index */
   initialStep?: number;
+  /**
+   * When set, progress is persisted to this localStorage key so the user can
+   * skip the flow mid-way and resume where they left off next time. A stored
+   * value of "completed" means the flow was finished and will not reopen. (#472)
+   */
+  storageKey?: string;
+  /** Called with an option's route when a handoff option is chosen. (#472) */
+  onNavigate?: (href: string) => void;
+  /** Called whenever a step option is chosen, before navigation/advance. (#472) */
+  onOption?: (option: OnboardingOption, stepIndex: number) => void;
 }
 
 /**
@@ -31,25 +56,83 @@ export function OnboardingModal({
   onComplete,
   steps,
   initialStep = 0,
+  storageKey,
+  onNavigate,
+  onOption,
 }: OnboardingModalProps) {
   const [currentStep, setCurrentStep] = useState(initialStep);
 
-  // Reset step when modal opens. The synchronous setState is the point: the
-  // modal stays mounted between openings, so `isOpen` flipping true is the only
-  // signal that the walkthrough should start over from `initialStep`. It runs
-  // once per open, not on every render.
+  // Reset (or resume) step when modal opens. The synchronous setState is the
+  // point: the modal stays mounted between openings, so `isOpen` flipping true
+  // is the only signal that the walkthrough should start over from
+  // `initialStep`. When a storageKey is set the user's last position is
+  // resumed instead — a stored "completed" starts fresh. (#472)
   useEffect(() => {
+    let resumed: number | null = null;
+    if (storageKey && typeof localStorage !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw && raw !== 'completed') {
+          const parsed = Number(raw);
+          if (Number.isInteger(parsed) && parsed >= 0 && parsed < steps.length) {
+            resumed = parsed;
+          }
+        }
+      } catch {
+        // Storage unavailable — fall through to initialStep.
+      }
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (isOpen) setCurrentStep(initialStep);
-  }, [isOpen, initialStep]);
+    if (isOpen) setCurrentStep(resumed ?? initialStep);
+  }, [isOpen, storageKey, initialStep, steps.length]);
+
+  // Persist progress on every step change so a skip + reopen resumes here.
+  // Writing "completed" on finish is what keeps the flow from auto-reopening.
+  useEffect(() => {
+    if (!storageKey || !isOpen || typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(storageKey, String(currentStep));
+    } catch {
+      // Storage unavailable (private mode, quota) — persistence is best-effort.
+    }
+  }, [storageKey, currentStep, isOpen]);
+
+  const complete = useCallback(() => {
+    if (storageKey && typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(storageKey, 'completed');
+      } catch {
+        // Best-effort; the in-memory flow still completes.
+      }
+    }
+    onComplete();
+  }, [storageKey, onComplete]);
+
+  const handleOption = useCallback(
+    (option: OnboardingOption) => {
+      onOption?.(option, currentStep);
+      if (option.href) {
+        onNavigate?.(option.href);
+        complete();
+        return;
+      }
+      const target = option.nextStep ?? currentStep + 1;
+      if (target >= steps.length) {
+        complete();
+      } else {
+        setCurrentStep(target);
+      }
+    },
+    [onOption, onNavigate, complete, currentStep, steps.length],
+  );
 
   const handleNext = useCallback(() => {
     if (currentStep < steps.length - 1) {
       setCurrentStep((prev) => prev + 1);
     } else {
-      onComplete();
+      complete();
     }
-  }, [currentStep, steps.length, onComplete]);
+  }, [currentStep, steps.length, complete]);
 
   const handleBack = useCallback(() => {
     if (currentStep > 0) {
@@ -111,36 +194,62 @@ export function OnboardingModal({
           {step.description}
         </p>
 
-        {/* Navigation buttons */}
-        <div className="flex justify-between gap-3">
-          {!isFirst ? (
+        {/* Navigation */}
+        {step.options && step.options.length > 0 ? (
+          <div className="space-y-2" data-testid="step-options">
+            {step.options.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => handleOption(option)}
+                data-testid={`option-${option.id}`}
+                className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-left hover:border-[var(--primary)]/50 hover:bg-[var(--primary)]/5 transition-colors"
+              >
+                <span>
+                  <span className="block text-sm font-medium text-[var(--foreground)]">
+                    {option.label}
+                  </span>
+                  {option.description && (
+                    <span className="block text-xs text-[var(--text-muted)] mt-0.5">
+                      {option.description}
+                    </span>
+                  )}
+                </span>
+                <ArrowRight className="w-4 h-4 text-[var(--text-muted)] flex-shrink-0" />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex justify-between gap-3">
+            {!isFirst ? (
+              <button
+                type="button"
+                onClick={handleBack}
+                data-testid="back-button"
+                className="px-6 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-[var(--foreground)] text-sm hover:bg-[var(--border)] transition-colors"
+              >
+                Back
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onClose}
+                data-testid="skip-button"
+                className="px-6 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-[var(--foreground)] text-sm hover:bg-[var(--border)] transition-colors"
+              >
+                Skip
+              </button>
+            )}
             <button
               type="button"
-              onClick={handleBack}
-              data-testid="back-button"
-              className="px-6 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-[var(--foreground)] text-sm hover:bg-[var(--border)] transition-colors"
+              onClick={handleNext}
+              data-testid="next-button"
+              className="px-6 py-2.5 rounded-lg bg-[var(--primary)] text-white text-sm font-medium hover:bg-[var(--primary)]/90 transition-colors"
             >
-              Back
+              {isLast ? (step.nextLabel ?? 'Get Started') : 'Next'}
             </button>
-          ) : (
-            <button
-              type="button"
-              onClick={onClose}
-              data-testid="skip-button"
-              className="px-6 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-[var(--foreground)] text-sm hover:bg-[var(--border)] transition-colors"
-            >
-              Skip
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleNext}
-            data-testid="next-button"
-            className="px-6 py-2.5 rounded-lg bg-[var(--primary)] text-white text-sm font-medium hover:bg-[var(--primary)]/90 transition-colors"
-          >
-            {isLast ? 'Get Started' : 'Next'}
-          </button>
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
