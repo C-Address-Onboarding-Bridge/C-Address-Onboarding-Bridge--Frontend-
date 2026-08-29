@@ -58,6 +58,9 @@ export default function BridgePage() {
   const [txHash, setTxHash] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
   const [sourceBalances, setSourceBalances] = useState<AccountBalances | null>(null);
+  // null covers both "no tiers configured" and "not loaded yet" — FeeTierDisplay
+  // hides itself either way, so no separate loading state is needed. (#468)
+  const [feeTierStatus, setFeeTierStatus] = useState<FeeTierStatus | null>(null);
   // Fee estimate fetched from Horizon when the user moves to the review step.
   // Falls back to the static placeholder if the fetch fails. (#257)
   const FALLBACK_FEE = "~0.00001 XLM";
@@ -147,6 +150,24 @@ export default function BridgePage() {
     let cancelled = false;
     getAccountBalances(address, network).then((result) => {
       if (!cancelled) setSourceBalances(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [address, network, isNetworkSupported]);
+
+  // Fee tier preview follows the connected account the same way balances do.
+  // getFeeTierPreview never throws (it resolves null on any failure), so
+  // there's nothing to catch here — a failed fetch degrades to the same
+  // "hide the tier display" state as tiers genuinely not being configured. (#468)
+  useEffect(() => {
+    if (!address || !isNetworkSupported) {
+      setFeeTierStatus(null);
+      return;
+    }
+    let cancelled = false;
+    getFeeTierPreview(address, network).then((result) => {
+      if (!cancelled) setFeeTierStatus(result);
     });
     return () => {
       cancelled = true;
@@ -644,6 +665,8 @@ export default function BridgePage() {
                     <span className="text-sm">{estimatedFee}</span>
                   </div>
                 </div>
+
+                <FeeTierDisplay status={feeTierStatus} amount={Number(amount)} asset={asset} />
 
                 {txError && (
                   <div className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3">
