@@ -5,6 +5,7 @@ import {
   displayNameStorageKey,
   isRenderableDisplayName,
   loadDisplayName,
+  saveDisplayName,
   validateDisplayName,
 } from "@/lib/profile";
 
@@ -102,5 +103,41 @@ describe("loadDisplayName (#525)", () => {
   it("scopes names per address", () => {
     localStorage.setItem(displayNameStorageKey(ADDRESS_A), "Alice");
     expect(loadDisplayName("CDIFFERENTADDRESS")).toBeNull();
+  });
+});
+
+describe("saveDisplayName (#526)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("returns false when address is missing", () => {
+    expect(saveDisplayName(null, "Alice")).toBe(false);
+    expect(saveDisplayName(undefined, "Alice")).toBe(false);
+    expect(saveDisplayName("", "Alice")).toBe(false);
+  });
+
+  it("returns false and stores nothing when the name is invalid", () => {
+    expect(saveDisplayName(ADDRESS_A, "")).toBe(false);
+    expect(saveDisplayName(ADDRESS_A, "a".repeat(DISPLAY_NAME_MAX_LENGTH + 1))).toBe(false);
+    expect(localStorage.getItem(displayNameStorageKey(ADDRESS_A))).toBeNull();
+  });
+
+  it("persists the trimmed value and returns true on success", () => {
+    expect(saveDisplayName(ADDRESS_A, "  Alice  ")).toBe(true);
+    expect(localStorage.getItem(displayNameStorageKey(ADDRESS_A))).toBe("Alice");
+    expect(loadDisplayName(ADDRESS_A)).toBe("Alice");
+  });
+
+  it("returns false instead of throwing when the store write fails (quota error)", () => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => {
+      throw new Error("QuotaExceededError");
+    };
+    try {
+      expect(saveDisplayName(ADDRESS_A, "Alice")).toBe(false);
+    } finally {
+      Storage.prototype.setItem = original;
+    }
   });
 });
