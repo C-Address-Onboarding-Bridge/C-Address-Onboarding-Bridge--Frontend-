@@ -128,7 +128,7 @@ interface NavigatorLike {
 
 /** True when this environment can host a worker at all (SSR and older browsers can't). */
 export function isServiceWorkerSupported(nav: NavigatorLike | undefined = typeof navigator === "undefined" ? undefined : navigator): boolean {
-  throw new Error('Not implemented: isServiceWorkerSupported');
+  return typeof nav?.serviceWorker?.register === "function";
 }
 
 /**
