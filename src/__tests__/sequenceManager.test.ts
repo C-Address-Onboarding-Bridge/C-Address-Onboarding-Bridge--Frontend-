@@ -317,6 +317,25 @@ describe("sequenceManager", () => {
       expect(isBadSequenceError({})).toBe(false);
       expect(isBadSequenceError("some string")).toBe(false);
     });
+
+    it("returns false for a Horizon-shaped error missing the result_codes", () => {
+      expect(isBadSequenceError({ response: {} })).toBe(false);
+      expect(isBadSequenceError({ response: { data: {} } })).toBe(false);
+      expect(isBadSequenceError({ response: { data: { extras: {} } } })).toBe(false);
+    });
+
+    it("returns false for a Horizon-shaped error with an unrelated result code", () => {
+      const error = {
+        response: {
+          data: {
+            extras: {
+              result_codes: { transaction: "tx_insufficient_balance" },
+            },
+          },
+        },
+      };
+      expect(isBadSequenceError(error)).toBe(false);
+    });
   });
 
   describe("withSequenceRetry", () => {
