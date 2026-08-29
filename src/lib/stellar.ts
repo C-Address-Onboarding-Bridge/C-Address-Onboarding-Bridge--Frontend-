@@ -1040,3 +1040,309 @@ export async function simulateBridgeTransaction(
     };
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/* #471 — Real-time transaction status (SSE with polling fallback)             */
+/* -------------------------------------------------------------------------- */
+
+/** Default polling interval (ms) used when Server-Sent Events are not
+ * available (e.g. offline first-load, jsdom, older browsers). */
+const TRANSACTION_STATUS_POLL_MS = 5_000;
+
+export interface TransactionStatusSubscription {
+  /** True while the stream (EventSource) is connected. */
+  connected: boolean;
+  /** "sse" when the live stream is active, "polling" for the fallback. */
+  transport: "sse" | "polling";
+  /** Closes the stream and stops the polling timer. Safe to call twice. */
+  unsubscribe: () => void;
+}
+
+/**
+ * Base URL for the transaction status endpoint. Defaults to the app's own
+ * `/api/transactions` route; override via NEXT_PUBLIC_TRANSACTION_STATUS_URL
+ * when the API is hosted elsewhere (e.g. a separate serverless deployment).
+ */
+const TRANSACTION_STATUS_BASE_URL =
+  process.env.NEXT_PUBLIC_TRANSACTION_STATUS_URL ?? "/api/transactions";
+
+function getTransactionStatusUrl(hash: string, network: StellarNetwork): string {
+  return `${TRANSACTION_STATUS_BASE_URL}/${encodeURIComponent(hash)}/status?network=${encodeURIComponent(network)}`;
+}
+
+/**
+ * Subscribes to live status updates for a submitted transaction.
+ *
+ * Prefers an SSE stream (`/api/transactions/[hash]/status`). If EventSource is
+ * unavailable or the stream errors, it transparently falls back to polling the
+ * same endpoint every `pollIntervalMs`.
+ *
+ * While the tab is hidden the stream pauses (there is nobody to notify) and
+ * resumes on focus, so a background tab never keeps an EventSource
+ * reconnecting forever. The returned subscription is already active; call
+ * `unsubscribe()` to close it. The stream also closes itself (and stops
+ * polling) once the transaction reaches a terminal state ("confirmed" or
+ * "failed"). (#471)
+ */
+export function subscribeToTransactionStatus(params: {
+  hash: string;
+  network: StellarNetwork;
+  onStatus: (status: BridgeTransactionStatus) => void;
+  onError?: (error: Error) => void;
+  pollIntervalMs?: number;
+}): TransactionStatusSubscription {
+  const { hash, network, onStatus, onError } = params;
+  const pollIntervalMs = params.pollIntervalMs ?? TRANSACTION_STATUS_POLL_MS;
+  const url = getTransactionStatusUrl(hash, network);
+
+  let stopped = false;
+  let fellBack = false;
+  let source: EventSource | null = null;
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const stopPolling = () => {
+    if (pollTimer !== null) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  };
+
+  const stopSource = () => {
+    if (source) {
+      source.close();
+      source = null;
+    }
+  };
+
+  const cleanup = () => {
+    stopped = true;
+    stopSource();
+    stopPolling();
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    }
+  };
+
+  const emit = (status: BridgeTransactionStatus) => {
+    if (stopped) return;
+    onStatus(status);
+    // Terminal state: close the stream so the browser stops reconnecting.
+    if (status === "confirmed" || status === "failed") cleanup();
+  };
+
+  const poll = async () => {
+    try {
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error(`Transaction status request failed (${res.status})`);
+      const payload = (await res.json()) as { status?: BridgeTransactionStatus };
+      if (payload.status) emit(payload.status);
+    } catch (e) {
+      if (!stopped) onError?.(e instanceof Error ? e : new Error(String(e)));
+    } finally {
+      // Don't reschedule while the tab is hidden; focus restarts the timer.
+      const visible =
+        typeof document === "undefined" || document.visibilityState !== "hidden";
+      if (!stopped && visible) pollTimer = setTimeout(() => void poll(), pollIntervalMs);
+    }
+  };
+
+  const startPolling = () => {
+    stopPolling();
+    void poll();
+  };
+
+  // An EventSource failure is permanent — polling takes over from then on.
+  // Pausing for a hidden tab is *not* a failure, so it doesn't set `fellBack`
+  // and the stream can be re-created when the tab is focused again.
+  const fallbackToPolling = () => {
+    if (fellBack) return;
+    fellBack = true;
+    stopSource();
+    startPolling();
+  };
+
+  const startSource = () => {
+    if (stopped) return;
+    try {
+      source = new EventSource(url);
+      source.onmessage = (event: MessageEvent<string>) => {
+        try {
+          const payload = JSON.parse(event.data) as { status?: BridgeTransactionStatus };
+          if (payload.status) emit(payload.status);
+        } catch {
+          // Malformed frame — ignore; the next event may still be valid.
+        }
+      };
+      // EventSource fires onerror for transient network failures too. Falling
+      // back to polling on the *first* error keeps a broken stream from
+      // silently stalling while it retries forever.
+      source.onerror = () => fallbackToPolling();
+    } catch {
+      source = null;
+      fallbackToPolling();
+    }
+  };
+
+  // No one is watching a hidden tab, so pause the stream (and the fallback
+  // timer) instead of reconnecting in the background; focusing resumes it. The
+  // listener is only attached when `document` exists, so this only runs in the
+  // browser. (#471)
+  const handleVisibilityChange = () => {
+    if (stopped) return;
+    if (document.visibilityState === "hidden") {
+      stopSource();
+      stopPolling();
+    } else if (fellBack) {
+      startPolling();
+    } else {
+      startSource();
+    }
+  };
+
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+  }
+
+  if (typeof EventSource === "undefined") {
+    startPolling();
+    return { connected: false, transport: "polling", unsubscribe: cleanup };
+  }
+
+  startSource();
+  const connected = source !== null && !fellBack;
+  return {
+    connected,
+    transport: connected ? "sse" : "polling",
+    unsubscribe: cleanup,
+  };
+}
+
+
+
+/* -------------------------------------------------------------------------- */
+/* #474 — Transaction detail lookup                                            */
+/* -------------------------------------------------------------------------- */
+
+export interface TransactionDetails {
+  hash: string;
+  network: StellarNetwork;
+  status: BridgeTransactionStatus;
+  createdAt: string | null;
+  ledger: number | null;
+  /** Ledger close time (ISO) for the block that included the tx, if known. */
+  ledgerClosedAt: string | null;
+  /** Actual fee charged, in stroops. */
+  feeChargedStroops: number;
+  /** Max fee bid when built, in stroops. */
+  feeStroops: number;
+  fromAddress: string | null;
+  toAddress: string | null;
+  amount: string | null;
+  asset: string | null;
+  memo: string | null;
+  sequence: number | null;
+}
+
+/** Matches Horizon/Soroban transaction hashes (sha256 hex, 64 chars). */
+const TRANSACTION_HASH_PATTERN = /^[0-9a-fA-F]{64}$/;
+
+/**
+ * Loads full details for a single transaction from Horizon.
+ *
+ * - Returns `null` when the hash is malformed (nothing with that id can ever
+ *   exist).
+ * - Returns a `pending` record when the hash is well-formed but Horizon does
+ *   not know it yet — the transaction may still be in flight — so the detail
+ *   page can show a "still processing" state and keep polling instead of a
+ *   dead-end "not found". (#474)
+ */
+export async function getTransactionByHash(
+  hash: string,
+  network: StellarNetwork
+): Promise<TransactionDetails | null> {
+  if (!TRANSACTION_HASH_PATTERN.test(hash)) return null;
+
+  const server = new Horizon.Server(HORIZON_URL[network]);
+  let record: Horizon.ServerApi.TransactionRecord;
+  try {
+    record = await server.transactions().transaction(hash).call();
+  } catch {
+    // Not ingested yet → still in flight, not unknown.
+    return {
+      hash,
+      network,
+      status: "pending",
+      createdAt: null,
+      ledger: null,
+      ledgerClosedAt: null,
+      feeChargedStroops: 0,
+      feeStroops: 0,
+      fromAddress: null,
+      toAddress: null,
+      amount: null,
+      asset: null,
+      memo: null,
+      sequence: null,
+    };
+  }
+
+  let fromAddress: string | null = null;
+  let toAddress: string | null = null;
+  let amount: string | null = null;
+  let asset: string | null = null;
+
+  // Payment-like operations carry the two ends of the transfer. Best-effort:
+  // a failed fetch of the operations page still renders the record above.
+  try {
+    const operations = await server.operations().forTransaction(hash).call();
+    const payment = operations.records.find((op) => op.type === "payment");
+    if (payment && payment.type === "payment") {
+      fromAddress = payment.from ?? null;
+      toAddress = payment.to ?? null;
+      amount = payment.amount ?? null;
+      asset = payment.asset_type === "native" ? "XLM" : (payment.asset_code ?? null);
+    }
+  } catch {
+    // Ignore — the record itself is enough to render the detail page.
+  }
+
+  // fee_charged / max_fee are typed `number | string` (Horizon returns
+  // strings). Normalise either shape to a number for display.
+  const toStroops = (value: number | string | undefined): number => {
+    const n = typeof value === "string" ? Number(value) : value;
+    return typeof n === "number" && Number.isFinite(n) ? n : 0;
+  };
+  // Best-effort ledger close time for the status timeline. The SDK types
+  // LedgerCallBuilder#call() as CollectionPage even though a single-ledger call
+  // returns the record itself, so read `closed_at` through a minimal shape.
+  let ledgerClosedAt: string | null = null;
+  if (record.ledger_attr != null) {
+    try {
+      const ledgerRecord = (await server
+        .ledgers()
+        .ledger(record.ledger_attr)
+        .call()) as unknown as { closed_at?: string | null };
+      ledgerClosedAt = ledgerRecord.closed_at ?? null;
+    } catch {
+      // Best-effort — the record alone is enough to render the detail page.
+    }
+  }
+  const sequenceNumber = Number(record.source_account_sequence);
+
+  return {
+    hash: record.hash ?? hash,
+    network,
+    status: record.successful ? "confirmed" : "failed",
+    createdAt: record.created_at ?? null,
+    ledger: record.ledger_attr ?? null,
+    ledgerClosedAt,
+    feeChargedStroops: toStroops(record.fee_charged),
+    feeStroops: toStroops(record.max_fee),
+    fromAddress,
+    toAddress,
+    amount,
+    asset,
+    memo: record.memo ?? null,
+    sequence: Number.isFinite(sequenceNumber) ? sequenceNumber : null,
+  };
+}
