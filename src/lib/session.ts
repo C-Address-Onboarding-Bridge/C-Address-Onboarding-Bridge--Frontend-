@@ -52,12 +52,7 @@ function storage(): Storage | null {
 
 /** True when `session` is older than the TTL and should be discarded. */
 export function isSessionExpired(session: WalletSession, now: number = Date.now()): boolean {
-  // Treat NaN updatedAt as expired (corrupt record).
-  if (!Number.isFinite(session.updatedAt)) return true;
-  const age = now - session.updatedAt;
-  // Also treat future-stamped records (age < 0) as expired to guard against
-  // clock-skew attacks where a far-future timestamp makes a record permanent.
-  return age < 0 || age > SESSION_TTL_MS;
+  return now - session.updatedAt > SESSION_TTL_MS;
 }
 
 function parseSession(raw: string | null): WalletSession | null {
@@ -85,13 +80,15 @@ function parseSession(raw: string | null): WalletSession | null {
 export function loadSession(now: number = Date.now()): WalletSession {
   const store = storage();
   if (!store) return freshSession(now);
+
   const raw = store.getItem(SESSION_STORAGE_KEY);
   const session = parseSession(raw);
-  if (!session) return freshSession(now);
-  if (isSessionExpired(session, now)) {
-    try { store.removeItem(SESSION_STORAGE_KEY); } catch { /* ignore */ }
+
+  if (!session || isSessionExpired(session, now)) {
+    if (raw !== null) store.removeItem(SESSION_STORAGE_KEY);
     return freshSession(now);
   }
+
   return session;
 }
 
@@ -108,18 +105,13 @@ function writeSession(session: WalletSession): WalletSession {
 }
 
 /** Records an explicit connect, clearing any sticky disconnect. */
-export function markConnected(address: string | null, now?: number): WalletSession;
-/** Records an explicit connect, clearing any sticky disconnect, and stores the chosen wallet ID. (#459) */
-export function markConnected(address: string | null, now: number, walletId: string | null): WalletSession;
-export function markConnected(address: string | null, now: number = Date.now(), walletId?: string | null): WalletSession {
-  const current = loadSession(now);
-  return writeSession({
-    ...current,
-    address,
+export function markConnected(address: string | null, now: number = Date.now()): WalletSession {
+  const session: WalletSession = {
+    address: address ?? null,
     manuallyDisconnected: false,
     updatedAt: now,
-    selectedWalletId: typeof walletId !== "undefined" ? walletId : current.selectedWalletId,
-  });
+  };
+  return writeSession(session);
 }
 
 /**
@@ -127,15 +119,12 @@ export function markConnected(address: string | null, now: number = Date.now(), 
  * debugging session) can tell which account was dropped.
  */
 export function markDisconnected(address: string | null = null, now: number = Date.now()): WalletSession {
-  const current = loadSession(now);
-  return writeSession({
-    ...current,
-    address,
+  const session: WalletSession = {
+    address: address ?? null,
     manuallyDisconnected: true,
     updatedAt: now,
-    // Preserve the wallet ID so it can be restored on reconnect.
-    selectedWalletId: current.selectedWalletId,
-  });
+  };
+  return writeSession(session);
 }
 
 /** Removes the stored session entirely. */
@@ -145,6 +134,6 @@ export function clearSession(): void {
   try {
     store.removeItem(SESSION_STORAGE_KEY);
   } catch {
-    /* ignore */
+    // Ignore errors in privacy mode
   }
 }

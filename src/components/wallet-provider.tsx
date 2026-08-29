@@ -1,9 +1,10 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
-import { connectWallet, checkConnection, getWalletAddress, getWalletNetwork, initWalletKit, openWalletSelectionModal } from "@/lib/stellar";
+import { connectWallet, checkConnection, getWalletAddress, getWalletNetwork, switchWalletNetwork, type SwitchNetworkResult } from "@/lib/stellar";
 import { APP_NETWORK, isSupportedNetwork, type StellarNetwork, type WalletNetworkState } from "@/lib/types";
 import { loadSession, markConnected, markDisconnected } from "@/lib/session";
+import { handleError } from "@/lib/errors";
 import {
   cancelOperation as removeOperation,
   createOperationId,
@@ -35,6 +36,16 @@ interface WalletContextType {
   networkMismatch: boolean;
   /** Call to dismiss the network-mismatch banner for the current session. */
   dismissNetworkMismatch: () => void;
+  /** Epoch ms of the last network change, or null when none this session. (#480) */
+  networkChangedAt: number | null;
+  /** True when the network changed within the last few seconds. (#480) */
+  recentlyChangedNetwork: boolean;
+  /**
+   * Requests a network change through the wallet. Resolves with "switched"
+   * when the wallet confirmed, "cancelled" when it declined, or "manual"
+   * when the wallet has no programmatic switch API. (#480)
+   */
+  switchNetwork: (target: "PUBLIC" | "TESTNET") => Promise<SwitchNetworkResult>;
   connect: () => Promise<void>;
   disconnect: () => void;
   /** True when the browser reports an active network connection. (#475) */
@@ -69,6 +80,11 @@ const FAST_INTERVAL = 3000;
 const SLOW_INTERVAL = 10000;
 /** Time before backing off from fast to slow interval. */
 const BACKOFF_THRESHOLD_MS = 30000;
+/**
+ * Window during which a network change is treated as "recent" so mainnet
+ * actions are warned about. (#480)
+ */
+const RECENT_NETWORK_CHANGE_MS = 60_000;
 
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
@@ -97,6 +113,18 @@ export function WalletProvider({ children }: { children: ReactNode }) {
    *   - explicit dismissal via dismissNetworkMismatch()
    */
   const [networkMismatch, setNetworkMismatch] = useState(false);
+  /**
+   * When the wallet's network last changed, so the UI can warn before a
+   * mainnet action initiated shortly after a switch. null = no change yet.
+   * (#480)
+   */
+  const [networkChangedAt, setNetworkChangedAt] = useState<number | null>(null);
+  // Mirrors `networkChangedAt` as a boolean that clears itself after
+  // RECENT_NETWORK_CHANGE_MS, so the provider value never has to call
+  // Date.now() during render (react-hooks/purity). (#480)
+  const [networkChangedRecently, setNetworkChangedRecently] = useState(false);
+  const recentChangeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousNetworkStatusRef = useRef<WalletNetworkState>(APP_NETWORK);
   /**
    * The network that was active at connection time. Used to detect changes.
    * null means no connection has been established yet this session.
@@ -156,7 +184,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       if (isOnlineRef.current && operation.kind === "safe" && operation.run) {
         void Promise.resolve(operation.run())
           .then(() => setPending((prev) => removeOperation(prev, id)))
-          .catch(() => {
+          .catch((e) => {
+            // Report through the central telemetry path; the operation stays
+            // queued so it can be replayed when the connection is healthy. (#473)
+            handleError(e, "wallet:enqueueOperation");
             /* leave queued if the immediate attempt fails */
           });
       }
@@ -174,8 +205,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const confirmFunding = useCallback(async () => {
     const funding = fundingOperations(pendingRef.current);
-    for (const op of funding) {
-      if (op.run) await Promise.resolve(op.run());
+    try {
+      for (const op of funding) {
+        if (op.run) await Promise.resolve(op.run());
+      }
+    } catch (e) {
+      // Report the failure but keep the original semantics: the submission
+      // aborts and the queue is left for the user to retry. (#473)
+      handleError(e, "wallet:confirmFunding");
+      throw e;
     }
     if (funding.length > 0) {
       setPending(removeOperations(pendingRef.current, funding.map((op) => op.id)));
@@ -242,6 +280,22 @@ export function WalletProvider({ children }: { children: ReactNode }) {
    * through `networkStatus` so callers block rather than transact on a guess.
    */
   const applyNetwork = useCallback((status: WalletNetworkState, name: string | null) => {
+    // Record the moment the active network changes so callers can warn on
+    // mainnet actions initiated right after a switch (#480). Uses a ref
+    // comparison rather than an updater so the timestamp write stays out of
+    // the state updater.
+    if (previousNetworkStatusRef.current !== status) {
+      previousNetworkStatusRef.current = status;
+      setNetworkChangedAt(Date.now());
+      // Flag the change as recent for the mainnet-action warning window, and
+      // clear it once the window elapses.
+      setNetworkChangedRecently(true);
+      if (recentChangeTimerRef.current) clearTimeout(recentChangeTimerRef.current);
+      recentChangeTimerRef.current = setTimeout(
+        () => setNetworkChangedRecently(false),
+        RECENT_NETWORK_CHANGE_MS
+      );
+    }
     setNetworkStatus(status);
     setWalletNetworkName(name);
     if (isSupportedNetwork(status)) {
@@ -251,30 +305,40 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateConnection = useCallback(async () => {
-    // Respect an explicit disconnect until the user reconnects, including one
-    // made before the last reload. (#288, #343)
-    if (isManuallyDisconnected()) return;
+    try {
+      // Respect an explicit disconnect until the user reconnects, including one
+      // made before the last reload. (#288, #343)
+      if (isManuallyDisconnected()) return;
 
-    const isConnected = await checkConnection();
-    if (isConnected) {
-      const pk = await getWalletAddress();
-      const { status, name } = await getWalletNetwork();
-      setAddress(pk);
-      applyNetwork(status, name);
+      const isConnected = await checkConnection();
+      if (isConnected) {
+        const pk = await getWalletAddress();
+        const { status, name } = await getWalletNetwork();
+        setAddress(pk);
+        applyNetwork(status, name);
 
-      // Mismatch tracking only makes sense between two supported networks; an
-      // unsupported/unknown network gets its own, louder notice instead.
-      if (!isSupportedNetwork(status)) return;
+        // Mismatch tracking only makes sense between two supported networks; an
+        // unsupported/unknown network gets its own, louder notice instead.
+        if (!isSupportedNetwork(status)) return;
 
-      if (initialNetworkRef.current === null) {
-        // First time we see the wallet connected — record the baseline network.
-        initialNetworkRef.current = status;
-      } else if (!dismissedRef.current && status !== initialNetworkRef.current) {
-        // Network changed after initial connection → surface warning.
-        setNetworkMismatch(true);
-        // Update the baseline so subsequent same-network polls don't re-fire,
-        // but a *further* change will fire again.
-        initialNetworkRef.current = status;
+        if (initialNetworkRef.current === null) {
+          // First time we see the wallet connected — record the baseline network.
+          initialNetworkRef.current = status;
+        } else if (!dismissedRef.current && status !== initialNetworkRef.current) {
+          // Network changed after initial connection → surface warning.
+          setNetworkMismatch(true);
+          // Update the baseline so subsequent same-network polls don't re-fire,
+          // but a *further* change will fire again.
+          initialNetworkRef.current = status;
+        }
+      } else {
+        setAddress(null);
+        // Reset mismatch tracking when wallet disconnects.
+        initialNetworkRef.current = null;
+        dismissedRef.current = false;
+        setNetworkMismatch(false);
+        setNetworkStatus(APP_NETWORK);
+        setWalletNetworkName(null);
       }
     } else {
       setAddress(null);
@@ -284,8 +348,23 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setNetworkMismatch(false);
       setNetworkStatus(APP_NETWORK);
       setWalletNetworkName(null);
+      previousNetworkStatusRef.current = APP_NETWORK;
+      setNetworkChangedAt(null);
+      setNetworkChangedRecently(false);
+      if (recentChangeTimerRef.current) clearTimeout(recentChangeTimerRef.current);
     }
   }, [applyNetwork, isManuallyDisconnected]);
+
+  const switchNetwork = useCallback(
+    async (target: "PUBLIC" | "TESTNET"): Promise<SwitchNetworkResult> => {
+      const result = await switchWalletNetwork(target);
+      // Re-read the wallet so address/network state reflects the outcome;
+      // applyNetwork records the change (if any) for the mainnet warning.
+      await updateConnection();
+      return result;
+    },
+    [updateConnection]
+  );
 
   const connect = useCallback(async () => {
     // An explicit connect clears the sticky disconnect so polling resumes. (#288)
@@ -314,6 +393,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         // instead of letting a cancelled attempt count as a reconnect.
         manuallyDisconnectedRef.current = loadSession().manuallyDisconnected;
       }
+    } catch (e) {
+      // Report the failure, then rethrow so the caller (and the boundary that
+      // wraps this tree) can also react to it. (#473)
+      handleError(e, "wallet:connect");
+      throw e;
     } finally {
       setIsConnecting(false);
     }
@@ -330,6 +414,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setNetworkMismatch(false);
     setNetworkStatus(APP_NETWORK);
     setWalletNetworkName(null);
+    previousNetworkStatusRef.current = APP_NETWORK;
+    setNetworkChangedAt(null);
+    setNetworkChangedRecently(false);
+    if (recentChangeTimerRef.current) clearTimeout(recentChangeTimerRef.current);
   }, [address]);
 
   // Polling with backoff + visibility awareness
@@ -410,6 +498,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         isConnecting,
         networkMismatch,
         dismissNetworkMismatch,
+        networkChangedAt,
+        recentlyChangedNetwork: networkChangedRecently,
+        switchNetwork,
         connect,
         disconnect,
         isOnline,

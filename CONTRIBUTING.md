@@ -50,8 +50,61 @@ CI runs four checks on every push and pull request. Run each locally before push
 | Typecheck | `npm run typecheck` | Runs TypeScript type checking with `tsc --noEmit` |
 | Test | `npm run test` | Runs the Vitest test suite |
 | Build | `npm run build` | Produces a production build (also enforces bundle budget) |
+| Visual Regression | `npm run visual-regression:capture` | Captures visual baselines and compares them with Percy |
 
-All four must pass before opening a pull request.
+All five must pass before opening a pull request.
+
+## Storybook & Visual Regression Testing
+
+This project uses [Storybook](https://storybook.js.org/) for component development and [Percy](https://percy.io/) for visual regression testing. Visual regression tests capture Storybook stories across multiple viewports and themes (light/dark) to catch unintended visual changes.
+
+### Running Storybook Locally
+
+```bash
+npm run storybook
+```
+
+This starts the Storybook dev server at `http://localhost:6006`. Add or update component stories as you develop features.
+
+### Story Guidelines
+
+- Place story files in `src/stories/` or co-locate them with their components (e.g., `src/components/Button.stories.tsx`)
+- Story files must be named `*.stories.tsx`
+- Cover the primary states and variants of each component
+- Use descriptive story names (e.g., "Default", "With Error", "Dark Theme")
+
+### Approving Visual Changes
+
+When your PR introduces intentional visual changes:
+
+1. **CI captures baselines** — Visual regression tests run automatically on your PR
+2. **Review on Percy** — Visual diffs appear at https://percy.io/builds (shared in PR comments)
+3. **Approve changes** — Maintainers review and approve intentional changes on Percy
+4. **Merge PR** — Once approved, merge to record the new baseline
+
+### Failing Builds on Unreviewed Visual Diffs
+
+The build fails if there are visual differences that haven't been reviewed and approved. This catches:
+
+- Accidental layout shifts due to CSS changes
+- Theme inconsistencies
+- Responsive design regressions
+- Browser-specific rendering issues
+
+To resolve:
+
+- **Intentional change:** Have it approved on Percy
+- **Unintended change:** Fix the CSS or component, then the test will pass
+
+### Optimizing Capture for Large PRs
+
+If your PR touches many files, you can limit visual regression capture to only the affected components:
+
+```bash
+AFFECTED_FILES="src/components/Button.tsx,src/components/Modal.tsx" npm run visual-regression:capture
+```
+
+This speeds up local testing during development.
 
 ## Branch Naming
 

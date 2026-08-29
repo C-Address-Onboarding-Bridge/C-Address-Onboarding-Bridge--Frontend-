@@ -48,7 +48,21 @@ export async function getNextSequenceNumber(
   server: Horizon.Server | rpc.Server,
   network: StellarNetwork
 ): Promise<bigint> {
-  throw new Error('Not implemented: getNextSequenceNumber');
+  const key = cacheKey(accountId, network);
+  const entry = cache.get(key);
+  const now = Date.now();
+
+  if (entry && now - entry.fetchedAt < CACHE_TTL_MS) {
+    // Increment cached sequence for this transaction
+    entry.sequence += 1n;
+    return entry.sequence;
+  }
+
+  // Cache miss or expired — fetch from network
+  const currentSequence = await fetchSequenceFromNetwork(accountId, server);
+  const nextSequence = currentSequence + 1n;
+  cache.set(key, { sequence: nextSequence, fetchedAt: now });
+  return nextSequence;
 }
 
 /**
@@ -82,7 +96,7 @@ export function invalidateSequenceCache(
   accountId: string,
   network: StellarNetwork
 ): void {
-  throw new Error('Not implemented: invalidateSequenceCache');
+  cache.delete(cacheKey(accountId, network));
 }
 
 /**
@@ -90,7 +104,7 @@ export function invalidateSequenceCache(
  * Use sparingly — prefer invalidateSequenceCache for targeted invalidation.
  */
 export function clearAllSequenceCache(): void {
-  throw new Error('Not implemented: clearAllSequenceCache');
+  cache.clear();
 }
 
 /**
@@ -98,7 +112,23 @@ export function clearAllSequenceCache(): void {
  * Handles both Horizon and SorobanRpc error shapes.
  */
 export function isBadSequenceError(error: unknown): boolean {
-  throw new Error('Not implemented: isBadSequenceError');
+  if (!error || typeof error !== "object") return false;
+
+  const e = error as Record<string, unknown>;
+
+  // Horizon error shape
+  if (typeof e.response === "object" && e.response !== null) {
+    const resp = e.response as Record<string, unknown>;
+    const data = resp.data as Record<string, unknown> | undefined;
+    const extras = data?.extras as Record<string, unknown> | undefined;
+    const resultCodes = extras?.result_codes as Record<string, unknown> | undefined;
+
+    if (resultCodes?.transaction === "tx_bad_seq") return true;
+  }
+
+  // String error message fallback
+  const msg = String(e.message ?? "");
+  return msg.includes("bad_seq") || msg.includes("tx_bad_seq");
 }
 
 /**
@@ -119,5 +149,21 @@ export async function withSequenceRetry<T>(
   network: StellarNetwork,
   maxRetries = 1
 ): Promise<T> {
-  throw new Error('Not implemented: withSequenceRetry');
+  let attempts = 0;
+
+  while (true) {
+    try {
+      const getSequence = () => getNextSequenceNumber(accountId, server, network);
+      return await fn(getSequence);
+    } catch (error) {
+      if (isBadSequenceError(error) && attempts < maxRetries) {
+        attempts++;
+        invalidateSequenceCache(accountId, network);
+        // Small delay before retry to avoid thundering herd
+        await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS * attempts));
+        continue;
+      }
+      throw error;
+    }
+  }
 }

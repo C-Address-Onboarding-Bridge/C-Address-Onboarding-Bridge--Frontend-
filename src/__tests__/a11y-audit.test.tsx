@@ -32,6 +32,18 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/lib/stellar", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/stellar")>();
+  return {
+    ...actual,
+    getExplorerUrl: (_network: unknown, _type: unknown, id: string) => `https://stellar.expert/explorer/testnet/tx/${id}`,
+  };
+});
+
+vi.mock("@/hooks/useCopyToClipboard", () => ({
+  useCopyToClipboard: () => ({ status: "idle", copy: vi.fn(), reset: vi.fn() }),
+}));
+
 function fixture(html: string): HTMLElement {
   const host = document.createElement("div");
   host.innerHTML = html;
