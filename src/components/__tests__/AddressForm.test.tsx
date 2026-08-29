@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AddressForm, validateStellarAddress } from '../AddressForm';
+import { addressBookStorageKey, saveRecipient } from '@/lib/addressBook';
 
 describe('AddressForm (#352)', () => {
   it('renders with label and input', () => {
@@ -126,6 +127,66 @@ describe('AddressForm (#352)', () => {
     fireEvent.change(input, { target: { value: validAddr } });
     fireEvent.blur(input);
     expect(screen.getByTestId('address-confirmation')).toHaveTextContent('GAAAAAAA');
+  });
+});
+
+describe('AddressForm — recipient autocomplete (#466)', () => {
+  const SAVED_ADDRESS = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('renders no datalist when the address book is empty', async () => {
+    render(<AddressForm onSubmit={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.queryByTestId('address-recipients-list')).not.toBeInTheDocument();
+    });
+  });
+
+  it('lists saved recipients as datalist options once loaded', async () => {
+    saveRecipient('Alice', SAVED_ADDRESS);
+
+    render(<AddressForm onSubmit={vi.fn()} />);
+
+    const list = await screen.findByTestId('address-recipients-list');
+    const option = list.querySelector('option');
+    expect(option).toHaveAttribute('value', SAVED_ADDRESS);
+    expect(option).toHaveTextContent('Alice');
+    expect(screen.getByTestId('address-input')).toHaveAttribute('list');
+  });
+
+  it('shows the saved label once the field holds a saved recipient\'s address', async () => {
+    saveRecipient('Alice', SAVED_ADDRESS);
+    render(<AddressForm onSubmit={vi.fn()} />);
+    await screen.findByTestId('address-recipients-list');
+
+    const input = screen.getByTestId('address-input');
+    fireEvent.change(input, { target: { value: SAVED_ADDRESS } });
+
+    expect(await screen.findByTestId('address-recipient-label')).toHaveTextContent('Alice');
+  });
+
+  it('does not show a saved label for an address that was not saved', async () => {
+    saveRecipient('Alice', SAVED_ADDRESS);
+    render(<AddressForm onSubmit={vi.fn()} />);
+    await screen.findByTestId('address-recipients-list');
+
+    fireEvent.change(screen.getByTestId('address-input'), { target: { value: 'GSOMEOTHERADDRESS' } });
+
+    expect(screen.queryByTestId('address-recipient-label')).not.toBeInTheDocument();
+  });
+
+  it('ignores a corrupted address book entry instead of crashing', async () => {
+    window.localStorage.setItem(
+      addressBookStorageKey(),
+      JSON.stringify([{ id: '1', label: 'Bad', address: 'not-an-address', createdAt: 1 }])
+    );
+
+    expect(() => render(<AddressForm onSubmit={vi.fn()} />)).not.toThrow();
+    await waitFor(() => {
+      expect(screen.queryByTestId('address-recipients-list')).not.toBeInTheDocument();
+    });
   });
 });
 

@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useId } from 'react';
 import { StrKey } from '@stellar/stellar-sdk';
+import { loadAddressBook, type SavedRecipient } from '@/lib/addressBook';
 
 export interface AddressFormProps {
   onSubmit: (address: string) => void;
@@ -12,7 +13,7 @@ export interface AddressFormProps {
 }
 
 /** Shortens an address for display: GABCDEFG…WXYZ. */
-function truncateAddress(address: string): string {
+export function truncateAddress(address: string): string {
   return address.length > 12
     ? `${address.slice(0, 8)}…${address.slice(-4)}`
     : address;
@@ -93,6 +94,18 @@ export function AddressForm({
   const [address, setAddress] = useState(initialValue);
   const [error, setError] = useState<string | undefined>();
   const [touched, setTouched] = useState(false);
+  const [recipients, setRecipients] = useState<SavedRecipient[]>([]);
+  const datalistId = useId();
+
+  // Read from storage after mount only (#466): touching localStorage during
+  // render would produce different server and client output and break
+  // hydration — same guard as AvatarUpload/ProfilePage use for their stores.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRecipients(loadAddressBook());
+  }, []);
+
+  const matchedRecipient = recipients.find((r) => r.address === address.trim());
 
   // Validation runs on blur, not on every keystroke (#488) — showing an error
   // mid-paste or mid-type would flag characters the user hasn't finished
@@ -148,6 +161,7 @@ export function AddressForm({
           data-testid="address-input"
           aria-invalid={!!error}
           aria-describedby={error ? 'address-error' : undefined}
+          list={recipients.length > 0 ? datalistId : undefined}
           style={{
             flex: 1,
             padding: '10px 12px',
@@ -158,6 +172,15 @@ export function AddressForm({
             outline: 'none',
           }}
         />
+        {recipients.length > 0 && (
+          <datalist id={datalistId} data-testid="address-recipients-list">
+            {recipients.map((recipient) => (
+              <option key={recipient.id} value={recipient.address}>
+                {recipient.label}
+              </option>
+            ))}
+          </datalist>
+        )}
         <button
           type="submit"
           disabled={disabled || !!error || !address}
@@ -192,6 +215,14 @@ export function AddressForm({
           style={{ color: '#16a34a', fontSize: '13px', marginTop: '6px' }}
         >
           Looks good: {truncateAddress(address)}
+        </p>
+      )}
+      {matchedRecipient && (
+        <p
+          data-testid="address-recipient-label"
+          style={{ color: '#6b7280', fontSize: '13px', marginTop: '4px' }}
+        >
+          Saved as &quot;{matchedRecipient.label}&quot;
         </p>
       )}
     </form>

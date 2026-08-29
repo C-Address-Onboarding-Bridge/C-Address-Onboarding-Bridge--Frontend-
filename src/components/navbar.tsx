@@ -12,18 +12,19 @@
 import React, { memo, useState, useCallback, useMemo, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Wallet, ArrowLeftRight, CreditCard, Building2, LayoutDashboard, UserRound, Menu, X, AlertTriangle, LogOut, ChevronDown, Loader2 } from "lucide-react";
+import { Wallet, ArrowLeftRight, CreditCard, Building2, LayoutDashboard, UserRound, BookUser, Menu, X, AlertTriangle, LogOut } from "lucide-react";
 import { useWallet } from "./wallet-provider";
 import { PrefetchLink } from "./prefetch-link";
 import NotificationCentre from "./notification-centre";
 import { formatNetworkLabel } from "@/lib/stellar";
-import { APP_NETWORK, type StellarNetwork, type WalletNetworkState } from "@/lib/types";
+import { useHelp } from "@/contexts/HelpContext";
 
 const navLinks = [
   { href: "/bridge", label: "Bridge", icon: ArrowLeftRight },
   { href: "/onramp", label: "Onramp", icon: CreditCard },
   { href: "/cex", label: "CEX", icon: Building2 },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/address-book", label: "Address Book", icon: BookUser },
   { href: "/profile", label: "Profile", icon: UserRound },
 ];
 
@@ -71,6 +72,8 @@ const Navbar = () => {
   const toggleButtonRef = useRef<HTMLButtonElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const wasOpenRef = useRef(false);
+
+  const { openHelp } = useHelp();
 
   const toggleMobile = useCallback(() => setMobileOpen((v) => !v), []);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
@@ -222,71 +225,14 @@ const Navbar = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Persistent network indicator + switcher (#480). */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setNetworkMenuOpen((v) => !v)}
-                aria-expanded={networkMenuOpen}
-                aria-haspopup="menu"
-                aria-label={`Network: ${switcherBadge.label}. Change network`}
-                title={`Currently on ${switcherBadge.label}. Click to switch networks.`}
-                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[0.6rem] font-semibold uppercase tracking-wide transition-colors hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] ${switcherBadge.className}`}
-              >
-                {switcherBadge.label}
-                <ChevronDown
-                  aria-hidden="true"
-                  className={`w-3.5 h-3.5 transition-transform ${networkMenuOpen ? "rotate-180" : ""}`}
-                />
-              </button>
-
-              {networkMenuOpen && (
-                <div
-                  role="menu"
-                  aria-label="Switch network"
-                  className="absolute right-0 mt-2 w-56 rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-xl z-50 overflow-hidden"
-                >
-                  <div className="px-4 py-2.5 border-b border-[var(--border)]">
-                    <p className="text-xs font-medium">Switch network</p>
-                    <p className="text-[0.6875rem] text-[var(--text-muted)]">
-                      Requests the change through Freighter.
-                    </p>
-                  </div>
-                  {(["TESTNET", "PUBLIC"] as StellarNetwork[]).map((target) => {
-                    const isCurrent = isNetworkSupported && networkStatus === target;
-                    return (
-                      <button
-                        key={target}
-                        type="button"
-                        role="menuitem"
-                        onClick={() => handleSwitchNetwork(target)}
-                        disabled={switchingTo !== null || isCurrent}
-                        className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-[var(--surface-2)] transition-colors disabled:opacity-40"
-                      >
-                        <span>{target === "PUBLIC" ? "Mainnet" : "Testnet"}</span>
-                        {switchingTo === target ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin motion-reduce:animate-none text-[var(--text-muted)]" />
-                        ) : isCurrent ? (
-                          <span className="text-xs text-[var(--success)]">Current</span>
-                        ) : null}
-                      </button>
-                    );
-                  })}
-                  {switchHint && (
-                    <p
-                      role="status"
-                      className="px-4 py-2.5 border-t border-[var(--border)] text-xs text-[var(--text-muted)]"
-                    >
-                      {switchHint}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Notification centre for transaction and account events (#477). */}
-            <NotificationCentre />
-
+            <button
+              onClick={openHelp}
+              aria-label="Open help centre"
+              title="Help"
+              className="hidden sm:flex p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
             {isConnected ? (
               <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
                 <div className="w-2 h-2 rounded-full bg-[var(--success)]" />

@@ -10,6 +10,7 @@ import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
 import { OfflineBanner } from "@/components/offline-banner";
+import { HelpProvider } from "@/contexts/HelpContext";
 
 const geist = Geist({
   subsets: ["latin"],
@@ -106,7 +107,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="antialiased">
         <FeatureFlagProvider>
           <WalletProvider>
-            <StatusBanner />
+            <HelpProvider>
+              <StatusBanner />
             <div className="min-h-screen flex flex-col">
               <a
                 href="#main-content"
@@ -121,8 +123,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Footer />
             </div>
             <FeatureFlagPanel />
-            <ServiceWorkerRegistrar />
-            <OfflineBanner />
+              <ServiceWorkerRegistrar />
+              <OfflineBanner />
+            </HelpProvider>
           </WalletProvider>
         </FeatureFlagProvider>
       </body>

@@ -777,6 +777,61 @@ export async function getRecommendedFee(network: StellarNetwork): Promise<string
 const STROOPS_PER_XLM = 10_000_000;
 
 /**
+ * Stellar testnet friendbot faucet endpoint.
+ */
+const FAUCET_URL = "https://friendbot.stellar.org";
+
+export interface FaucetRequest {
+  success: boolean;
+  message?: string;
+}
+
+/**
+ * Requests test XLM from the Stellar friendbot faucet for the given address.
+ *
+ * - Rate-limited responses (HTTP 429) return a clear message instead of
+ *   silently failing.
+ * - The control is only intended for testnet; callers must gate on
+ *   `network === "TESTNET"` before invoking.
+ */
+export async function requestTestXLM(address: string): Promise<FaucetRequest> {
+  if (!StrKey.isValidEd25519PublicKey(address)) {
+    return { success: false, message: "Invalid Stellar address." };
+  }
+
+  try {
+    const response = await fetch(`${FAUCET_URL}?addr=${encodeURIComponent(address)}`);
+
+    if (response.status === 429) {
+      return {
+        success: false,
+        message: "Faucet is rate-limited. Please wait a few minutes before trying again.",
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        success: false,
+        message: `Faucet request failed (${response.status}). Please try again.`,
+      };
+    }
+
+    const data = (await response.json()) as { hash?: string };
+    return {
+      success: true,
+      message: data.hash
+        ? `Test XLM sent! Transaction: ${data.hash.slice(0, 8)}...${data.hash.slice(-8)}`
+        : "Test XLM request submitted.",
+    };
+  } catch {
+    return {
+      success: false,
+      message: "Network error while contacting faucet. Please check your connection and try again.",
+    };
+  }
+}
+
+/**
  * Fetch the current estimated network fee and return it as a human-readable
  * XLM string suitable for display on the review screen (e.g. "~0.0002 XLM").
  *

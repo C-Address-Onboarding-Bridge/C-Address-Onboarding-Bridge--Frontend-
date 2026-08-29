@@ -1,0 +1,37 @@
+version: 2
+
+# Static site serving for Storybook builds
+static:
+  cleanUrls: true
+
+# Snapshot discovery configuration
+discovery:
+  allowed-hosts:
+    - localhost
+    - "*.percy.io"
+  network-idle-timeout: 750
+
+# Comparison configuration
+comparison:
+  # Only flag changes larger than 1% of the viewport
+  threshold: 0.01
+
+# Build configuration
+build:
+  # Fail the build if there are unreviewed changes
+  fail-on-changes: true
+
+# Notification settings
+notifications:
+  pull-requests:
+    enabled: true
+  github-checks:
+    enabled: true
+
+# Project-specific settings
+project:
+  # Number of days to keep snapshots
+  retention: 30
+  # Auto-approve trivial changes (comments, whitespace)
+  # Disable for strict visual regression
+  auto-approve-threshold: 0

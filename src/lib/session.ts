@@ -46,9 +46,6 @@ function storage(): Storage | null {
 
 /** True when `session` is older than the TTL and should be discarded. */
 export function isSessionExpired(session: WalletSession, now: number = Date.now()): boolean {
-  // A record stamped in the future (clock change, edited storage) is not
-  // trustworthy either, so treat it as expired.
-  if (!Number.isFinite(session.updatedAt) || session.updatedAt > now) return true;
   return now - session.updatedAt > SESSION_TTL_MS;
 }
 
@@ -77,20 +74,14 @@ export function loadSession(now: number = Date.now()): WalletSession {
   const store = storage();
   if (!store) return freshSession(now);
 
-  let raw: string | null = null;
-  try {
-    raw = store.getItem(SESSION_STORAGE_KEY);
-  } catch {
-    return freshSession(now);
-  }
-
+  const raw = store.getItem(SESSION_STORAGE_KEY);
   const session = parseSession(raw);
-  if (!session) return freshSession(now);
 
-  if (isSessionExpired(session, now)) {
-    clearSession();
+  if (!session || isSessionExpired(session, now)) {
+    if (raw !== null) store.removeItem(SESSION_STORAGE_KEY);
     return freshSession(now);
   }
+
   return session;
 }
 
@@ -108,7 +99,12 @@ function writeSession(session: WalletSession): WalletSession {
 
 /** Records an explicit connect, clearing any sticky disconnect. */
 export function markConnected(address: string | null, now: number = Date.now()): WalletSession {
-  return writeSession({ address, manuallyDisconnected: false, updatedAt: now });
+  const session: WalletSession = {
+    address: address ?? null,
+    manuallyDisconnected: false,
+    updatedAt: now,
+  };
+  return writeSession(session);
 }
 
 /**
@@ -116,7 +112,12 @@ export function markConnected(address: string | null, now: number = Date.now()):
  * debugging session) can tell which account was dropped.
  */
 export function markDisconnected(address: string | null = null, now: number = Date.now()): WalletSession {
-  return writeSession({ address, manuallyDisconnected: true, updatedAt: now });
+  const session: WalletSession = {
+    address: address ?? null,
+    manuallyDisconnected: true,
+    updatedAt: now,
+  };
+  return writeSession(session);
 }
 
 /** Removes the stored session entirely. */
@@ -126,6 +127,6 @@ export function clearSession(): void {
   try {
     store.removeItem(SESSION_STORAGE_KEY);
   } catch {
-    // Nothing useful to do; the record lapses on its own via the TTL.
+    // Ignore errors in privacy mode
   }
 }
