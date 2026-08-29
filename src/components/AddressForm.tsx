@@ -149,7 +149,13 @@ export function AddressForm({
       >
         {label}
       </label>
-      <div style={{ display: 'flex', gap: '8px' }}>
+      {/*
+        Mobile-optimised layout (#487): stacked full-width input/button below
+        the `sm` breakpoint so the tap target for each is comfortably wide,
+        and side-by-side above it. `minHeight: 44px` on both controls meets
+        the ~44px touch-target guideline on every viewport.
+      */}
+      <div className="flex flex-col sm:flex-row" style={{ gap: '8px' }}>
         <input
           id="stellar-address"
           type="text"
@@ -163,13 +169,14 @@ export function AddressForm({
           aria-describedby={error ? 'address-error' : undefined}
           list={recipients.length > 0 ? datalistId : undefined}
           style={{
-            flex: 1,
-            padding: '10px 12px',
+            padding: '12px',
+            minHeight: '44px',
             borderRadius: '8px',
             border: `1px solid ${error ? '#ef4444' : '#d1d5db'}`,
             fontSize: '14px',
             fontFamily: 'monospace',
             outline: 'none',
+            boxSizing: 'border-box',
           }}
         />
         {recipients.length > 0 && (
@@ -185,8 +192,10 @@ export function AddressForm({
           type="submit"
           disabled={disabled || !!error || !address}
           data-testid="submit-button"
+          className="w-full sm:w-auto"
           style={{
-            padding: '10px 20px',
+            padding: '12px 20px',
+            minHeight: '44px',
             borderRadius: '8px',
             border: 'none',
             backgroundColor: disabled || !!error || !address ? '#9ca3af' : '#3b82f6',

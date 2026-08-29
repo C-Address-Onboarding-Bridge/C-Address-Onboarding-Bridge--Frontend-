@@ -69,7 +69,20 @@ export function createAppError(
   message?: string,
   details?: unknown,
 ): AppError {
-  throw new Error('Not implemented: createAppError');
+  const retryable = [
+    ErrorCode.WALLET_CONNECTION_FAILED,
+    ErrorCode.TRANSACTION_FAILED,
+    ErrorCode.API_ERROR,
+    ErrorCode.TIMEOUT,
+  ].includes(code);
+
+  return new AppError({
+    code,
+    message: message || USER_MESSAGES[code],
+    userMessage: USER_MESSAGES[code],
+    details,
+    retryable,
+  });
 }
 
 /**
@@ -77,7 +90,34 @@ export function createAppError(
  * Maps common Stellar/Freighter errors to typed codes.
  */
 export function parseError(error: unknown): AppError {
-  throw new Error('Not implemented: parseError');
+  if (error instanceof AppError) return error;
+
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+
+  if (lower.includes('freighter not detected') || lower.includes('not installed')) {
+    return createAppError(ErrorCode.WALLET_NOT_FOUND, message, error);
+  }
+  if (lower.includes('connect') || lower.includes('wallet')) {
+    return createAppError(ErrorCode.WALLET_CONNECTION_FAILED, message, error);
+  }
+  if (lower.includes('network') || lower.includes('passphrase')) {
+    return createAppError(ErrorCode.NETWORK_MISMATCH, message, error);
+  }
+  if (lower.includes('rejected') || lower.includes('denied') || lower.includes('cancelled')) {
+    return createAppError(ErrorCode.TRANSACTION_REJECTED, message, error);
+  }
+  if (lower.includes('insufficient') || lower.includes('balance')) {
+    return createAppError(ErrorCode.INSUFFICIENT_BALANCE, message, error);
+  }
+  if (lower.includes('timeout') || lower.includes('timed out')) {
+    return createAppError(ErrorCode.TIMEOUT, message, error);
+  }
+  if (lower.includes('invalid') && lower.includes('address')) {
+    return createAppError(ErrorCode.INVALID_ADDRESS, message, error);
+  }
+
+  return createAppError(ErrorCode.UNKNOWN, message, error);
 }
 
 /**
@@ -85,7 +125,9 @@ export function parseError(error: unknown): AppError {
  * Never throws — safe to use in catch blocks.
  */
 export function handleError(error: unknown, context?: string): AppError {
-  const parsed = parseError(error);
-  console.error(context ? `[${context}] ${parsed.message}` : parsed.message, parsed.details ?? error);
-  return parsed;
+  const appError = parseError(error);
+  console.error(
+    `[${appError.code}]${context ? ` ${context}:` : ''} ${appError.message}`,
+  );
+  return appError;
 }

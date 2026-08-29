@@ -3,6 +3,7 @@ import { Geist, JetBrains_Mono } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import { WalletProvider } from "@/components/wallet-provider";
+import { ErrorBoundary, WalletErrorBoundary } from "@/components/error-boundary";
 import { FeatureFlagProvider } from "@/contexts/FeatureFlagContext";
 import { FeatureFlagPanel } from "@/components/FeatureFlagPanel";
 import { StatusBanner } from "@/components/status-banner";

@@ -4,6 +4,7 @@ import type { BridgeTransactionData } from "@/lib/types";
 import { getExplorerUrl } from "@/lib/stellar";
 import type { StellarNetwork } from "@/lib/types";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
+import LiveRegion from "@/components/live-region";
 
 const typeConfig: Record<string, { icon: typeof ArrowLeftRight; label: string; color: string }> = {
   "g-to-c": { icon: ArrowLeftRight, label: "G → C Bridge", color: "text-[var(--primary-light)]" },
@@ -17,6 +18,69 @@ const statusConfig: Record<string, { label: string; color: string }> = {
   failed: { label: "Failed", color: "text-[var(--error)]" },
 };
 
+const STATUS_FILTERS: Array<{ value: "all" | BridgeTransactionStatus; label: string }> = [
+  { value: "all", label: "All statuses" },
+  { value: "pending", label: "Pending" },
+  { value: "confirmed", label: "Confirmed" },
+  { value: "failed", label: "Failed" },
+];
+
+/**
+ * A transaction is claimable once its G → C bridge has settled — a pending
+ * bridge has no funds on the C side yet, and fiat/CEX flows land directly in
+ * the destination account rather than a claimable timelock. This is the only
+ * eligibility signal `BridgeTransactionData` carries today; timelocked claims
+ * arriving alongside batch funding will likely add an explicit flag, but this
+ * keeps bulk claim meaningful (and its "not every row qualifies" case
+ * testable) in the meantime. (#486)
+ */
+function isClaimEligible(tx: BridgeTransactionData): boolean {
+  return tx.type === "g-to-c" && tx.status === "confirmed";
+}
+
+/** Minimal CSV escaping: quote any field containing a comma, quote or newline. */
+function csvField(value: string): string {
+  if (/[",\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
+}
+
+/** Builds CSV text for a bulk export. Exported for direct unit testing. */
+export function buildTransactionsCsv(transactions: BridgeTransactionData[]): string {
+  const header = ["id", "type", "status", "amount", "asset", "toAddress", "hash", "timestamp"];
+  const rows = transactions.map((tx) =>
+    [
+      tx.id,
+      tx.type,
+      tx.status,
+      tx.amount,
+      tx.asset,
+      tx.toAddress,
+      tx.hash ?? "",
+      new Date(tx.timestamp).toISOString(),
+    ].map((v) => csvField(String(v)))
+  );
+  return [header.join(","), ...rows.map((r) => r.join(","))].join("\n");
+}
+
+/** Triggers a browser download of the CSV. Swallows environments (older test
+ *  runners, some SSR shells) that lack Blob/URL download support — the caller
+ *  still confirms success via the on-screen status message either way. */
+function downloadCsv(csv: string, filename: string): void {
+  try {
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    // See doc comment above.
+  }
+}
+
 interface Props {
   transactions: BridgeTransactionData[];
   loading: boolean;
@@ -25,7 +89,17 @@ interface Props {
   address?: string;
 }
 
-const TransactionItem = memo(function TransactionItem({ tx, network }: { tx: BridgeTransactionData; network: Props["network"] }) {
+const TransactionItem = memo(function TransactionItem({
+  tx,
+  network,
+  selected,
+  onToggleSelected,
+}: {
+  tx: BridgeTransactionData;
+  network: Props["network"];
+  selected: boolean;
+  onToggleSelected: (id: string) => void;
+}) {
   const type = typeConfig[tx.type] || typeConfig["g-to-c"];
   const status = statusConfig[tx.status];
   const Icon = type.icon;
@@ -44,6 +118,17 @@ const TransactionItem = memo(function TransactionItem({ tx, network }: { tx: Bri
     <div className="p-4 hover:bg-[var(--surface-2)] transition-colors">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 min-w-0">
+          {/* Bulk-selection checkbox. Selection is intentionally allowed on
+              every row regardless of claim eligibility — mixed selections
+              (some rows eligible, some not) are the normal case the bulk
+              toolbar below has to explain, not something to prevent. (#486) */}
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelected(tx.id)}
+            aria-label={`Select ${type.label} of ${tx.amount} ${tx.asset}`}
+            className="w-4 h-4 flex-shrink-0 accent-[var(--primary)]"
+          />
           <div className="w-9 h-9 rounded-lg bg-[var(--surface-2)] flex items-center justify-center flex-shrink-0">
             <Icon className={`w-4 h-4 ${type.color}`} />
           </div>
@@ -337,9 +422,14 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
             Clear all filters
           </button>
         </div>
+      ) : filteredTransactions.length === 0 ? (
+        <div className="p-12 text-center">
+          <p className="text-sm text-[var(--text-muted)]">No transactions match the current filter.</p>
+        </div>
       ) : (
         <div className="divide-y divide-[var(--border)]">{items}</div>
       )}
+
       <div className="p-4 border-t border-[var(--border)]">
         {/* Link to the account's specific transaction history when an address
             is available, otherwise fall back to the explorer home. (#294) */}
@@ -357,6 +447,48 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
           <ExternalLink className="w-3 h-3" />
         </a>
       </div>
+
+      <LiveRegion message={statusMessage} />
+
+      {confirmingClaim && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bulk-claim-title"
+          aria-describedby="bulk-claim-description"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0, 0, 0, 0.5)" }}
+          onKeyDown={handleDialogKeyDown}
+          data-testid="bulk-claim-dialog"
+        >
+          <div className="card w-full max-w-sm p-6" style={{ boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)" }}>
+            <h2 id="bulk-claim-title" className="text-lg font-semibold mb-2">
+              Confirm claim
+            </h2>
+            <p id="bulk-claim-description" className="text-sm text-[var(--text-muted)] mb-6">
+              This claims {selectedCount} transaction{selectedCount === 1 ? "" : "s"} and moves funds on-chain.
+              This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleCancelClaim}
+                autoFocus
+                className="px-4 py-2 rounded-lg border border-[var(--border)] text-sm hover:bg-[var(--surface-2)] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClaim}
+                className="px-4 py-2 rounded-lg bg-[var(--primary)] text-white text-sm font-medium hover:bg-[var(--primary)]/90 transition-colors"
+              >
+                Confirm claim
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
