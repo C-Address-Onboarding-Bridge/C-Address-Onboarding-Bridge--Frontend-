@@ -103,4 +103,24 @@ describe("wallet session persistence (#343)", () => {
     expect(session.manuallyDisconnected).toBe(false);
     expect(session.address).toBeNull();
   });
+
+  it("markConnected preserves a previously persisted selectedWalletId (#459)", () => {
+    localStorage.setItem(
+      SESSION_STORAGE_KEY,
+      JSON.stringify({ address: null, manuallyDisconnected: true, updatedAt: NOW, selectedWalletId: "xbull" })
+    );
+    const result = markConnected(ADDRESS, NOW + 1000);
+    expect(result.selectedWalletId).toBe("xbull");
+    expect(loadSession(NOW + 2000).selectedWalletId).toBe("xbull");
+  });
+
+  it("markDisconnected preserves a previously persisted selectedWalletId (#459)", () => {
+    localStorage.setItem(
+      SESSION_STORAGE_KEY,
+      JSON.stringify({ address: ADDRESS, manuallyDisconnected: false, updatedAt: NOW, selectedWalletId: "lobstr" })
+    );
+    const result = markDisconnected(ADDRESS, NOW + 1000);
+    expect(result.selectedWalletId).toBe("lobstr");
+    expect(loadSession(NOW + 2000).selectedWalletId).toBe("lobstr");
+  });
 });
