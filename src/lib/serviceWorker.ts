@@ -113,7 +113,8 @@ export function isCacheableResponse(response: {
   status?: number;
   type?: string;
 } | null | undefined): boolean {
-  throw new Error('Not implemented: isCacheableResponse');
+  if (!response) return false;
+  return response.ok === true && response.status !== 206 && response.type === "basic";
 }
 
 /** Registration is opt-in, so a stale cached shell can never surprise a deploy. */
