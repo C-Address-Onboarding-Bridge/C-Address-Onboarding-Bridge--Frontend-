@@ -111,22 +111,25 @@ export function isFeatureEnabled(
   key: string,
   sessionId?: string,
 ): boolean {
+  const normalizedKey = key.trim();
+  if (!normalizedKey) return false;
+
   if (process.env.NODE_ENV === 'development') {
     const overrides = getDevOverrides();
-    if (key in overrides) return overrides[key];
+    if (normalizedKey in overrides) return overrides[normalizedKey];
   }
 
   const envFlags = parseEnvFlags();
-  if (key in envFlags) return envFlags[key];
+  if (normalizedKey in envFlags) return envFlags[normalizedKey];
 
-  const flag = getFlagDef(key);
+  const flag = getFlagDef(normalizedKey);
   if (!flag) return false;
 
   if (flag.rolloutPercentage <= 0) return flag.defaultEnabled;
   if (flag.rolloutPercentage >= 100) return true;
 
   const id = sessionId ?? getSessionId();
-  const bucket = deterministicHash(`${key}:${id}`) % 100;
+  const bucket = deterministicHash(`${normalizedKey}:${id}`) % 100;
   return bucket < flag.rolloutPercentage;
 }
 
@@ -181,7 +184,9 @@ export function getDevOverrides(): Record<string, boolean> {
     ) {
       return {};
     }
-    return parsed as Record<string, boolean>;
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([key]) => key.trim().length > 0)
+    ) as Record<string, boolean>;
   } catch {
     return {};
   }
@@ -197,8 +202,10 @@ export function getDevOverrides(): Record<string, boolean> {
 export function setDevOverride(key: string, enabled: boolean): void {
   if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
   try {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) return;
     const overrides = getDevOverrides();
-    overrides[key] = enabled;
+    overrides[normalizedKey] = enabled;
     window.localStorage.setItem(DEV_OVERRIDES_KEY, JSON.stringify(overrides));
   } catch {
     // Storage unavailable — override simply won't persist this session.
@@ -214,8 +221,14 @@ export function setDevOverride(key: string, enabled: boolean): void {
 export function clearDevOverride(key: string): void {
   if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
   try {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) return;
     const overrides = getDevOverrides();
-    delete overrides[key];
+    delete overrides[normalizedKey];
+    if (Object.keys(overrides).length === 0) {
+      window.localStorage.removeItem(DEV_OVERRIDES_KEY);
+      return;
+    }
     window.localStorage.setItem(DEV_OVERRIDES_KEY, JSON.stringify(overrides));
   } catch {
     // Storage unavailable — nothing to clear.

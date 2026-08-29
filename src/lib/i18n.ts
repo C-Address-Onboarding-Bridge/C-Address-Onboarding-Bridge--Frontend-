@@ -272,7 +272,8 @@ const translations: Record<Locale, TranslationSet> = {
  * Get translations for a locale.
  */
 export function getTranslations(locale: Locale = DEFAULT_LOCALE): TranslationSet {
-  const entry = translations[locale];
+  const normalized = SUPPORTED_LOCALES.includes(locale) ? locale : DEFAULT_LOCALE;
+  const entry = translations[normalized];
   if (!entry) return translations[DEFAULT_LOCALE];
   return entry;
 }
@@ -281,6 +282,7 @@ export function getTranslations(locale: Locale = DEFAULT_LOCALE): TranslationSet
  * Translate a dot-path key like 'common.connect_wallet'.
  */
 export function t(locale: Locale, key: string): string {
+  if (!key.trim()) return key;
   const parts = key.split('.');
   let current: unknown = getTranslations(locale);
   for (const part of parts) {
@@ -298,7 +300,7 @@ export function t(locale: Locale, key: string): string {
  */
 export function detectLocale(): Locale {
   if (typeof window === 'undefined') return DEFAULT_LOCALE;
-  const browser = window.navigator.language.slice(0, 2).toLowerCase();
+  const browser = window.navigator.language?.slice(0, 2).toLowerCase() ?? DEFAULT_LOCALE;
   return SUPPORTED_LOCALES.includes(browser as Locale) ? (browser as Locale) : DEFAULT_LOCALE;
 }
 
