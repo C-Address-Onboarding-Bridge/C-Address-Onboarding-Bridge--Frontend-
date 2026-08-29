@@ -85,7 +85,8 @@ export function shouldBypassCache(request: RequestLike): boolean {
 
 /** True when the pathname points at a static asset that is safe to serve cache-first. */
 export function isCacheableAsset(pathname: string): boolean {
-  throw new Error('Not implemented: isCacheableAsset');
+  const lower = pathname.toLowerCase();
+  return CACHEABLE_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
 /**
