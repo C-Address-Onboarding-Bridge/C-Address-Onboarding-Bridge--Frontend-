@@ -221,8 +221,14 @@ export function setDevOverride(key: string, enabled: boolean): void {
 export function clearDevOverride(key: string): void {
   if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
   try {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) return;
     const overrides = getDevOverrides();
-    delete overrides[key];
+    delete overrides[normalizedKey];
+    if (Object.keys(overrides).length === 0) {
+      window.localStorage.removeItem(DEV_OVERRIDES_KEY);
+      return;
+    }
     window.localStorage.setItem(DEV_OVERRIDES_KEY, JSON.stringify(overrides));
   } catch {
     // Storage unavailable — nothing to clear.
