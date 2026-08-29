@@ -105,7 +105,14 @@ export function saveAvatar(address: string | null | undefined, dataUrl: string):
 
 /** Removes the stored avatar for `address`. */
 export function removeAvatar(address: string | null | undefined): void {
-  throw new Error('Not implemented: removeAvatar');
+  if (!address) return;
+  const store = storage();
+  if (!store) return;
+  try {
+    store.removeItem(avatarStorageKey(address));
+  } catch {
+    // Ignore storage failures on best-effort cleanup.
+  }
 }
 
 /**
@@ -113,5 +120,6 @@ export function removeAvatar(address: string | null | undefined): void {
  * base32 so the leading characters ("GA", "CB", …) are stable and readable.
  */
 export function avatarInitials(address: string | null | undefined): string {
-  throw new Error('Not implemented: avatarInitials');
+  if (!address) return "?";
+  return address.slice(0, 2).toUpperCase();
 }
