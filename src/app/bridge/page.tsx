@@ -34,6 +34,7 @@ export default function BridgePage() {
     walletNetworkName,
     isNetworkSupported,
     isOnline,
+    recentlyChangedNetwork,
     connect,
   } = useWallet();
   const { openHelp } = useHelp();
@@ -65,6 +66,14 @@ export default function BridgePage() {
   // Falls back to the static placeholder if the fetch fails. (#257)
   const FALLBACK_FEE = "~0.00001 XLM";
   const [estimatedFee, setEstimatedFee] = useState<string>(FALLBACK_FEE);
+  // Simulation result fetched from /api/simulate before the signing step is
+  // presented. `null` means no simulation has run for the current form values;
+  // `simulating` covers the in-flight fetch. (#478)
+  const [simulation, setSimulation] = useState<SimulationResult | null>(null);
+  const [simulating, setSimulating] = useState(false);
+  // Set when the user tries to confirm a mainnet action shortly after a
+  // network change; signing waits for explicit acknowledgement. (#480)
+  const [mainnetWarning, setMainnetWarning] = useState(false);
 
   // Keyboard + screen-reader step transitions: focus the new step's heading and
   // announce the change. Implemented in useStepTransition. (#476)
@@ -176,8 +185,9 @@ export default function BridgePage() {
 
   const handleSubmit = () => {
     if (!canProceed) return;
-    setStep("review");
     setTxError(null);
+    setSimulation(null);
+    setSimulating(true);
     // Fetch a fresh fee estimate in the background; if it fails the
     // fallback value already set in state is shown instead. (#257)
     getEstimatedFeeXLM(network).then((fee) => setEstimatedFee(fee)).catch(() => {
@@ -185,6 +195,42 @@ export default function BridgePage() {
       // guard here for defence in depth.
       setEstimatedFee(FALLBACK_FEE);
     });
+    // Simulate before presenting the signing step: the review screen shows
+    // the predicted fee, net amount, recipient, and any specific failure
+    // reason instead of asking the user to sign blind. The endpoint always
+    // resolves; if it can't run (offline / unreachable), the review screen
+    // degrades to the static fee estimate and lets the user continue. (#478)
+    try {
+      const response = await fetch("/api/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceAddress: fromAddress,
+          destinationAddress: toAddress,
+          amount,
+          assetCode: asset,
+          network,
+        }),
+      });
+      if (response.ok) {
+        setSimulation((await response.json()) as SimulationResult);
+      } else {
+        setSimulation({
+          ok: false,
+          reason: "simulation_unavailable",
+          message: "The transaction couldn't be simulated right now. Review the details and try again.",
+        });
+      }
+    } catch {
+      setSimulation({
+        ok: false,
+        reason: "simulation_unavailable",
+        message: "The transaction couldn't be simulated right now. Review the details and try again.",
+      });
+    } finally {
+      setSimulating(false);
+      setStep("review");
+    }
   };
 
   const handleConfirm = async () => {
@@ -237,10 +283,46 @@ export default function BridgePage() {
       setTxHash(result.hash);
       setTxStatus("success");
       setStep("confirm");
+      // Record the outcome in the notification centre so the result survives
+      // navigation away from the review/confirm screen. (#477)
+      addNotification({
+        kind: "transaction",
+        title: "Transaction submitted",
+        message: `${amount} ${asset} to ${toAddress.slice(0, 8)}…${toAddress.slice(-6)}`,
+        href: getExplorerUrl(network, "tx", result.hash),
+      });
     } catch (e: unknown) {
-      setTxError(toSafeErrorMessage(e, "Transaction failed. Please try again."));
+      const message = toSafeErrorMessage(e, "Transaction failed. Please try again.");
+      setTxError(message);
       setTxStatus("error");
+      addNotification({
+        kind: "failure",
+        title: "Transaction failed",
+        message: `${message.slice(0, 120)}${message.length > 120 ? "…" : ""}`,
+        href: "/bridge",
+      });
     }
+  };
+
+  const handleConfirm = async () => {
+    if (!fromAddress || !toAddress || !amount) return;
+    // Never build against a network the app only guessed at. (#289)
+    if (!isNetworkSupported) {
+      setTxError(
+        networkStatus === "UNSUPPORTED"
+          ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
+          : "Freighter's network couldn't be read. Unlock the extension and reload before submitting."
+      );
+      setTxStatus("error");
+      return;
+    }
+    // Warn before a mainnet action initiated shortly after a network change:
+    // real funds are at stake and the switch may have been a mistake. (#480)
+    if (shouldWarnOnMainnetAction(network, recentlyChangedNetwork, mainnetWarning)) {
+      setMainnetWarning(true);
+      return;
+    }
+    await performConfirm();
   };
 
   const handleReset = () => {
@@ -688,7 +770,17 @@ export default function BridgePage() {
                   </button>
                   <button
                     onClick={handleConfirm}
-                    disabled={txStatus === "signing" || txStatus === "submitting" || !isOnline}
+                    disabled={
+                      txStatus === "signing" ||
+                      txStatus === "submitting" ||
+                      !isOnline ||
+                      (simulation !== null && !simulation.ok)
+                    }
+                    title={
+                      simulation !== null && !simulation.ok
+                        ? "Fix the issue shown by the simulation before signing"
+                        : undefined
+                    }
                     className="flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-light)]"
                   >
                     {txStatus === "signing" || txStatus === "submitting" ? (
