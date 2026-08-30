@@ -46,7 +46,11 @@ function storage(): Storage | null {
 
 /** True when `session` is older than the TTL and should be discarded. */
 export function isSessionExpired(session: WalletSession, now: number = Date.now()): boolean {
-  throw new Error('Not implemented: isSessionExpired');
+  const { updatedAt } = session;
+  // NaN or a future timestamp both count as expired
+  if (!Number.isFinite(updatedAt)) return true;
+  if (updatedAt > now) return true;
+  return now > updatedAt + SESSION_TTL_MS;
 }
 
 function parseSession(raw: string | null): WalletSession | null {
@@ -71,7 +75,25 @@ function parseSession(raw: string | null): WalletSession | null {
  * is not re-parsed on every call.
  */
 export function loadSession(now: number = Date.now()): WalletSession {
-  throw new Error('Not implemented: loadSession');
+  const store = storage();
+  if (!store) return freshSession(now);
+
+  const raw = store.getItem(SESSION_STORAGE_KEY);
+  const session = parseSession(raw);
+
+  if (!session) return freshSession(now);
+
+  if (isSessionExpired(session, now)) {
+    // Drop the stale record
+    try {
+      store.removeItem(SESSION_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+    return freshSession(now);
+  }
+
+  return session;
 }
 
 function writeSession(session: WalletSession): WalletSession {
@@ -88,7 +110,12 @@ function writeSession(session: WalletSession): WalletSession {
 
 /** Records an explicit connect, clearing any sticky disconnect. */
 export function markConnected(address: string | null, now: number = Date.now()): WalletSession {
-  throw new Error('Not implemented: markConnected');
+  const session: WalletSession = {
+    address,
+    manuallyDisconnected: false,
+    updatedAt: now,
+  };
+  return writeSession(session);
 }
 
 /**
@@ -96,10 +123,21 @@ export function markConnected(address: string | null, now: number = Date.now()):
  * debugging session) can tell which account was dropped.
  */
 export function markDisconnected(address: string | null = null, now: number = Date.now()): WalletSession {
-  throw new Error('Not implemented: markDisconnected');
+  const session: WalletSession = {
+    address,
+    manuallyDisconnected: true,
+    updatedAt: now,
+  };
+  return writeSession(session);
 }
 
 /** Removes the stored session entirely. */
 export function clearSession(): void {
-  throw new Error('Not implemented: clearSession');
+  const store = storage();
+  if (!store) return;
+  try {
+    store.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
 }

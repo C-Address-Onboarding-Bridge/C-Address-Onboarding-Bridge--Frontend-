@@ -46,7 +46,7 @@ export type DisplayNameValidation =
 
 /** Storage key for an address. Exported so tests and docs can reference it. */
 export function displayNameStorageKey(address: string): string {
-  throw new Error('Not implemented: displayNameStorageKey');
+  return `${STORAGE_PREFIX}${address}${NAME_SUFFIX}`;
 }
 
 /**
@@ -57,12 +57,32 @@ export function displayNameStorageKey(address: string): string {
  * the length cap gets bypassed by trailing whitespace.
  */
 export function validateDisplayName(raw: string): DisplayNameValidation {
-  throw new Error('Not implemented: validateDisplayName');
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return { ok: false, error: "Enter a display name." };
+  }
+  if (trimmed.length > DISPLAY_NAME_MAX_LENGTH) {
+    return {
+      ok: false,
+      error: `Display name is too long — the limit is ${DISPLAY_NAME_MAX_LENGTH} characters.`,
+    };
+  }
+  if (hasControlChars(trimmed)) {
+    return { ok: false, error: "Display name contains invalid characters." };
+  }
+  return { ok: true, value: trimmed };
 }
 
 /** True when `value` came out of storage in a shape that is safe to render. */
 export function isRenderableDisplayName(value: unknown): value is string {
-  throw new Error('Not implemented: isRenderableDisplayName');
+  if (typeof value !== "string") return false;
+  // Values written by saveDisplayName are always trimmed — an untrimmed value
+  // came from outside this module (e.g. hand-edited localStorage).
+  if (value !== value.trim()) return false;
+  if (value.length === 0) return false;
+  if (value.length > DISPLAY_NAME_MAX_LENGTH) return false;
+  if (hasControlChars(value)) return false;
+  return true;
 }
 
 function storage(): Storage | null {
@@ -77,7 +97,16 @@ function storage(): Storage | null {
 
 /** Reads the stored display name for `address`, or null when absent/invalid. */
 export function loadDisplayName(address: string | null | undefined): string | null {
-  throw new Error('Not implemented: loadDisplayName');
+  if (!address) return null;
+  const store = storage();
+  if (!store) return null;
+  try {
+    const value = store.getItem(displayNameStorageKey(address));
+    if (!isRenderableDisplayName(value)) return null;
+    return value;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -89,18 +118,37 @@ export function saveDisplayName(
   address: string | null | undefined,
   name: string,
 ): boolean {
-  throw new Error('Not implemented: saveDisplayName');
+  if (!address) return false;
+  const validation = validateDisplayName(name);
+  if (!validation.ok) return false;
+  const store = storage();
+  if (!store) return false;
+  try {
+    store.setItem(displayNameStorageKey(address), validation.value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Removes the stored display name for `address`. */
 export function clearDisplayName(address: string | null | undefined): void {
-  throw new Error('Not implemented: clearDisplayName');
+  if (!address) return;
+  const store = storage();
+  if (!store) return;
+  try {
+    store.removeItem(displayNameStorageKey(address));
+  } catch {
+    // ignore
+  }
 }
 
 /**
- * Short form of a Stellar address for display: `GABC…WXYZ`. Falls back to the
+ * Short form of a Stellar address for display: `GABCDE…OPQRST`. Falls back to the
  * whole string when it is too short to shorten meaningfully.
  */
 export function shortenAddress(address: string | null | undefined): string {
-  throw new Error('Not implemented: shortenAddress');
+  if (!address) return "";
+  if (address.length <= 12) return address;
+  return `${address.slice(0, 6)}…${address.slice(-6)}`;
 }

@@ -28,21 +28,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
 ];
 
 /**
- * Determines if a feature flag is enabled for the current user/session.
- * Priority order:
- * 1. Developer override (localStorage) — highest priority, dev panel only
- * 2. Environment variable override (NEXT_PUBLIC_FEATURE_FLAGS)
- * 3. Rollout percentage (deterministic based on session ID)
- * 4. Default value
- */
-export function isFeatureEnabled(
-  key: string,
-  sessionId?: string,
-): boolean {
-  throw new Error('Not implemented: isFeatureEnabled');
-}
-
-/**
  * Deterministic hash function for consistent rollout behavior.
  */
 function deterministicHash(str: string): number {
@@ -59,7 +44,7 @@ function deterministicHash(str: string): number {
  */
 function getSessionId(): string {
   if (typeof window === 'undefined') return 'server';
-  
+
   let id = sessionStorage.getItem('ff_session_id');
   if (!id) {
     id = Math.random().toString(36).slice(2);
@@ -80,7 +65,22 @@ const DEV_OVERRIDES_KEY = 'ff_dev_overrides';
  * shapes into the feature-flag evaluation path. (#240)
  */
 export function getDevOverrides(): Record<string, boolean> {
-  throw new Error('Not implemented: getDevOverrides');
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(DEV_OVERRIDES_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    // Must be a plain object (not null, not array, not primitive)
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    // All values must be booleans
+    const obj = parsed as Record<string, unknown>;
+    for (const val of Object.values(obj)) {
+      if (typeof val !== 'boolean') return {};
+    }
+    return obj as Record<string, boolean>;
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -91,7 +91,15 @@ export function getDevOverrides(): Record<string, boolean> {
  * NODE_ENV guard. (#240)
  */
 export function setDevOverride(key: string, enabled: boolean): void {
-  throw new Error('Not implemented: setDevOverride');
+  if (process.env.NODE_ENV !== 'development') return;
+  if (typeof window === 'undefined') return;
+  try {
+    const overrides = getDevOverrides();
+    overrides[key] = enabled;
+    localStorage.setItem(DEV_OVERRIDES_KEY, JSON.stringify(overrides));
+  } catch {
+    // ignore storage errors
+  }
 }
 
 /**
@@ -101,7 +109,15 @@ export function setDevOverride(key: string, enabled: boolean): void {
  * of which call site invokes it. (#240)
  */
 export function clearDevOverride(key: string): void {
-  throw new Error('Not implemented: clearDevOverride');
+  if (process.env.NODE_ENV !== 'development') return;
+  if (typeof window === 'undefined') return;
+  try {
+    const overrides = getDevOverrides();
+    delete overrides[key];
+    localStorage.setItem(DEV_OVERRIDES_KEY, JSON.stringify(overrides));
+  } catch {
+    // ignore storage errors
+  }
 }
 
 /**
@@ -111,7 +127,7 @@ export function clearDevOverride(key: string): void {
 function parseEnvFlags(): Record<string, boolean> {
   const raw = process.env.NEXT_PUBLIC_FEATURE_FLAGS ?? '';
   if (!raw) return {};
-  
+
   return Object.fromEntries(
     raw.split(',')
       .map(pair => pair.trim())
@@ -122,4 +138,45 @@ function parseEnvFlags(): Record<string, boolean> {
       })
       .filter(([k]) => k.length > 0)
   );
+}
+
+/**
+ * Determines if a feature flag is enabled for the current user/session.
+ * Priority order:
+ * 1. Developer override (localStorage) — highest priority, dev panel only
+ * 2. Environment variable override (NEXT_PUBLIC_FEATURE_FLAGS)
+ * 3. Rollout percentage (deterministic based on session ID)
+ * 4. Default value
+ */
+export function isFeatureEnabled(
+  key: string,
+  sessionId?: string,
+): boolean {
+  // Find the flag definition
+  const flag = FEATURE_FLAGS.find(f => f.key === key);
+  if (!flag) return false;
+
+  // 1. Developer override — highest priority (dev only)
+  if (process.env.NODE_ENV === 'development') {
+    const devOverrides = getDevOverrides();
+    if (key in devOverrides) {
+      return devOverrides[key];
+    }
+  }
+
+  // 2. Environment variable override
+  const envFlags = parseEnvFlags();
+  if (key in envFlags) {
+    return envFlags[key];
+  }
+
+  // 3. Rollout percentage (when > 0 and < 100)
+  if (flag.rolloutPercentage === 100) return true;
+  if (flag.rolloutPercentage === 0) return flag.defaultEnabled;
+
+  // Deterministic hash-based rollout
+  const sid = sessionId ?? getSessionId();
+  const hash = deterministicHash(`${key}:${sid}`);
+  const bucket = hash % 100;
+  return bucket < flag.rolloutPercentage;
 }

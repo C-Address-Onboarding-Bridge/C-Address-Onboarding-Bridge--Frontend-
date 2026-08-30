@@ -61,6 +61,12 @@ const USER_MESSAGES: Record<ErrorCode, string> = {
   [ErrorCode.UNKNOWN]: 'An unexpected error occurred.',
 };
 
+const RETRYABLE_CODES = new Set<ErrorCode>([
+  ErrorCode.API_ERROR,
+  ErrorCode.TIMEOUT,
+  ErrorCode.TRANSACTION_FAILED,
+]);
+
 /**
  * Create an AppError from an error code with optional details.
  */
@@ -69,7 +75,14 @@ export function createAppError(
   message?: string,
   details?: unknown,
 ): AppError {
-  throw new Error('Not implemented: createAppError');
+  const userMessage = USER_MESSAGES[code];
+  return new AppError({
+    code,
+    message: message ?? userMessage,
+    userMessage,
+    details,
+    retryable: RETRYABLE_CODES.has(code),
+  });
 }
 
 /**
@@ -77,7 +90,44 @@ export function createAppError(
  * Maps common Stellar/Freighter errors to typed codes.
  */
 export function parseError(error: unknown): AppError {
-  throw new Error('Not implemented: parseError');
+  if (error instanceof AppError) return error;
+
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+
+  // Map specific patterns — order matters: more specific first
+  if (lower.includes('not detected') || lower.includes('freighter not')) {
+    return createAppError(ErrorCode.WALLET_NOT_FOUND, message);
+  }
+  if (lower.includes('timeout') || lower.includes('timed out')) {
+    return createAppError(ErrorCode.TIMEOUT, message);
+  }
+  if (lower.includes('network') && lower.includes('passphrase')) {
+    return createAppError(ErrorCode.NETWORK_MISMATCH, message);
+  }
+  if (lower.includes('wrong network') || (lower.includes('network') && lower.includes('mismatch'))) {
+    return createAppError(ErrorCode.NETWORK_MISMATCH, message);
+  }
+  if (lower.includes('rejected') || lower.includes('declined')) {
+    return createAppError(ErrorCode.TRANSACTION_REJECTED, message);
+  }
+  if (lower.includes('insufficient') || lower.includes('balance')) {
+    return createAppError(ErrorCode.INSUFFICIENT_BALANCE, message);
+  }
+  if (lower.includes('connect')) {
+    return createAppError(ErrorCode.WALLET_CONNECTION_FAILED, message);
+  }
+  if (lower.includes('invalid') && lower.includes('address')) {
+    return createAppError(ErrorCode.INVALID_ADDRESS, message);
+  }
+  if (lower.includes('address') && lower.includes('format')) {
+    return createAppError(ErrorCode.INVALID_ADDRESS, message);
+  }
+  if (lower.includes('transaction') && (lower.includes('failed') || lower.includes('error'))) {
+    return createAppError(ErrorCode.TRANSACTION_FAILED, message);
+  }
+
+  return createAppError(ErrorCode.UNKNOWN, message, error);
 }
 
 /**
@@ -85,5 +135,13 @@ export function parseError(error: unknown): AppError {
  * Never throws — safe to use in catch blocks.
  */
 export function handleError(error: unknown, context?: string): AppError {
-  throw new Error('Not implemented: handleError');
+  try {
+    const appError = parseError(error);
+    const prefix = context ? `[${context}] ` : '';
+    console.error(`${prefix}${appError.code}: ${appError.message}`, appError.details);
+    return appError;
+  } catch {
+    // Defensive: if parseError itself throws somehow, return a generic error
+    return createAppError(ErrorCode.UNKNOWN, 'An unexpected error occurred');
+  }
 }

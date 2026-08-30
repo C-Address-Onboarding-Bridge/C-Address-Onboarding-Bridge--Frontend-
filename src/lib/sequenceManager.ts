@@ -1,4 +1,4 @@
-import { Horizon, rpc, Account } from "@stellar/stellar-sdk";
+import { Horizon, rpc } from "@stellar/stellar-sdk";
 import type { StellarNetwork } from "./types";
 
 /**
@@ -48,7 +48,22 @@ export async function getNextSequenceNumber(
   server: Horizon.Server | rpc.Server,
   network: StellarNetwork
 ): Promise<bigint> {
-  throw new Error('Not implemented: getNextSequenceNumber');
+  const key = cacheKey(accountId, network);
+  const now = Date.now();
+  const entry = cache.get(key);
+
+  if (entry && now - entry.fetchedAt < CACHE_TTL_MS) {
+    // Increment in cache and return next sequence
+    entry.sequence += 1n;
+    return entry.sequence;
+  }
+
+  // Cache miss or expired — fetch from network
+  const fetched = await fetchSequenceFromNetwork(accountId, server);
+  // fetched is the current sequence; next transaction uses fetched + 1
+  const nextSeq = fetched + 1n;
+  cache.set(key, { sequence: nextSeq, fetchedAt: now });
+  return nextSeq;
 }
 
 /**
@@ -82,7 +97,7 @@ export function invalidateSequenceCache(
   accountId: string,
   network: StellarNetwork
 ): void {
-  throw new Error('Not implemented: invalidateSequenceCache');
+  cache.delete(cacheKey(accountId, network));
 }
 
 /**
@@ -90,7 +105,7 @@ export function invalidateSequenceCache(
  * Use sparingly — prefer invalidateSequenceCache for targeted invalidation.
  */
 export function clearAllSequenceCache(): void {
-  throw new Error('Not implemented: clearAllSequenceCache');
+  cache.clear();
 }
 
 /**
@@ -98,7 +113,32 @@ export function clearAllSequenceCache(): void {
  * Handles both Horizon and SorobanRpc error shapes.
  */
 export function isBadSequenceError(error: unknown): boolean {
-  throw new Error('Not implemented: isBadSequenceError');
+  if (error === null || error === undefined) return false;
+
+  // Check Horizon error shape: error.response.data.extras.result_codes.transaction
+  if (typeof error === "object") {
+    const e = error as {
+      response?: {
+        data?: {
+          extras?: {
+            result_codes?: {
+              transaction?: string;
+            };
+          };
+        };
+      };
+    };
+    const txCode = e.response?.data?.extras?.result_codes?.transaction;
+    if (txCode === "tx_bad_seq") return true;
+  }
+
+  // Check error message
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    if (msg.includes("bad_seq") || msg.includes("tx_bad_seq")) return true;
+  }
+
+  return false;
 }
 
 /**
@@ -119,5 +159,25 @@ export async function withSequenceRetry<T>(
   network: StellarNetwork,
   maxRetries = 1
 ): Promise<T> {
-  throw new Error('Not implemented: withSequenceRetry');
+  let attempts = 0;
+
+  while (true) {
+    const getSequence = () => getNextSequenceNumber(accountId, server, network);
+
+    try {
+      return await fn(getSequence);
+    } catch (err) {
+      if (isBadSequenceError(err) && attempts < maxRetries) {
+        attempts++;
+        // Invalidate cache so next call re-fetches fresh sequence
+        invalidateSequenceCache(accountId, network);
+        // Apply backoff delay
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, RETRY_BACKOFF_MS * attempts)
+        );
+        continue;
+      }
+      throw err;
+    }
+  }
 }

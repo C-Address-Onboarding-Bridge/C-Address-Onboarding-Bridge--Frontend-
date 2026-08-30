@@ -45,5 +45,45 @@ export interface UseCopyToClipboardReturn {
  *                       Defaults to 2000ms.
  */
 export function useCopyToClipboard(resetAfterMs = COPY_FEEDBACK_DURATION_MS): UseCopyToClipboardReturn {
-  throw new Error('Not implemented: useCopyToClipboard');
+  const [status, setStatus] = useState<CopyStatus>("idle");
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const reset = useCallback(() => {
+    setStatus("idle");
+  }, []);
+
+  const copy = useCallback(async (text: string): Promise<boolean> => {
+    // Cancel any pending auto-reset timeout
+    if (timeoutRef.current !== null) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("copied");
+
+      if (resetAfterMs > 0) {
+        timeoutRef.current = setTimeout(() => {
+          setStatus("idle");
+          timeoutRef.current = null;
+        }, resetAfterMs);
+      }
+
+      return true;
+    } catch {
+      setStatus("error");
+
+      if (resetAfterMs > 0) {
+        timeoutRef.current = setTimeout(() => {
+          setStatus("idle");
+          timeoutRef.current = null;
+        }, resetAfterMs);
+      }
+
+      return false;
+    }
+  }, [resetAfterMs]);
+
+  return { status, copy, reset };
 }

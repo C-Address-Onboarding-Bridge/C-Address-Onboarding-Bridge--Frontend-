@@ -197,28 +197,48 @@ const translations: Record<Locale, TranslationSet> = {
  * Get translations for a locale.
  */
 export function getTranslations(locale: Locale = DEFAULT_LOCALE): TranslationSet {
-  throw new Error('Not implemented: getTranslations');
+  return translations[locale] ?? translations[DEFAULT_LOCALE];
 }
 
 /**
  * Translate a dot-path key like 'common.connect_wallet'.
  */
 export function t(locale: Locale, key: string): string {
-  throw new Error('Not implemented: t');
+  const set = getTranslations(locale);
+  const parts = key.split('.');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let current: any = set;
+  for (const part of parts) {
+    if (current === null || current === undefined || typeof current !== 'object') {
+      return key;
+    }
+    current = current[part];
+  }
+  if (typeof current !== 'string') return key;
+  return current;
 }
 
 /**
  * Detect locale from browser or fallback to default.
  */
 export function detectLocale(): Locale {
-  throw new Error('Not implemented: detectLocale');
+  if (typeof navigator === 'undefined') return DEFAULT_LOCALE;
+  const lang = navigator.language?.split('-')[0]?.toLowerCase();
+  if (lang && (SUPPORTED_LOCALES as string[]).includes(lang)) {
+    return lang as Locale;
+  }
+  return DEFAULT_LOCALE;
 }
 
 /**
  * Format a number for the given locale.
  */
 export function formatNumber(value: number, locale: Locale = DEFAULT_LOCALE): string {
-  throw new Error('Not implemented: formatNumber');
+  try {
+    return new Intl.NumberFormat(locale).format(value);
+  } catch {
+    return String(value);
+  }
 }
 
 /**
@@ -229,5 +249,12 @@ export function formatCurrency(
   currency: string = 'USD',
   locale: Locale = DEFAULT_LOCALE,
 ): string {
-  throw new Error('Not implemented: formatCurrency');
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency,
+    }).format(value);
+  } catch {
+    return `${value} ${currency}`;
+  }
 }

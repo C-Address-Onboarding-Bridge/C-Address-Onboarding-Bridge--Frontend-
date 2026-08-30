@@ -5,7 +5,6 @@ import { CreditCard, Wallet, ExternalLink, ArrowRight, Check, DollarSign, AlertC
 import LiveRegion from "@/components/live-region";
 import { isValidStellarAddress, isCAddress } from "@/lib/stellar";
 import { useDebounce } from "@/hooks/useDebounce";
-import LiveRegion from "@/components/live-region";
 
 const MOONPAY_API_KEY = process.env.NEXT_PUBLIC_MOONPAY_API_KEY || "";
 const TRANSAK_API_KEY = process.env.NEXT_PUBLIC_TRANSAK_API_KEY || "";
