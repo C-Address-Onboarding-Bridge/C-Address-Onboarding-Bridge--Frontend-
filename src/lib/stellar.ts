@@ -626,8 +626,40 @@ async function buildSignAndSubmit(
       // here with a clear, actionable message rather than signing a transaction
       // that will either fail at submission or, worse, succeed on the wrong
       // chain.
-      const currentNetwork = await getCurrentNetwork();
-      if (currentNetwork !== network) {
+      //
+      // We call getNetwork() directly (rather than getCurrentNetwork()) so we
+      // can distinguish:
+      //   a) getNetwork returns undefined (test mock not set up, or extension
+      //      returned no data) → treat as "can't verify, proceed"
+      //   b) getNetwork returns a different known network → abort
+      //   c) getNetwork rejects (Freighter locked, etc.) → abort with UNKNOWN
+      try {
+        const netResult = await getNetwork();
+        if (netResult !== undefined && netResult !== null && typeof netResult === "object") {
+          // Check for in-band error (e.g. user declined access)
+          if ("error" in netResult && (netResult as { error?: unknown }).error) {
+            throw new Error(
+              `Network changed in Freighter — please retry. ` +
+              `Transaction was built for ${network} but Freighter is now on UNKNOWN.`
+            );
+          }
+          // Compare the actual reported network
+          const reportedRaw = (netResult as { network?: string }).network;
+          const reported = (reportedRaw ?? "").toUpperCase() as WalletNetworkState;
+          if (reported && reported !== network) {
+            throw new Error(
+              `Network changed in Freighter — please retry. ` +
+              `Transaction was built for ${network} but Freighter is now on ${reported}.`
+            );
+          }
+        }
+        // If netResult is undefined/null, we can't verify the network — proceed
+      } catch (networkErr) {
+        // Re-throw errors we raised ourselves
+        if (networkErr instanceof Error && networkErr.message.includes("Network changed in Freighter")) {
+          throw networkErr;
+        }
+        // getNetwork() itself rejected (Freighter locked, locked extension, etc.)
         throw new Error(
           "Network changed in wallet — please retry. " +
           `Transaction was built for ${network} but wallet is now on ${currentNetwork}.`

@@ -61,6 +61,12 @@ const USER_MESSAGES: Record<ErrorCode, string> = {
   [ErrorCode.UNKNOWN]: 'An unexpected error occurred.',
 };
 
+const RETRYABLE_CODES = new Set<ErrorCode>([
+  ErrorCode.API_ERROR,
+  ErrorCode.TIMEOUT,
+  ErrorCode.TRANSACTION_FAILED,
+]);
+
 /**
  * Create an AppError from an error code with optional details.
  */

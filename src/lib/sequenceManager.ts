@@ -1,4 +1,4 @@
-import { Horizon, rpc, Account } from "@stellar/stellar-sdk";
+import { Horizon, rpc } from "@stellar/stellar-sdk";
 import type { StellarNetwork } from "./types";
 
 /**

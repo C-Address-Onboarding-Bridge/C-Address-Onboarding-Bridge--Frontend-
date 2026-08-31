@@ -40,7 +40,7 @@ const DATA_URL_PATTERN = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+
 
 export type AvatarValidation = { ok: true } | { ok: false; error: string };
 
-/** Human-readable size for error messages, e.g. "512 KB" or "1.4 MB". */
+/** Human-readable size for error messages, e.g. "512 B", "512 KB" or "1.5 MB". */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;

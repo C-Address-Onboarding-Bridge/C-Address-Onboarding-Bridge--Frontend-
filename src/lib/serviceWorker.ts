@@ -111,7 +111,15 @@ export function isCacheableAsset(pathname: string): boolean {
  *   pure offline fallback
  */
 export function cacheStrategyFor(request: RequestLike, origin: string): CacheStrategy {
-  throw new Error('Not implemented: cacheStrategyFor');
+  if (shouldBypassCache(request)) return "network-only";
+
+  const parsed = parseUrl(request.url);
+  if (!parsed) return "network-only";
+  if (parsed.origin !== origin) return "network-only";
+
+  if (isCacheableAsset(parsed.pathname)) return "cache-first";
+
+  return "network-first";
 }
 
 /** True for caches this app owns from an older worker version — deleted on activate. */

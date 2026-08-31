@@ -180,7 +180,7 @@ export function clearDisplayName(address: string | null | undefined): void {
 }
 
 /**
- * Short form of a Stellar address for display: `GABC…WXYZ`. Falls back to the
+ * Short form of a Stellar address for display: `GABCDE…OPQRST`. Falls back to the
  * whole string when it is too short to shorten meaningfully.
  *
  * Stellar addresses are Base32-encoded and contain only ASCII characters, so
