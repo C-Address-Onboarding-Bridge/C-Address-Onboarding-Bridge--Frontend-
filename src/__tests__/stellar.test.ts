@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { Keypair, StrKey } from "@stellar/stellar-sdk";
+import { Keypair, StrKey, Horizon } from "@stellar/stellar-sdk";
 import {
   isValidStellarAddress,
   isCAddress,
@@ -7,7 +7,9 @@ import {
   isValidStellarAmount,
   getAccountBalances,
   clearAccountBalancesCache,
+  getHorizonServer,
 } from "@/lib/stellar";
+import { HORIZON_URL } from "@/lib/types";
 
 // Horizon's network call is the only thing stubbed; every other SDK export
 // (Keypair, StrKey, ...) stays real so the address fixtures below are genuine
@@ -279,5 +281,25 @@ describe("getAccountBalances cache", () => {
     await getAccountBalances(G_ADDRESS, "TESTNET");
 
     expect(loadAccount).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("getHorizonServer", () => {
+  beforeEach(() => {
+    (Horizon.Server as unknown as ReturnType<typeof vi.fn>).mockClear();
+  });
+
+  it("builds a Horizon server pointed at the network's Horizon URL", async () => {
+    await getHorizonServer("PUBLIC");
+    expect(Horizon.Server).toHaveBeenCalledWith(HORIZON_URL.PUBLIC);
+  });
+
+  it("uses the testnet Horizon URL for TESTNET", async () => {
+    await getHorizonServer("TESTNET");
+    expect(Horizon.Server).toHaveBeenCalledWith(HORIZON_URL.TESTNET);
+  });
+
+  it("PUBLIC and TESTNET resolve to distinct Horizon URLs", () => {
+    expect(HORIZON_URL.PUBLIC).not.toBe(HORIZON_URL.TESTNET);
   });
 });

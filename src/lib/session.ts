@@ -110,6 +110,7 @@ export function markConnected(address: string | null, now: number = Date.now()):
     address: address ?? null,
     manuallyDisconnected: false,
     updatedAt: now,
+    selectedWalletId: loadSession(now).selectedWalletId,
   };
   return writeSession(session);
 }
@@ -123,6 +124,7 @@ export function markDisconnected(address: string | null = null, now: number = Da
     address: address ?? null,
     manuallyDisconnected: true,
     updatedAt: now,
+    selectedWalletId: loadSession(now).selectedWalletId,
   };
   return writeSession(session);
 }
