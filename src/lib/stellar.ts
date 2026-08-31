@@ -353,6 +353,7 @@ export function isValidStellarAmount(amount: string): boolean {
   return !isNaN(num) && num > 0;
 }
 
+/** Whether `address` is a valid Soroban contract address (a `C...` StrKey). */
 export function isCAddress(address: string): boolean {
   return StrKey.isValidContract(address);
 }
