@@ -305,6 +305,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateConnection = useCallback(async () => {
+    // Shared by the "explicitly not connected" and "connection check threw"
+    // paths below — a thrown error while checking connection is treated the
+    // same as a clean disconnect, including clearing the (#480) network-change
+    // tracking, rather than leaving stale connected state on screen.
+    const resetToDisconnected = () => {
+      setAddress(null);
+      // Reset mismatch tracking when wallet disconnects.
+      initialNetworkRef.current = null;
+      dismissedRef.current = false;
+      setNetworkMismatch(false);
+      setNetworkStatus(APP_NETWORK);
+      setWalletNetworkName(null);
+      previousNetworkStatusRef.current = APP_NETWORK;
+      setNetworkChangedAt(null);
+      setNetworkChangedRecently(false);
+      if (recentChangeTimerRef.current) clearTimeout(recentChangeTimerRef.current);
+    };
+
     try {
       // Respect an explicit disconnect until the user reconnects, including one
       // made before the last reload. (#288, #343)
@@ -332,26 +350,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           initialNetworkRef.current = status;
         }
       } else {
-        setAddress(null);
-        // Reset mismatch tracking when wallet disconnects.
-        initialNetworkRef.current = null;
-        dismissedRef.current = false;
-        setNetworkMismatch(false);
-        setNetworkStatus(APP_NETWORK);
-        setWalletNetworkName(null);
+        resetToDisconnected();
       }
-    } else {
-      setAddress(null);
-      // Reset mismatch tracking when wallet disconnects.
-      initialNetworkRef.current = null;
-      dismissedRef.current = false;
-      setNetworkMismatch(false);
-      setNetworkStatus(APP_NETWORK);
-      setWalletNetworkName(null);
-      previousNetworkStatusRef.current = APP_NETWORK;
-      setNetworkChangedAt(null);
-      setNetworkChangedRecently(false);
-      if (recentChangeTimerRef.current) clearTimeout(recentChangeTimerRef.current);
+    } catch {
+      resetToDisconnected();
     }
   }, [applyNetwork, isManuallyDisconnected]);
 
