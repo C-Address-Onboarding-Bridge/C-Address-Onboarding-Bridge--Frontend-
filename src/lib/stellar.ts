@@ -205,6 +205,12 @@ export async function getHorizonServer(network: StellarNetwork): Promise<Horizon
   return new Horizon.Server(HORIZON_URL[network]);
 }
 
+/**
+ * Get a Soroban RPC server client for `network`.
+ *
+ * Throws a descriptive error if no RPC URL is configured for the network
+ * (see `NEXT_PUBLIC_SOROBAN_RPC_URL_<NETWORK>`).
+ */
 export async function getSorobanRpcServer(network: StellarNetwork): Promise<rpc.Server> {
   const url = SOROBAN_RPC_URL[network];
   if (!url) {
