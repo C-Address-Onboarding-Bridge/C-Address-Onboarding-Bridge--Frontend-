@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Aframp Widget — Live Example</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 480px;
+        margin: 48px auto;
+        padding: 0 16px;
+        color: #111;
+      }
+      h1 {
+        font-size: 1.25rem;
+      }
+      p {
+        color: #555;
+        font-size: 0.9rem;
+      }
+      #aframp-widget {
+        border: 1px solid #ddd;
+        border-radius: 12px;
+        overflow: hidden;
+        margin: 24px 0;
+      }
+      #log {
+        background: #f6f6f6;
+        border-radius: 8px;
+        padding: 12px;
+        font-family: ui-monospace, monospace;
+        font-size: 0.8rem;
+        white-space: pre-wrap;
+        min-height: 60px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Aframp Widget — Live Example</h1>
+    <p>
+      This page embeds the funding widget exactly the way a third-party dApp
+      would, via <code>/aframp-widget.js</code>. See
+      <a href="/docs/embedding.md">docs/embedding.md</a> for the full guide.
+    </p>
+
+    <div id="aframp-widget"></div>
+
+    <p>Messages received from the widget:</p>
+    <div id="log">(none yet)</div>
+
+    <script src="/aframp-widget.js"></script>
+    <script>
+      const log = document.getElementById("log");
+      let entries = [];
+      function append(entry) {
+        entries.unshift(`${new Date().toLocaleTimeString()}  ${entry}`);
+        log.textContent = entries.join("\n");
+      }
+
+      AframpWidget.mount(document.getElementById("aframp-widget"), {
+        // This example is served by the app itself, so its own origin is
+        // both the widget origin and the host origin — a real third-party
+        // dApp would set widgetOrigin to this app's deployed URL instead.
+        widgetOrigin: window.location.origin,
+        address: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+        asset: "XLM",
+        theme: "light",
+        network: "TESTNET",
+        onSuccess: (result) => append(`success: ${result.amount} ${result.asset} — ${result.txHash}`),
+        onError: (message) => append(`error: ${message}`),
+        onCancel: () => append("cancelled"),
+      });
+    </script>
+  </body>
+</html>
