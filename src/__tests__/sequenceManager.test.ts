@@ -317,6 +317,25 @@ describe("sequenceManager", () => {
       expect(isBadSequenceError({})).toBe(false);
       expect(isBadSequenceError("some string")).toBe(false);
     });
+
+    it("returns false for a Horizon-shaped error missing the result_codes", () => {
+      expect(isBadSequenceError({ response: {} })).toBe(false);
+      expect(isBadSequenceError({ response: { data: {} } })).toBe(false);
+      expect(isBadSequenceError({ response: { data: { extras: {} } } })).toBe(false);
+    });
+
+    it("returns false for a Horizon-shaped error with an unrelated result code", () => {
+      const error = {
+        response: {
+          data: {
+            extras: {
+              result_codes: { transaction: "tx_insufficient_balance" },
+            },
+          },
+        },
+      };
+      expect(isBadSequenceError(error)).toBe(false);
+    });
   });
 
   describe("withSequenceRetry", () => {
@@ -482,6 +501,30 @@ describe("sequenceManager", () => {
 
       expect(result).toBe("success");
     });
+
+    it("defaults maxRetries to 1, giving up after a single retry", async () => {
+      const mockAccount = { sequenceNumber: () => "100" };
+      (mockHorizonServer.loadAccount as Mock).mockResolvedValue(mockAccount);
+
+      const badSeqError = {
+        response: {
+          data: {
+            extras: { result_codes: { transaction: "tx_bad_seq" } },
+          },
+        },
+      };
+
+      const fn = vi.fn().mockRejectedValue(badSeqError);
+
+      // No maxRetries argument passed - should use the default of 1.
+      const promise = withSequenceRetry(testAccountId, fn, mockHorizonServer, "TESTNET");
+      const expectation = expect(promise).rejects.toEqual(badSeqError);
+      await vi.runAllTimersAsync();
+      await expectation;
+
+      // Initial attempt + 1 retry = 2 calls total.
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("clearAllSequenceCache", () => {
@@ -511,6 +554,11 @@ describe("sequenceManager", () => {
       expect(result1).toBe(201n);
       expect(result2).toBe(201n);
       expect(mockHorizonServer.loadAccount).toHaveBeenCalledTimes(4);
+    });
+
+    it("is a no-op and does not throw when the cache is already empty", () => {
+      expect(() => clearAllSequenceCache()).not.toThrow();
+      expect(() => clearAllSequenceCache()).not.toThrow();
     });
   });
 });
