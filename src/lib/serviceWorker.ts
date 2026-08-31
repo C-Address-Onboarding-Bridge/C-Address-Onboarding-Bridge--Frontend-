@@ -83,12 +83,14 @@ export function shouldBypassCache(request: RequestLike): boolean {
   const method = (request.method ?? "GET").toUpperCase();
   if (method !== "GET") return true;
 
-  const parsed = parseUrl(request.url);
-  if (!parsed) return true;
+  const url = parseUrl(request.url);
+  if (!url) return true;
 
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return true;
-  if (NEVER_CACHE_ORIGINS.includes(parsed.origin)) return true;
-  if (parsed.pathname === "/api" || parsed.pathname.startsWith("/api/")) return true;
+  if (url.protocol !== "http:" && url.protocol !== "https:") return true;
+
+  if (NEVER_CACHE_ORIGINS.some((origin) => request.url.startsWith(origin))) return true;
+
+  if (url.pathname === "/api" || url.pathname.startsWith("/api/")) return true;
 
   return false;
 }
@@ -132,9 +134,7 @@ export function isCacheableResponse(response: {
   type?: string;
 } | null | undefined): boolean {
   if (!response) return false;
-  if (response.ok !== true) return false;
-  if (response.status === 206) return false;
-  return response.type === "basic" || response.type === "default";
+  return response.ok === true && response.status !== 206 && response.type === "basic";
 }
 
 /** Registration is opt-in, so a stale cached shell can never surprise a deploy. */
@@ -150,7 +150,7 @@ interface NavigatorLike {
 
 /** True when this environment can host a worker at all (SSR and older browsers can't). */
 export function isServiceWorkerSupported(nav: NavigatorLike | undefined = typeof navigator === "undefined" ? undefined : navigator): boolean {
-  return !!(nav && typeof nav.serviceWorker?.register === "function");
+  return typeof nav?.serviceWorker?.register === "function";
 }
 
 /**
@@ -162,11 +162,14 @@ export function isServiceWorkerSupported(nav: NavigatorLike | undefined = typeof
 export async function registerServiceWorker(
   nav: NavigatorLike | undefined = typeof navigator === "undefined" ? undefined : navigator,
 ): Promise<ServiceWorkerRegistration | null> {
-  if (!isServiceWorkerEnabled()) return null;
-  if (!isServiceWorkerSupported(nav)) return null;
+  if (!isServiceWorkerEnabled() || !isServiceWorkerSupported(nav)) {
+    return null;
+  }
   try {
     return await nav!.serviceWorker!.register(SW_SCRIPT_URL, { scope: SW_SCOPE });
   } catch {
+    // A failed registration must never break boot: the app is fully
+    // functional without a worker.
     return null;
   }
 }

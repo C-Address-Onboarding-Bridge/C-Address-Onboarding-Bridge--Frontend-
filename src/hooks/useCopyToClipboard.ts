@@ -46,44 +46,49 @@ export interface UseCopyToClipboardReturn {
  */
 export function useCopyToClipboard(resetAfterMs = COPY_FEEDBACK_DURATION_MS): UseCopyToClipboardReturn {
   const [status, setStatus] = useState<CopyStatus>("idle");
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const reset = useCallback(() => {
     setStatus("idle");
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
   }, []);
 
-  const copy = useCallback(async (text: string): Promise<boolean> => {
-    // Cancel any pending auto-reset timeout
-    if (timeoutRef.current !== null) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
+  const copy = useCallback(
+    async (text: string): Promise<boolean> => {
+      try {
+        if (!navigator?.clipboard?.writeText) {
+          setStatus("error");
+          return false;
+        }
 
-    try {
-      await navigator.clipboard.writeText(text);
-      setStatus("copied");
+        await navigator.clipboard.writeText(text);
+        setStatus("copied");
 
-      if (resetAfterMs > 0) {
-        timeoutRef.current = setTimeout(() => {
-          setStatus("idle");
-          timeoutRef.current = null;
-        }, resetAfterMs);
+        if (resetAfterMs > 0) {
+          if (timeoutRef.current) clearTimeout(timeoutRef.current);
+          timeoutRef.current = setTimeout(() => {
+            setStatus("idle");
+          }, resetAfterMs);
+        }
+
+        return true;
+      } catch {
+        setStatus("error");
+
+        if (resetAfterMs > 0) {
+          if (timeoutRef.current) clearTimeout(timeoutRef.current);
+          timeoutRef.current = setTimeout(() => {
+            setStatus("idle");
+          }, resetAfterMs);
+        }
+
+        return false;
       }
-
-      return true;
-    } catch {
-      setStatus("error");
-
-      if (resetAfterMs > 0) {
-        timeoutRef.current = setTimeout(() => {
-          setStatus("idle");
-          timeoutRef.current = null;
-        }, resetAfterMs);
-      }
-
-      return false;
-    }
-  }, [resetAfterMs]);
+    },
+    [resetAfterMs]
+  );
 
   return { status, copy, reset };
 }

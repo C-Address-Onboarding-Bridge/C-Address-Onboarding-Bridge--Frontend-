@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { CEX_LIST, STELLAR_NETWORK, SOROBAN_RPC_URL, HORIZON_URL } from "@/lib/types";
+import {
+  CEX_LIST,
+  STELLAR_NETWORK,
+  SOROBAN_RPC_URL,
+  HORIZON_URL,
+  isSupportedNetwork,
+  isOnrampProvider,
+  isTerminalStatus,
+  getAddressType,
+} from "@/lib/types";
 
 describe("CEX_LIST", () => {
   it("has three exchanges", () => {
@@ -39,5 +48,56 @@ describe("Network constants", () => {
   it("Horizon URLs are valid", () => {
     expect(HORIZON_URL.PUBLIC).toContain("horizon.stellar.org");
     expect(HORIZON_URL.TESTNET).toContain("testnet");
+  });
+});
+
+describe("isSupportedNetwork", () => {
+  it("returns true for PUBLIC and TESTNET", () => {
+    expect(isSupportedNetwork("PUBLIC")).toBe(true);
+    expect(isSupportedNetwork("TESTNET")).toBe(true);
+  });
+
+  it("returns false for UNSUPPORTED and UNKNOWN", () => {
+    expect(isSupportedNetwork("UNSUPPORTED")).toBe(false);
+    expect(isSupportedNetwork("UNKNOWN")).toBe(false);
+  });
+});
+
+describe("isOnrampProvider", () => {
+  it("accepts known providers", () => {
+    expect(isOnrampProvider("moonpay")).toBe(true);
+    expect(isOnrampProvider("transak")).toBe(true);
+  });
+
+  it("rejects unknown values", () => {
+    expect(isOnrampProvider("stripe")).toBe(false);
+    expect(isOnrampProvider(null)).toBe(false);
+    expect(isOnrampProvider(42)).toBe(false);
+  });
+});
+
+describe("isTerminalStatus", () => {
+  it("returns true for confirmed and failed", () => {
+    expect(isTerminalStatus("confirmed")).toBe(true);
+    expect(isTerminalStatus("failed")).toBe(true);
+  });
+
+  it("returns false for pending", () => {
+    expect(isTerminalStatus("pending")).toBe(false);
+  });
+});
+
+describe("getAddressType", () => {
+  it("returns G for G-addresses", () => {
+    expect(getAddressType("GABC123")).toBe("G");
+  });
+
+  it("returns C for C-addresses", () => {
+    expect(getAddressType("CABC123")).toBe("C");
+  });
+
+  it("returns null for unknown prefixes", () => {
+    expect(getAddressType("XABC123")).toBe(null);
+    expect(getAddressType("")).toBe(null);
   });
 });

@@ -27,6 +27,112 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
   },
 ];
 
+const FLAGS_ENDPOINT = '/api/feature-flags';
+const REMOTE_CACHE_KEY = 'ff_remote_cache';
+const REMOTE_FETCH_TIMEOUT_MS = 3000;
+
+let remoteFlagsMemo: FeatureFlag[] | null = null;
+
+function readCachedRemoteFlags(): FeatureFlag[] | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(REMOTE_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as FeatureFlag[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedRemoteFlags(flags: FeatureFlag[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(REMOTE_CACHE_KEY, JSON.stringify(flags));
+  } catch {
+    // Storage unavailable/full — cache is a best-effort convenience only.
+  }
+}
+
+/**
+ * Fetches flag definitions from the backend so they can be changed without a
+ * client redeploy. Falls back to the last-known-good cache on failure, and
+ * populates `remoteFlagsMemo` so subsequent `isFeatureEnabled` calls in this
+ * session use it without refetching. Never throws — a flag source that can
+ * fail must not be able to crash the app that reads it.
+ */
+export async function fetchRemoteFlags(): Promise<FeatureFlag[]> {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
+  const timeout = controller
+    ? setTimeout(() => controller.abort(), REMOTE_FETCH_TIMEOUT_MS)
+    : undefined;
+  try {
+    const res = await fetch(FLAGS_ENDPOINT, { signal: controller?.signal });
+    if (!res.ok) throw new Error(`Feature flag source returned ${res.status}`);
+    const data = await res.json();
+    if (!Array.isArray(data)) throw new Error('Feature flag source returned an unexpected shape');
+    remoteFlagsMemo = data as FeatureFlag[];
+    writeCachedRemoteFlags(remoteFlagsMemo);
+    return remoteFlagsMemo;
+  } catch {
+    const cached = readCachedRemoteFlags();
+    if (cached) {
+      remoteFlagsMemo = cached;
+      return cached;
+    }
+    // No remote and no cache: fail safe rather than trusting the bundled
+    // defaults, since a future flag could default to enabled.
+    remoteFlagsMemo = FEATURE_FLAGS.map((f) => ({ ...f, defaultEnabled: false, rolloutPercentage: 0 }));
+    return remoteFlagsMemo;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function getFlagDef(key: string): FeatureFlag | undefined {
+  const source = remoteFlagsMemo ?? readCachedRemoteFlags();
+  return (source ?? FEATURE_FLAGS).find((f) => f.key === key);
+}
+
+/**
+ * Determines if a feature flag is enabled for the current user/session.
+ * Priority order:
+ * 1. Developer override (localStorage) — highest priority, dev panel only
+ * 2. Environment variable override (NEXT_PUBLIC_FEATURE_FLAGS)
+ * 3. Rollout percentage (deterministic based on the given user/session id,
+ *    so the same user consistently lands on the same side of a gradual
+ *    rollout instead of flipping on every evaluation)
+ * 4. Default value
+ *
+ * Until {@link fetchRemoteFlags} has resolved at least once, definitions
+ * fall back to the last cached response, then to the bundled defaults.
+ */
+export function isFeatureEnabled(
+  key: string,
+  sessionId?: string,
+): boolean {
+  const normalizedKey = key.trim();
+  if (!normalizedKey) return false;
+
+  if (process.env.NODE_ENV === 'development') {
+    const overrides = getDevOverrides();
+    if (normalizedKey in overrides) return overrides[normalizedKey];
+  }
+
+  const envFlags = parseEnvFlags();
+  if (normalizedKey in envFlags) return envFlags[normalizedKey];
+
+  const flag = getFlagDef(normalizedKey);
+  if (!flag) return false;
+
+  if (flag.rolloutPercentage <= 0) return flag.defaultEnabled;
+  if (flag.rolloutPercentage >= 100) return true;
+
+  const id = sessionId ?? getSessionId();
+  const bucket = deterministicHash(`${normalizedKey}:${id}`) % 100;
+  return bucket < flag.rolloutPercentage;
+}
+
 /**
  * Deterministic hash function for consistent rollout behavior.
  */
@@ -67,17 +173,20 @@ const DEV_OVERRIDES_KEY = 'ff_dev_overrides';
 export function getDevOverrides(): Record<string, boolean> {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = localStorage.getItem(DEV_OVERRIDES_KEY);
+    const raw = window.localStorage.getItem(DEV_OVERRIDES_KEY);
     if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    // Must be a plain object (not null, not array, not primitive)
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    // All values must be booleans
-    const obj = parsed as Record<string, unknown>;
-    for (const val of Object.values(obj)) {
-      if (typeof val !== 'boolean') return {};
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed) ||
+      !Object.values(parsed).every((v) => typeof v === 'boolean')
+    ) {
+      return {};
     }
-    return obj as Record<string, boolean>;
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([key]) => key.trim().length > 0)
+    ) as Record<string, boolean>;
   } catch {
     return {};
   }
@@ -91,14 +200,15 @@ export function getDevOverrides(): Record<string, boolean> {
  * NODE_ENV guard. (#240)
  */
 export function setDevOverride(key: string, enabled: boolean): void {
-  if (process.env.NODE_ENV !== 'development') return;
-  if (typeof window === 'undefined') return;
+  if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
   try {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) return;
     const overrides = getDevOverrides();
-    overrides[key] = enabled;
-    localStorage.setItem(DEV_OVERRIDES_KEY, JSON.stringify(overrides));
+    overrides[normalizedKey] = enabled;
+    window.localStorage.setItem(DEV_OVERRIDES_KEY, JSON.stringify(overrides));
   } catch {
-    // ignore storage errors
+    // Storage unavailable — override simply won't persist this session.
   }
 }
 
@@ -109,14 +219,19 @@ export function setDevOverride(key: string, enabled: boolean): void {
  * of which call site invokes it. (#240)
  */
 export function clearDevOverride(key: string): void {
-  if (process.env.NODE_ENV !== 'development') return;
-  if (typeof window === 'undefined') return;
+  if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
   try {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) return;
     const overrides = getDevOverrides();
-    delete overrides[key];
-    localStorage.setItem(DEV_OVERRIDES_KEY, JSON.stringify(overrides));
+    delete overrides[normalizedKey];
+    if (Object.keys(overrides).length === 0) {
+      window.localStorage.removeItem(DEV_OVERRIDES_KEY);
+      return;
+    }
+    window.localStorage.setItem(DEV_OVERRIDES_KEY, JSON.stringify(overrides));
   } catch {
-    // ignore storage errors
+    // Storage unavailable — nothing to clear.
   }
 }
 

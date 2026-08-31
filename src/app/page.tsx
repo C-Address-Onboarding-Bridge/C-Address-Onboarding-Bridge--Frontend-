@@ -1,5 +1,8 @@
 import { ArrowRight, Shield, Zap, CreditCard, Building2, Globe, Code } from "lucide-react";
 import { PrefetchLink } from "@/components/prefetch-link";
+import { RecentActivityFeed } from "@/components/RecentActivityFeed";
+import { OnboardingChecklist } from "@/components/OnboardingChecklist";
+import { useWallet } from "@/components/wallet-provider";
 
 const features = [
   {
@@ -32,9 +35,6 @@ const steps = [
   {
     step: "01",
     title: "Connect Wallet",
-    // The connected Freighter account is the only possible source: Freighter
-    // signs with its active account, so any other "from" address could only
-    // fail at submission with tx_bad_auth. (#287)
     description: "Connect your Freighter wallet — the connected account funds the transfer.",
   },
   {
@@ -54,9 +54,39 @@ const steps = [
   },
 ];
 
+function useOnboardingSteps() {
+  const { isConnected } = useWallet();
+  return [
+    {
+      title: "Connect Wallet",
+      description: "Connect your Freighter wallet to get started.",
+      href: "/dashboard",
+      check: () => isConnected,
+    },
+    {
+      title: "Choose Funding Route",
+      description: "Select G-to-C bridge, fiat onramp, or CEX withdrawal.",
+      href: "/bridge",
+      check: () => false,
+    },
+    {
+      title: "Complete First Transfer",
+      description: "Fund your first C-address and confirm the transaction.",
+      href: "/bridge",
+      check: () => false,
+    },
+  ];
+}
+
 export default function LandingPage() {
+  const onboardingSteps = useOnboardingSteps();
+  
   return (
     <div>
+      {/* First-visit guided onboarding. Persists progress and suppresses itself
+          once completed — see src/components/onboarding-flow.tsx. (#472) */}
+      <OnboardingFlow />
+
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-[var(--primary)]/5 via-transparent to-transparent" />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-32">
@@ -92,6 +122,8 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      <OnboardingChecklist steps={onboardingSteps} />
 
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-24">
         <div className="text-center mb-16">
@@ -150,6 +182,8 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      <RecentActivityFeed />
 
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
         <div className="relative p-12 rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--primary)]/5 via-[var(--secondary)]/5 to-transparent overflow-hidden text-center">
