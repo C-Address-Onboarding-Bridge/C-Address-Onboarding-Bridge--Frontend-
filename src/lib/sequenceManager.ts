@@ -49,21 +49,20 @@ export async function getNextSequenceNumber(
   network: StellarNetwork
 ): Promise<bigint> {
   const key = cacheKey(accountId, network);
-  const now = Date.now();
   const entry = cache.get(key);
+  const now = Date.now();
 
   if (entry && now - entry.fetchedAt < CACHE_TTL_MS) {
-    // Increment in cache and return next sequence
+    // Increment cached sequence for this transaction
     entry.sequence += 1n;
     return entry.sequence;
   }
 
   // Cache miss or expired — fetch from network
-  const fetched = await fetchSequenceFromNetwork(accountId, server);
-  // fetched is the current sequence; next transaction uses fetched + 1
-  const nextSeq = fetched + 1n;
-  cache.set(key, { sequence: nextSeq, fetchedAt: now });
-  return nextSeq;
+  const currentSequence = await fetchSequenceFromNetwork(accountId, server);
+  const nextSequence = currentSequence + 1n;
+  cache.set(key, { sequence: nextSequence, fetchedAt: now });
+  return nextSequence;
 }
 
 /**
@@ -113,32 +112,23 @@ export function clearAllSequenceCache(): void {
  * Handles both Horizon and SorobanRpc error shapes.
  */
 export function isBadSequenceError(error: unknown): boolean {
-  if (error === null || error === undefined) return false;
+  if (!error || typeof error !== "object") return false;
 
-  // Check Horizon error shape: error.response.data.extras.result_codes.transaction
-  if (typeof error === "object") {
-    const e = error as {
-      response?: {
-        data?: {
-          extras?: {
-            result_codes?: {
-              transaction?: string;
-            };
-          };
-        };
-      };
-    };
-    const txCode = e.response?.data?.extras?.result_codes?.transaction;
-    if (txCode === "tx_bad_seq") return true;
+  const e = error as Record<string, unknown>;
+
+  // Horizon error shape
+  if (typeof e.response === "object" && e.response !== null) {
+    const resp = e.response as Record<string, unknown>;
+    const data = resp.data as Record<string, unknown> | undefined;
+    const extras = data?.extras as Record<string, unknown> | undefined;
+    const resultCodes = extras?.result_codes as Record<string, unknown> | undefined;
+
+    if (resultCodes?.transaction === "tx_bad_seq") return true;
   }
 
-  // Check error message
-  if (error instanceof Error) {
-    const msg = error.message.toLowerCase();
-    if (msg.includes("bad_seq") || msg.includes("tx_bad_seq")) return true;
-  }
-
-  return false;
+  // String error message fallback
+  const msg = String(e.message ?? "");
+  return msg.includes("bad_seq") || msg.includes("tx_bad_seq");
 }
 
 /**
@@ -162,22 +152,18 @@ export async function withSequenceRetry<T>(
   let attempts = 0;
 
   while (true) {
-    const getSequence = () => getNextSequenceNumber(accountId, server, network);
-
     try {
+      const getSequence = () => getNextSequenceNumber(accountId, server, network);
       return await fn(getSequence);
-    } catch (err) {
-      if (isBadSequenceError(err) && attempts < maxRetries) {
+    } catch (error) {
+      if (isBadSequenceError(error) && attempts < maxRetries) {
         attempts++;
-        // Invalidate cache so next call re-fetches fresh sequence
         invalidateSequenceCache(accountId, network);
-        // Apply backoff delay
-        await new Promise<void>((resolve) =>
-          setTimeout(resolve, RETRY_BACKOFF_MS * attempts)
-        );
+        // Small delay before retry to avoid thundering herd
+        await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS * attempts));
         continue;
       }
-      throw err;
+      throw error;
     }
   }
 }

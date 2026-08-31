@@ -70,7 +70,17 @@ export function FeatureFlagPanel() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
-  if (process.env.NODE_ENV !== "development") return null;
+  // Restricted to development, or to an explicitly authorised operator in
+  // production: NEXT_PUBLIC_FLAG_PANEL_TOKEN must be set and match a token
+  // the operator has stored in this browser's localStorage. Flags can
+  // control in-development or sensitive features, so the panel to flip them
+  // is not shipped open to every visitor. (#490)
+  const isAuthorisedInProd =
+    typeof window !== "undefined" &&
+    !!process.env.NEXT_PUBLIC_FLAG_PANEL_TOKEN &&
+    window.localStorage.getItem("ff_panel_token") === process.env.NEXT_PUBLIC_FLAG_PANEL_TOKEN;
+
+  if (process.env.NODE_ENV !== "development" && !isAuthorisedInProd) return null;
 
 
   return (

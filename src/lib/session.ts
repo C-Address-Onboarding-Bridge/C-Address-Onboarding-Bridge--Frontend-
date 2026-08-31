@@ -28,10 +28,16 @@ export interface WalletSession {
   manuallyDisconnected: boolean;
   /** Epoch ms this record was last written. */
   updatedAt: number;
+  /**
+   * The wallet ID last chosen by the user in the Stellar Wallets Kit modal
+   * (e.g. "freighter", "xbull", "lobstr"). Persisted so the kit can restore
+   * the same module on the next page load. (#459)
+   */
+  selectedWalletId: string | null;
 }
 
 function freshSession(now: number): WalletSession {
-  return { address: null, manuallyDisconnected: false, updatedAt: now };
+  return { address: null, manuallyDisconnected: false, updatedAt: now, selectedWalletId: null };
 }
 
 function storage(): Storage | null {
@@ -46,11 +52,7 @@ function storage(): Storage | null {
 
 /** True when `session` is older than the TTL and should be discarded. */
 export function isSessionExpired(session: WalletSession, now: number = Date.now()): boolean {
-  const { updatedAt } = session;
-  // NaN or a future timestamp both count as expired
-  if (!Number.isFinite(updatedAt)) return true;
-  if (updatedAt > now) return true;
-  return now > updatedAt + SESSION_TTL_MS;
+  return now - session.updatedAt > SESSION_TTL_MS;
 }
 
 function parseSession(raw: string | null): WalletSession | null {
@@ -63,6 +65,7 @@ function parseSession(raw: string | null): WalletSession | null {
       address: typeof candidate.address === "string" ? candidate.address : null,
       manuallyDisconnected: candidate.manuallyDisconnected === true,
       updatedAt: typeof candidate.updatedAt === "number" ? candidate.updatedAt : 0,
+      selectedWalletId: typeof candidate.selectedWalletId === "string" ? candidate.selectedWalletId : null,
     };
   } catch {
     return null;
@@ -81,15 +84,8 @@ export function loadSession(now: number = Date.now()): WalletSession {
   const raw = store.getItem(SESSION_STORAGE_KEY);
   const session = parseSession(raw);
 
-  if (!session) return freshSession(now);
-
-  if (isSessionExpired(session, now)) {
-    // Drop the stale record
-    try {
-      store.removeItem(SESSION_STORAGE_KEY);
-    } catch {
-      // ignore
-    }
+  if (!session || isSessionExpired(session, now)) {
+    if (raw !== null) store.removeItem(SESSION_STORAGE_KEY);
     return freshSession(now);
   }
 
@@ -111,9 +107,10 @@ function writeSession(session: WalletSession): WalletSession {
 /** Records an explicit connect, clearing any sticky disconnect. */
 export function markConnected(address: string | null, now: number = Date.now()): WalletSession {
   const session: WalletSession = {
-    address,
+    address: address ?? null,
     manuallyDisconnected: false,
     updatedAt: now,
+    selectedWalletId: loadSession(now).selectedWalletId,
   };
   return writeSession(session);
 }
@@ -124,9 +121,10 @@ export function markConnected(address: string | null, now: number = Date.now()):
  */
 export function markDisconnected(address: string | null = null, now: number = Date.now()): WalletSession {
   const session: WalletSession = {
-    address,
+    address: address ?? null,
     manuallyDisconnected: true,
     updatedAt: now,
+    selectedWalletId: loadSession(now).selectedWalletId,
   };
   return writeSession(session);
 }
@@ -138,6 +136,6 @@ export function clearSession(): void {
   try {
     store.removeItem(SESSION_STORAGE_KEY);
   } catch {
-    // ignore
+    // Ignore errors in privacy mode
   }
 }

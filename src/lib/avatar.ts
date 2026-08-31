@@ -42,13 +42,9 @@ export type AvatarValidation = { ok: true } | { ok: false; error: string };
 
 /** Human-readable size for error messages, e.g. "512 B", "512 KB" or "1.5 MB". */
 export function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)} KB`;
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
 }
 
 /**
@@ -56,20 +52,14 @@ export function formatBytes(bytes: number): string {
  * `File` it needs so it can be unit-tested without a DOM `File`.
  */
 export function validateAvatarFile(file: Pick<File, "type" | "size">): AvatarValidation {
-  if (!(ACCEPTED_AVATAR_TYPES as readonly string[]).includes(file.type)) {
-    return {
-      ok: false,
-      error: `Unsupported file type: ${file.type}. Accepted types: ${ACCEPTED_AVATAR_TYPES.join(", ")}`,
-    };
+  if (!ACCEPTED_AVATAR_TYPES.includes(file.type as (typeof ACCEPTED_AVATAR_TYPES)[number])) {
+    return { ok: false, error: "Choose a PNG, JPEG, WebP or GIF image." };
   }
-  if (file.size === 0) {
-    return { ok: false, error: "File is empty." };
+  if (file.size <= 0) {
+    return { ok: false, error: "The selected image is empty." };
   }
   if (file.size > AVATAR_MAX_BYTES) {
-    return {
-      ok: false,
-      error: `File is too large (${formatBytes(file.size)}) — the limit is ${formatBytes(AVATAR_MAX_BYTES)}.`,
-    };
+    return { ok: false, error: `Choose an image up to ${formatBytes(AVATAR_MAX_BYTES)}.` };
   }
   return { ok: true };
 }
@@ -101,8 +91,7 @@ export function loadAvatar(address: string | null | undefined): string | null {
   if (!store) return null;
   try {
     const value = store.getItem(avatarStorageKey(address));
-    if (!isRenderableAvatar(value)) return null;
-    return value;
+    return isRenderableAvatar(value) ? value : null;
   } catch {
     return null;
   }
@@ -114,8 +103,7 @@ export function loadAvatar(address: string | null | undefined): string | null {
  * surface a message instead of silently losing the image.
  */
 export function saveAvatar(address: string | null | undefined, dataUrl: string): boolean {
-  if (!address) return false;
-  if (!isRenderableAvatar(dataUrl)) return false;
+  if (!address || !isRenderableAvatar(dataUrl)) return false;
   const store = storage();
   if (!store) return false;
   try {
@@ -134,7 +122,7 @@ export function removeAvatar(address: string | null | undefined): void {
   try {
     store.removeItem(avatarStorageKey(address));
   } catch {
-    // ignore
+    // Ignore storage failures on best-effort cleanup.
   }
 }
 
@@ -143,7 +131,6 @@ export function removeAvatar(address: string | null | undefined): void {
  * base32 so the leading characters ("GA", "CB", …) are stable and readable.
  */
 export function avatarInitials(address: string | null | undefined): string {
-  if (!address || address.length === 0) return "?";
-  if (address.length === 1) return address.toUpperCase();
+  if (!address) return "?";
   return address.slice(0, 2).toUpperCase();
 }

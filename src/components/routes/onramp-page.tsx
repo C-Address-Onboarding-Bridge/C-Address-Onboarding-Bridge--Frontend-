@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { CreditCard, Wallet, ExternalLink, ArrowRight, Check, DollarSign, AlertCircle } from "lucide-react";
+import { CreditCard, Wallet, ExternalLink, ArrowRight, Check, DollarSign, AlertCircle, HelpCircle } from "lucide-react";
 import LiveRegion from "@/components/live-region";
 import { isValidStellarAddress, isCAddress } from "@/lib/stellar";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useHelp } from "@/contexts/HelpContext";
 
 const MOONPAY_API_KEY = process.env.NEXT_PUBLIC_MOONPAY_API_KEY || "";
 const TRANSAK_API_KEY = process.env.NEXT_PUBLIC_TRANSAK_API_KEY || "";
@@ -97,6 +98,7 @@ export function buildProviderUrl(p: typeof providers[number], cAddress: string, 
 }
 
 export default function OnrampPage() {
+  const { openHelp } = useHelp();
   const [cAddress, setCAddress] = useState("");
   const [fiatAmount, setFiatAmount] = useState("");
   const [selectedProvider, setSelectedProvider] = useState("moonpay");
@@ -406,15 +408,14 @@ export default function OnrampPage() {
             <p className="text-sm text-[var(--text-muted)] mb-3">
               Make sure your C-address is valid before continuing.
             </p>
-            <a
-              href="https://developers.stellar.org/docs/build/smart-contracts"
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              type="button"
+              onClick={openHelp}
               className="inline-flex items-center gap-2 text-sm text-[var(--primary-light)] hover:underline"
             >
-              Learn about Soroban addresses
-              <ArrowRight className="w-4 h-4" />
-            </a>
+              <HelpCircle className="w-4 h-4" />
+              Open help centre
+            </button>
           </div>
         </div>
       </div>

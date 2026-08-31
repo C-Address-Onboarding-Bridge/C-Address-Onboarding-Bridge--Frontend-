@@ -63,7 +63,7 @@ const CSP_HEADER_NAME = "Content-Security-Policy-Report-Only";
 // calls will be blocked once this header is enforcing.
 const cspHeader = `
   default-src 'self';
-  script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""};
+  script-src 'self'${isDev ? " 'unsafe-eval'" : ""};
   style-src 'self' 'unsafe-inline';
   img-src 'self' data:;
   font-src 'self';
