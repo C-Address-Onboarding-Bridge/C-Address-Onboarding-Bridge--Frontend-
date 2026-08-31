@@ -4,6 +4,9 @@
  * Handles health checks, transaction submission, and status polling.
  */
 import type { StellarNetwork } from "./types";
+import type { FundingSchedule, ScheduleInterval } from "./schedules";
+import type { Lock } from "./locks";
+import type { FeeTierStatus } from "./feeTiers";
 
 export interface HealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy';
@@ -250,6 +253,88 @@ export async function getFeeTierPreview(address: string, network: StellarNetwork
     console.error('Failed to fetch fee tier preview:', error);
     return null;
   }
+}
+
+/**
+ * Recurring funding schedules (#557).
+ *
+ * PLACEHOLDER INTERFACE: see `src/lib/schedules.ts` for why — no contract
+ * source or schedule API route exists anywhere in this repo to build
+ * against yet. The routes below (`POST /schedules`, `GET /schedules?address=`,
+ * `POST /schedules/:id/pause`, `POST /schedules/:id/resume`,
+ * `POST /schedules/:id/cancel`) are a best-guess shape, mirroring the
+ * existing `/locks` placeholder routes above, and must be reconciled
+ * against the real API once it lands.
+ */
+
+export interface CreateScheduleParams {
+  from: string;
+  recipient: string;
+  amount: string;
+  asset: string;
+  interval: ScheduleInterval;
+  /** Epoch milliseconds, or `null` for no end date. */
+  endDate: number | null;
+  network: StellarNetwork;
+}
+
+/** Creates a new recurring funding schedule. */
+export async function createSchedule(params: CreateScheduleParams): Promise<FundingSchedule> {
+  const response = await fetch(`${API_BASE_URL}/schedules`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractApiErrorMessage(response, `Schedule creation failed (${response.status})`));
+  }
+  return (await response.json()) as FundingSchedule;
+}
+
+/** Lists funding schedules sent from `address`, in any status. */
+export async function listSchedules(address: string, network: StellarNetwork): Promise<FundingSchedule[]> {
+  const response = await fetch(
+    `${API_BASE_URL}/schedules?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
+  );
+
+  if (!response.ok) {
+    throw new Error(await extractApiErrorMessage(response, `Failed to load schedules (${response.status})`));
+  }
+  const body = (await response.json()) as { schedules: FundingSchedule[] };
+  return body.schedules;
+}
+
+async function postScheduleAction(
+  scheduleId: string,
+  action: "pause" | "resume" | "cancel",
+  network: StellarNetwork
+): Promise<FundingSchedule> {
+  const response = await fetch(`${API_BASE_URL}/schedules/${encodeURIComponent(scheduleId)}/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ network }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractApiErrorMessage(response, `Failed to ${action} schedule (${response.status})`));
+  }
+  return (await response.json()) as FundingSchedule;
+}
+
+/** Pauses an active schedule — it stops executing but keeps its next-execution time for `resumeSchedule`. */
+export async function pauseSchedule(scheduleId: string, network: StellarNetwork): Promise<FundingSchedule> {
+  return postScheduleAction(scheduleId, "pause", network);
+}
+
+/** Resumes a paused schedule. */
+export async function resumeSchedule(scheduleId: string, network: StellarNetwork): Promise<FundingSchedule> {
+  return postScheduleAction(scheduleId, "resume", network);
+}
+
+/** Cancels a schedule permanently — no further executions will run. */
+export async function cancelSchedule(scheduleId: string, network: StellarNetwork): Promise<FundingSchedule> {
+  return postScheduleAction(scheduleId, "cancel", network);
 }
 
 /**

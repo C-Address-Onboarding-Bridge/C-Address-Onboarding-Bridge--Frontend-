@@ -6,6 +6,7 @@ import { useWallet } from "@/components/wallet-provider";
 import AvatarUpload from "@/components/avatar-upload";
 import TransactionHistory from "@/components/transaction-history";
 import ClaimsPanel from "@/components/claims-panel";
+import RecurringSchedulesPanel from "@/components/recurring-schedules-panel";
 import LiveRegion from "@/components/live-region";
 import Link from "next/link";
 import { getAccountBalances, fetchRecentTransactions, getExplorerUrl, formatNetworkLabel, toSafeErrorMessage, requestTestXLM } from "@/lib/stellar";
@@ -334,6 +335,7 @@ export default function DashboardPage() {
   const { isConnected, address, network, networkStatus, walletNetworkName, isNetworkSupported, connect } = useWallet();
   const { status: copyStatus, copy: copyToClipboard } = useCopyToClipboard();
   const [balance, setBalance] = useState<string | null>(null);
+  const [feeTierStatus, setFeeTierStatus] = useState<FeeTierStatus | null>(null);
   const [transactions, setTransactions] = useState<BridgeTransactionData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -699,6 +701,10 @@ export default function DashboardPage() {
 
       <div className="mt-8">
         <ClaimsPanel address={address ?? null} network={network} isNetworkSupported={isNetworkSupported} />
+      </div>
+
+      <div className="mt-8">
+        <RecurringSchedulesPanel address={address ?? null} network={network} isNetworkSupported={isNetworkSupported} />
       </div>
     </div>
   );

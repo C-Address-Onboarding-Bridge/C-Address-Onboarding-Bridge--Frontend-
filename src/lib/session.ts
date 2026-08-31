@@ -104,13 +104,22 @@ function writeSession(session: WalletSession): WalletSession {
   return session;
 }
 
-/** Records an explicit connect, clearing any sticky disconnect. */
-export function markConnected(address: string | null, now: number = Date.now()): WalletSession {
+/**
+ * Records an explicit connect, clearing any sticky disconnect. `walletId`
+ * persists which wallet (Freighter, xBull, Lobstr, …) was selected via the
+ * Stellar Wallets Kit modal, so a reload can restore the same one; omitting
+ * it keeps whatever was previously persisted. (#459)
+ */
+export function markConnected(
+  address: string | null,
+  now: number = Date.now(),
+  walletId?: string | null
+): WalletSession {
   const session: WalletSession = {
     address: address ?? null,
     manuallyDisconnected: false,
     updatedAt: now,
-    selectedWalletId: loadSession(now).selectedWalletId,
+    selectedWalletId: walletId !== undefined ? walletId : loadSession(now).selectedWalletId,
   };
   return writeSession(session);
 }

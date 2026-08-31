@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import BridgePage from "@/app/bridge/page";
 
@@ -30,6 +30,7 @@ vi.mock("@/components/wallet-provider", () => ({
     walletNetworkName: "Testnet",
     isNetworkSupported: true,
     isOnline: true,
+    recentlyChangedNetwork: false,
     connect: vi.fn(),
   }),
 }));
@@ -49,11 +50,24 @@ vi.mock("@/lib/stellar", () => ({
   getAccountMinimumBalance: () => "1",
   getEstimatedFeeXLM: vi.fn().mockResolvedValue("~0.00001 XLM"),
   toSafeErrorMessage: (_e: unknown, fallback: string) => fallback,
+  // Not under test here — the mainnet-change warning (#480) has its own
+  // coverage; these tests just need it to never gate the confirm flow.
+  shouldWarnOnMainnetAction: () => false,
 }));
 
 const createLockMock = vi.fn();
 vi.mock("@/lib/api", () => ({
   createLock: (...args: unknown[]) => createLockMock(...args),
+  // The page also fetches a fee-tier preview (#468) and can submit a batch
+  // or a recurring schedule (#557) on other tabs — none of that is under
+  // test here, so these just need to resolve/exist rather than be undefined.
+  getFeeTierPreview: vi.fn().mockResolvedValue(null),
+  submitBatchFunding: vi.fn(),
+  createSchedule: vi.fn(),
+}));
+
+vi.mock("@/lib/notifications", () => ({
+  addNotification: vi.fn(),
 }));
 
 async function fillForm() {
@@ -69,8 +83,32 @@ function futureDatetimeLocal(msFromNow: number): string {
 }
 
 describe("Bridge form — lock option (#467)", () => {
+  beforeEach(() => {
+    // "Review" (both locked and instant) runs a pre-signing simulation
+    // (#478) before advancing; a successful one keeps Confirm enabled the
+    // same way a real backend response would. Simulation itself isn't under
+    // test here — only that the lock flow reaches createLock once reviewed.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            ok: true,
+            feeStroops: "100",
+            feeXlm: "0.00001 XLM",
+            netAmount: "10",
+            grossAmount: "10",
+            asset: "XLM",
+            recipient: VALID_C_ADDRESS,
+          }),
+      })
+    );
+  });
+
   afterEach(() => {
     createLockMock.mockReset();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
