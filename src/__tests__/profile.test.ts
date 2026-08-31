@@ -1,71 +1,143 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from "vitest";
 import {
-  clearDisplayName,
+  DISPLAY_NAME_MAX_LENGTH,
   displayNameStorageKey,
+  isRenderableDisplayName,
+  loadDisplayName,
   saveDisplayName,
-  shortenAddress,
+  validateDisplayName,
 } from "@/lib/profile";
 
 const ADDRESS_A = "GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW";
-const ADDRESS_B = "CABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW";
 
-beforeEach(() => {
-  window.localStorage.clear();
-});
-
-describe("clearDisplayName (#527)", () => {
-  it("removes the stored name for the given address", () => {
-    saveDisplayName(ADDRESS_A, "Alice");
-    expect(window.localStorage.getItem(displayNameStorageKey(ADDRESS_A))).toBe("Alice");
-
-    clearDisplayName(ADDRESS_A);
-
-    expect(window.localStorage.getItem(displayNameStorageKey(ADDRESS_A))).toBeNull();
+describe("validateDisplayName (#523)", () => {
+  it("rejects an empty or whitespace-only name", () => {
+    expect(validateDisplayName("").ok).toBe(false);
+    expect(validateDisplayName("   ").ok).toBe(false);
   });
 
-  it("only clears the given address, leaving other addresses untouched", () => {
-    saveDisplayName(ADDRESS_A, "Alice");
-    saveDisplayName(ADDRESS_B, "Bob");
-
-    clearDisplayName(ADDRESS_A);
-
-    expect(window.localStorage.getItem(displayNameStorageKey(ADDRESS_A))).toBeNull();
-    expect(window.localStorage.getItem(displayNameStorageKey(ADDRESS_B))).toBe("Bob");
+  it("trims surrounding whitespace and returns the trimmed value", () => {
+    const result = validateDisplayName("  Alice  ");
+    expect(result).toEqual({ ok: true, value: "Alice" });
   });
 
-  it("is a no-op for a null/undefined address (does not throw)", () => {
-    expect(() => clearDisplayName(null)).not.toThrow();
-    expect(() => clearDisplayName(undefined)).not.toThrow();
+  it("accepts a name exactly at the code point cap", () => {
+    const name = "a".repeat(DISPLAY_NAME_MAX_LENGTH);
+    expect(validateDisplayName(name)).toEqual({ ok: true, value: name });
   });
 
-  it("is a no-op when nothing was ever stored for the address", () => {
-    expect(() => clearDisplayName(ADDRESS_A)).not.toThrow();
-    expect(window.localStorage.getItem(displayNameStorageKey(ADDRESS_A))).toBeNull();
+  it("rejects a name over the code point cap", () => {
+    const name = "a".repeat(DISPLAY_NAME_MAX_LENGTH + 1);
+    expect(validateDisplayName(name).ok).toBe(false);
+  });
+
+  it("counts astral-plane emoji as a single code point each (#458)", () => {
+    // Each emoji below is a single Unicode code point but 2 UTF-16 units.
+    const name = "\u{1F600}".repeat(DISPLAY_NAME_MAX_LENGTH);
+    expect(validateDisplayName(name).ok).toBe(true);
+    expect(validateDisplayName(name + "\u{1F600}").ok).toBe(false);
+  });
+
+  it("rejects control characters and bidi overrides", () => {
+    expect(validateDisplayName("Alice\nBob").ok).toBe(false);
+    expect(validateDisplayName("Alice‮cve.exe").ok).toBe(false);
   });
 });
 
-describe("shortenAddress (#528)", () => {
-  it("keeps the first 6 and last 6 characters, joined by an ellipsis", () => {
-    const result = shortenAddress(ADDRESS_A);
-    expect(result).toBe(`${ADDRESS_A.slice(0, 6)}…${ADDRESS_A.slice(-6)}`);
-    expect(result.startsWith(ADDRESS_A.slice(0, 6))).toBe(true);
-    expect(result.endsWith(ADDRESS_A.slice(-6))).toBe(true);
+describe("isRenderableDisplayName (#524)", () => {
+  it("rejects non-string values from tampered storage", () => {
+    expect(isRenderableDisplayName(null)).toBe(false);
+    expect(isRenderableDisplayName(undefined)).toBe(false);
+    expect(isRenderableDisplayName(42)).toBe(false);
+    expect(isRenderableDisplayName({ name: "Alice" })).toBe(false);
   });
 
-  it("returns strings of 12 characters or fewer unchanged", () => {
-    expect(shortenAddress("123456789012")).toBe("123456789012"); // exactly 12
-    expect(shortenAddress("short")).toBe("short");
-    expect(shortenAddress("")).toBe("");
+  it("rejects a value with leading/trailing whitespace (not pre-trimmed)", () => {
+    expect(isRenderableDisplayName(" Alice")).toBe(false);
+    expect(isRenderableDisplayName("Alice ")).toBe(false);
   });
 
-  it("shortens strings of 13 characters or more", () => {
-    const address = "1234567890123"; // 13 chars
-    expect(shortenAddress(address)).toBe("123456…890123");
+  it("rejects a value that fails validateDisplayName (e.g. control chars, too long)", () => {
+    expect(isRenderableDisplayName("Alice\nBob")).toBe(false);
+    expect(isRenderableDisplayName("a".repeat(DISPLAY_NAME_MAX_LENGTH + 1))).toBe(false);
+    expect(isRenderableDisplayName("")).toBe(false);
   });
 
-  it("returns an empty string for null/undefined input", () => {
-    expect(shortenAddress(null)).toBe("");
-    expect(shortenAddress(undefined)).toBe("");
+  it("accepts a trimmed, valid string and narrows the type", () => {
+    const value: unknown = "Alice";
+    expect(isRenderableDisplayName(value)).toBe(true);
+    if (isRenderableDisplayName(value)) {
+      // Type guard narrows `unknown` to `string`.
+      expect(value.toUpperCase()).toBe("ALICE");
+    }
+  });
+});
+
+describe("loadDisplayName (#525)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("returns null when address is missing", () => {
+    expect(loadDisplayName(null)).toBeNull();
+    expect(loadDisplayName(undefined)).toBeNull();
+    expect(loadDisplayName("")).toBeNull();
+  });
+
+  it("returns null when nothing is stored for the address", () => {
+    expect(loadDisplayName(ADDRESS_A)).toBeNull();
+  });
+
+  it("returns the stored name when present and valid", () => {
+    localStorage.setItem(displayNameStorageKey(ADDRESS_A), "Alice");
+    expect(loadDisplayName(ADDRESS_A)).toBe("Alice");
+  });
+
+  it("returns null instead of throwing when stored value is tampered/invalid", () => {
+    // Not trimmed — fails isRenderableDisplayName even though it's a string.
+    localStorage.setItem(displayNameStorageKey(ADDRESS_A), " Alice ");
+    expect(loadDisplayName(ADDRESS_A)).toBeNull();
+  });
+
+  it("scopes names per address", () => {
+    localStorage.setItem(displayNameStorageKey(ADDRESS_A), "Alice");
+    expect(loadDisplayName("CDIFFERENTADDRESS")).toBeNull();
+  });
+});
+
+describe("saveDisplayName (#526)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("returns false when address is missing", () => {
+    expect(saveDisplayName(null, "Alice")).toBe(false);
+    expect(saveDisplayName(undefined, "Alice")).toBe(false);
+    expect(saveDisplayName("", "Alice")).toBe(false);
+  });
+
+  it("returns false and stores nothing when the name is invalid", () => {
+    expect(saveDisplayName(ADDRESS_A, "")).toBe(false);
+    expect(saveDisplayName(ADDRESS_A, "a".repeat(DISPLAY_NAME_MAX_LENGTH + 1))).toBe(false);
+    expect(localStorage.getItem(displayNameStorageKey(ADDRESS_A))).toBeNull();
+  });
+
+  it("persists the trimmed value and returns true on success", () => {
+    expect(saveDisplayName(ADDRESS_A, "  Alice  ")).toBe(true);
+    expect(localStorage.getItem(displayNameStorageKey(ADDRESS_A))).toBe("Alice");
+    expect(loadDisplayName(ADDRESS_A)).toBe("Alice");
+  });
+
+  it("returns false instead of throwing when the store write fails (quota error)", () => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => {
+      throw new Error("QuotaExceededError");
+    };
+    try {
+      expect(saveDisplayName(ADDRESS_A, "Alice")).toBe(false);
+    } finally {
+      Storage.prototype.setItem = original;
+    }
   });
 });

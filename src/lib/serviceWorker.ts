@@ -80,12 +80,25 @@ function parseUrl(url: string): URL | null {
  * request-specific and may carry user data.
  */
 export function shouldBypassCache(request: RequestLike): boolean {
-  throw new Error('Not implemented: shouldBypassCache');
+  const method = (request.method ?? "GET").toUpperCase();
+  if (method !== "GET") return true;
+
+  const url = parseUrl(request.url);
+  if (!url) return true;
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") return true;
+
+  if (NEVER_CACHE_ORIGINS.some((origin) => request.url.startsWith(origin))) return true;
+
+  if (url.pathname === "/api" || url.pathname.startsWith("/api/")) return true;
+
+  return false;
 }
 
 /** True when the pathname points at a static asset that is safe to serve cache-first. */
 export function isCacheableAsset(pathname: string): boolean {
-  throw new Error('Not implemented: isCacheableAsset');
+  const lower = pathname.toLowerCase();
+  return CACHEABLE_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
 /**
@@ -103,7 +116,7 @@ export function cacheStrategyFor(request: RequestLike, origin: string): CacheStr
 
 /** True for caches this app owns from an older worker version — deleted on activate. */
 export function isStaleCache(cacheName: string): boolean {
-  throw new Error('Not implemented: isStaleCache');
+  return cacheName.startsWith(SW_CACHE_PREFIX) && cacheName !== SW_CACHE_NAME;
 }
 
 /** Only responses that are OK, basic (same-origin) and non-partial are worth storing. */
@@ -112,12 +125,13 @@ export function isCacheableResponse(response: {
   status?: number;
   type?: string;
 } | null | undefined): boolean {
-  throw new Error('Not implemented: isCacheableResponse');
+  if (!response) return false;
+  return response.ok === true && response.status !== 206 && response.type === "basic";
 }
 
 /** Registration is opt-in, so a stale cached shell can never surprise a deploy. */
 export function isServiceWorkerEnabled(): boolean {
-  throw new Error('Not implemented: isServiceWorkerEnabled');
+  return process.env.NEXT_PUBLIC_ENABLE_SW === "true";
 }
 
 interface NavigatorLike {
