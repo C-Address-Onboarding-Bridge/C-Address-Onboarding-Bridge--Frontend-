@@ -142,7 +142,7 @@ interface NavigatorLike {
 
 /** True when this environment can host a worker at all (SSR and older browsers can't). */
 export function isServiceWorkerSupported(nav: NavigatorLike | undefined = typeof navigator === "undefined" ? undefined : navigator): boolean {
-  throw new Error('Not implemented: isServiceWorkerSupported');
+  return typeof nav?.serviceWorker?.register === "function";
 }
 
 /**
@@ -154,5 +154,14 @@ export function isServiceWorkerSupported(nav: NavigatorLike | undefined = typeof
 export async function registerServiceWorker(
   nav: NavigatorLike | undefined = typeof navigator === "undefined" ? undefined : navigator,
 ): Promise<ServiceWorkerRegistration | null> {
-  throw new Error('Not implemented: registerServiceWorker');
+  if (!isServiceWorkerEnabled() || !isServiceWorkerSupported(nav)) {
+    return null;
+  }
+  try {
+    return await nav!.serviceWorker!.register(SW_SCRIPT_URL, { scope: SW_SCOPE });
+  } catch {
+    // A failed registration must never break boot: the app is fully
+    // functional without a worker.
+    return null;
+  }
 }

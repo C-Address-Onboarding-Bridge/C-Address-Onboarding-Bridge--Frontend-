@@ -62,6 +62,25 @@ describe("wallet session persistence (#343)", () => {
     }
   });
 
+  it("loadSession defaults selectedWalletId to null on a fresh session", () => {
+    expect(loadSession(NOW).selectedWalletId).toBeNull();
+  });
+
+  it("loadSession returns a fresh session when the stored record is a JSON array", () => {
+    localStorage.setItem(SESSION_STORAGE_KEY, "[1,2,3]");
+    const session = loadSession(NOW);
+    expect(session.manuallyDisconnected).toBe(false);
+    expect(session.address).toBeNull();
+    // The unparseable-as-a-session record must not be re-parsed on later calls.
+    expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+  });
+
+  it("loadSession is idempotent: reading twice does not itself expire a fresh record", () => {
+    markDisconnected(ADDRESS, NOW);
+    expect(loadSession(NOW + 1).manuallyDisconnected).toBe(true);
+    expect(loadSession(NOW + 2).manuallyDisconnected).toBe(true);
+  });
+
   it("clearSession removes the record", () => {
     markDisconnected(ADDRESS, NOW);
     clearSession();
@@ -91,6 +110,20 @@ describe("wallet session persistence (#343)", () => {
     expect(isSessionExpired(session, NOW + SESSION_TTL_MS)).toBe(false);
     expect(isSessionExpired(session, NOW + SESSION_TTL_MS + 1)).toBe(true);
     expect(isSessionExpired({ ...session, updatedAt: NaN }, NOW)).toBe(true);
+  });
+
+  it("isSessionExpired treats a future-stamped record as not expired in isolation", () => {
+    // loadSession layers its own future-stamp rejection on top of this; in
+    // isolation a negative age is simply "not yet past the TTL".
+    const session = { address: ADDRESS, manuallyDisconnected: true, updatedAt: NOW + 60_000 };
+    expect(isSessionExpired(session, NOW)).toBe(false);
+  });
+
+  it("isSessionExpired defaults `now` to the current time when omitted", () => {
+    const recent = { address: ADDRESS, manuallyDisconnected: true, updatedAt: Date.now() };
+    expect(isSessionExpired(recent)).toBe(false);
+    const stale = { address: ADDRESS, manuallyDisconnected: true, updatedAt: Date.now() - SESSION_TTL_MS - 1 };
+    expect(isSessionExpired(stale)).toBe(true);
   });
 
   it("markDisconnected returns the written session", () => {
