@@ -85,7 +85,8 @@ export function shouldBypassCache(request: RequestLike): boolean {
 
 /** True when the pathname points at a static asset that is safe to serve cache-first. */
 export function isCacheableAsset(pathname: string): boolean {
-  throw new Error('Not implemented: isCacheableAsset');
+  const lower = pathname.toLowerCase();
+  return CACHEABLE_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
 /**
@@ -103,7 +104,7 @@ export function cacheStrategyFor(request: RequestLike, origin: string): CacheStr
 
 /** True for caches this app owns from an older worker version — deleted on activate. */
 export function isStaleCache(cacheName: string): boolean {
-  throw new Error('Not implemented: isStaleCache');
+  return cacheName.startsWith(SW_CACHE_PREFIX) && cacheName !== SW_CACHE_NAME;
 }
 
 /** Only responses that are OK, basic (same-origin) and non-partial are worth storing. */
@@ -112,12 +113,13 @@ export function isCacheableResponse(response: {
   status?: number;
   type?: string;
 } | null | undefined): boolean {
-  throw new Error('Not implemented: isCacheableResponse');
+  if (!response) return false;
+  return response.ok === true && response.status !== 206 && response.type === "basic";
 }
 
 /** Registration is opt-in, so a stale cached shell can never surprise a deploy. */
 export function isServiceWorkerEnabled(): boolean {
-  throw new Error('Not implemented: isServiceWorkerEnabled');
+  return process.env.NEXT_PUBLIC_ENABLE_SW === "true";
 }
 
 interface NavigatorLike {
