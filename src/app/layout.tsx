@@ -2,18 +2,8 @@ import type { Metadata } from "next";
 import { Geist, JetBrains_Mono } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
-import { WalletProvider } from "@/components/wallet-provider";
 import { ErrorBoundary, WalletErrorBoundary } from "@/components/error-boundary";
-import { FeatureFlagProvider } from "@/contexts/FeatureFlagContext";
-import { FeatureFlagPanel } from "@/components/FeatureFlagPanel";
-import { StatusBanner } from "@/components/status-banner";
-import Navbar from "@/components/navbar";
-import Footer from "@/components/footer";
-import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
-import { OfflineBanner } from "@/components/offline-banner";
-import { HelpProvider } from "@/contexts/HelpContext";
-import { ThemeProvider } from "@/contexts/ThemeContext";
-import { LocaleProvider } from "@/contexts/LocaleContext";
+import { AppChrome } from "@/components/app-chrome";
 
 const geist = Geist({
   subsets: ["latin"],
@@ -132,33 +122,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="antialiased">
-        <ThemeProvider>
-          <LocaleProvider>
-          <FeatureFlagProvider>
-            <WalletProvider>
-              <HelpProvider>
-                <StatusBanner />
-              <div className="min-h-screen flex flex-col">
-                <a
-                  href="#main-content"
-                  className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-[var(--primary)] focus:text-white focus:font-medium focus:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-light)]"
-                >
-                  Skip to main content
-                </a>
-                <Navbar />
-                <main id="main-content" tabIndex={-1} className="flex-1 pt-16">
-                  {children}
-                </main>
-                <Footer />
-              </div>
-              <FeatureFlagPanel />
-                <ServiceWorkerRegistrar />
-                <OfflineBanner />
-              </HelpProvider>
-            </WalletProvider>
-          </FeatureFlagProvider>
-          </LocaleProvider>
-        </ThemeProvider>
+        <AppChrome>{children}</AppChrome>
       </body>
     </html>
   );

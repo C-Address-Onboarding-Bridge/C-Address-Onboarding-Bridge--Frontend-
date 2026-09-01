@@ -205,6 +205,12 @@ export async function getHorizonServer(network: StellarNetwork): Promise<Horizon
   return new Horizon.Server(HORIZON_URL[network]);
 }
 
+/**
+ * Get a Soroban RPC server client for `network`.
+ *
+ * Throws a descriptive error if no RPC URL is configured for the network
+ * (see `NEXT_PUBLIC_SOROBAN_RPC_URL_<NETWORK>`).
+ */
 export async function getSorobanRpcServer(network: StellarNetwork): Promise<rpc.Server> {
   const url = SOROBAN_RPC_URL[network];
   if (!url) {
@@ -215,6 +221,7 @@ export async function getSorobanRpcServer(network: StellarNetwork): Promise<rpc.
   return new rpc.Server(url);
 }
 
+/** The network passphrase Horizon/Soroban RPC requests for `network` must sign with. */
 export async function getNetworkPassphrase(network: StellarNetwork): Promise<string> {
   return network === "PUBLIC" ? Networks.PUBLIC : Networks.TESTNET;
 }
@@ -229,12 +236,8 @@ export async function getNetworkPassphrase(network: StellarNetwork): Promise<str
  */
 export async function connectWallet(): Promise<string | null> {
   try {
-    const conn = await isConnected();
-    if (!conn.isConnected) {
-      throw new Error("Freighter not detected");
-    }
-    const addr = await getAddress();
-    return addr.address;
+    const result = await openWalletSelectionModal();
+    return result?.address ?? null;
   } catch (e) {
     console.error("Failed to connect wallet:", e);
     return null;
@@ -249,9 +252,12 @@ export async function connectWallet(): Promise<string | null> {
  * provider, which is both faster and avoids permission-prompt loops. (#459)
  */
 export async function checkConnection(): Promise<boolean> {
+  if (!_kitReady || typeof window === "undefined") return false;
   try {
-    const result = await isConnected();
-    return result.isConnected;
+    const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+    // selectedModule is a getter that throws once nothing has been chosen —
+    // caught below and treated the same as "not connected".
+    return !!StellarWalletsKit.selectedModule;
   } catch {
     return false;
   }
@@ -261,8 +267,13 @@ export async function checkConnection(): Promise<boolean> {
  * Return the public key for the currently connected wallet, or null.
  */
 export async function getWalletAddress(): Promise<string | null> {
+  if (typeof window === "undefined") return null;
   try {
-    const result = await getAddress();
+    if (!_kitReady) {
+      await initWalletKit();
+    }
+    const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+    const result = await StellarWalletsKit.getAddress();
     return result.address;
   } catch {
     return null;
@@ -294,8 +305,12 @@ export interface WalletNetworkInfo {
  */
 export async function getWalletNetwork(): Promise<WalletNetworkInfo> {
   try {
-    const result = await getNetwork();
-    // Freighter reports failures in-band via `error` as well as by throwing.
+    if (!_kitReady) {
+      await initWalletKit();
+    }
+    const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+    const result = await StellarWalletsKit.getNetwork();
+    // The wallet can report failures in-band via `error` as well as by throwing.
     if (result && typeof result === "object" && "error" in result && result.error) {
       return { status: "UNKNOWN", name: null };
     }
@@ -353,10 +368,12 @@ export function isValidStellarAmount(amount: string): boolean {
   return !isNaN(num) && num > 0;
 }
 
+/** Whether `address` is a valid Soroban contract address (a `C...` StrKey). */
 export function isCAddress(address: string): boolean {
   return StrKey.isValidContract(address);
 }
 
+/** Whether `address` is a valid Stellar account address (a `G...` ed25519 StrKey). */
 export function isGAddress(address: string): boolean {
   return StrKey.isValidEd25519PublicKey(address);
 }
