@@ -268,8 +268,13 @@ export async function checkConnection(): Promise<boolean> {
  * Return the public key for the currently connected wallet, or null.
  */
 export async function getWalletAddress(): Promise<string | null> {
+  if (typeof window === "undefined") return null;
   try {
-    const result = await getAddress();
+    if (!_kitReady) {
+      await initWalletKit();
+    }
+    const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+    const result = await StellarWalletsKit.getAddress();
     return result.address;
   } catch {
     return null;
@@ -301,8 +306,12 @@ export interface WalletNetworkInfo {
  */
 export async function getWalletNetwork(): Promise<WalletNetworkInfo> {
   try {
-    const result = await getNetwork();
-    // Freighter reports failures in-band via `error` as well as by throwing.
+    if (!_kitReady) {
+      await initWalletKit();
+    }
+    const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+    const result = await StellarWalletsKit.getNetwork();
+    // The wallet can report failures in-band via `error` as well as by throwing.
     if (result && typeof result === "object" && "error" in result && result.error) {
       return { status: "UNKNOWN", name: null };
     }
