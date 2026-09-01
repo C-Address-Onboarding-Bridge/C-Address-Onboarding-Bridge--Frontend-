@@ -365,6 +365,7 @@ export function isCAddress(address: string): boolean {
   return StrKey.isValidContract(address);
 }
 
+/** Whether `address` is a valid Stellar account address (a `G...` ed25519 StrKey). */
 export function isGAddress(address: string): boolean {
   return StrKey.isValidEd25519PublicKey(address);
 }
