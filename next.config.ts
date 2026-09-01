@@ -97,6 +97,36 @@ const securityHeaders = [
   },
 ];
 
+/**
+ * The embeddable widget (#558) exists specifically to be framed by
+ * third-party host pages, so it can't ship the blanket `frame-ancestors
+ * 'none'` / `X-Frame-Options: DENY` above — that would break every embed.
+ * There's no "any origin may frame me" value for X-Frame-Options (ALLOW-FROM
+ * is deprecated and ignored by current browsers), so it's omitted here
+ * rather than set to something misleading; `frame-ancestors *` is the actual,
+ * modern equivalent. The real security boundary for the widget isn't "who
+ * can put us in an iframe" — it's the postMessage origin check in
+ * src/lib/widget.ts, since the widget never trusts a message (or reveals a
+ * result) without validating the declared parent origin.
+ */
+const widgetSecurityHeaders = [
+  {
+    key: CSP_HEADER_NAME,
+    value: cspHeader
+      .replace(/frame-ancestors 'none';/, "frame-ancestors *;")
+      .replace(/\s{2,}/g, " ")
+      .trim(),
+  },
+  {
+    key: "Referrer-Policy",
+    value: "strict-origin-when-cross-origin",
+  },
+  {
+    key: "Permissions-Policy",
+    value: "camera=(), microphone=(), geolocation=(), payment=()",
+  },
+];
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 
@@ -123,9 +153,15 @@ const nextConfig: NextConfig = {
 
   async headers() {
     return [
+      // Excludes /widget so its relaxed frame-ancestors below is the only
+      // one ever applied there — no two entries ever match the same path.
       {
-        source: "/(.*)",
+        source: "/((?!widget).*)",
         headers: securityHeaders,
+      },
+      {
+        source: "/widget/:path*",
+        headers: widgetSecurityHeaders,
       },
     ];
   },

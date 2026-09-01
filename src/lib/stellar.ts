@@ -236,12 +236,8 @@ export async function getNetworkPassphrase(network: StellarNetwork): Promise<str
  */
 export async function connectWallet(): Promise<string | null> {
   try {
-    const conn = await isConnected();
-    if (!conn.isConnected) {
-      throw new Error("Freighter not detected");
-    }
-    const addr = await getAddress();
-    return addr.address;
+    const result = await openWalletSelectionModal();
+    return result?.address ?? null;
   } catch (e) {
     console.error("Failed to connect wallet:", e);
     return null;
@@ -256,9 +252,12 @@ export async function connectWallet(): Promise<string | null> {
  * provider, which is both faster and avoids permission-prompt loops. (#459)
  */
 export async function checkConnection(): Promise<boolean> {
+  if (!_kitReady || typeof window === "undefined") return false;
   try {
-    const result = await isConnected();
-    return result.isConnected;
+    const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+    // selectedModule is a getter that throws once nothing has been chosen —
+    // caught below and treated the same as "not connected".
+    return !!StellarWalletsKit.selectedModule;
   } catch {
     return false;
   }

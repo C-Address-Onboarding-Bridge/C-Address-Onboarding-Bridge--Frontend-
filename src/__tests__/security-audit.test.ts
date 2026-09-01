@@ -213,8 +213,46 @@ describe("security headers (next.config.ts)", () => {
     expect(nextConfig).toMatch(pattern);
   });
 
-  it("applies the header set to every route", () => {
-    expect(nextConfig).toMatch(/source:\s*"\/\(\.\*\)"/);
+  it("applies the header set to every route except the embeddable widget", () => {
+    // #558: the widget is designed to be framed by third-party host pages,
+    // so it deliberately doesn't get frame-ancestors 'none' / X-Frame-Options
+    // DENY. This asserts the carve-out is exactly "/widget" and nothing
+    // broader, so a future edit can't widen it by accident.
+    expect(nextConfig).toMatch(/source:\s*"\/\(\(\?!widget\)\.\*\)"/);
+  });
+});
+
+describe("embeddable widget headers (#558)", () => {
+  it("gives the widget route its own header set, not the strict default", () => {
+    expect(nextConfig).toMatch(/source:\s*"\/widget\/:path\*"/);
+    expect(nextConfig).toMatch(/headers:\s*widgetSecurityHeaders/);
+  });
+
+  it("relaxes frame-ancestors for the widget instead of dropping CSP outright", () => {
+    const widgetHeaders = nextConfig.match(
+      /const widgetSecurityHeaders = \[([\s\S]*?)\n\];/,
+    )?.[1];
+    expect(widgetHeaders, "widgetSecurityHeaders array not found in next.config.ts").toBeTruthy();
+    // Checks the .replace() call rewrites the shared cspHeader's
+    // frame-ancestors, not that the string "frame-ancestors 'none'" is
+    // absent from this block's source text — it necessarily appears once,
+    // as the pattern the .replace() call matches against.
+    expect(widgetHeaders).toMatch(/\.replace\(\/frame-ancestors 'none';\/, "frame-ancestors \*;"\)/);
+  });
+
+  it("does not send X-Frame-Options on the widget route (no permissive value exists for it)", () => {
+    const widgetHeaders = nextConfig.match(
+      /const widgetSecurityHeaders = \[([\s\S]*?)\n\];/,
+    )?.[1];
+    expect(widgetHeaders).not.toMatch(/X-Frame-Options/);
+  });
+
+  it("keeps Referrer-Policy and Permissions-Policy on the widget route", () => {
+    const widgetHeaders = nextConfig.match(
+      /const widgetSecurityHeaders = \[([\s\S]*?)\n\];/,
+    )?.[1];
+    expect(widgetHeaders).toMatch(/"Referrer-Policy"/);
+    expect(widgetHeaders).toMatch(/"Permissions-Policy"/);
   });
 });
 

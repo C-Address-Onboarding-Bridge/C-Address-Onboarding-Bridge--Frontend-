@@ -13,6 +13,60 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
+// Mock the Stellar Wallets Kit SDK before importing stellar.ts — same
+// convention as src/__tests__/walletNetwork.test.ts. checkConnection() and
+// connectWallet() (#549, #560) read the kit's in-memory state / open its
+// selection modal rather than calling the Freighter API directly. (#459)
+// ---------------------------------------------------------------------------
+
+const mockAuthModal = vi.fn<[], Promise<{ address: string }>>();
+const mockInit = vi.fn();
+let mockSelectedModule: { productId: string } | null = null;
+
+vi.mock("@creit.tech/stellar-wallets-kit/sdk", () => ({
+  StellarWalletsKit: {
+    init: mockInit,
+    authModal: () => mockAuthModal(),
+    get selectedModule() {
+      if (!mockSelectedModule) throw new Error("No wallet selected");
+      return mockSelectedModule;
+    },
+  },
+  Networks: {
+    PUBLIC: "Public Global Stellar Network ; September 2015",
+    TESTNET: "Test SDF Network ; September 2015",
+  },
+}));
+
+vi.mock("@creit.tech/stellar-wallets-kit/modules/freighter", () => ({
+  FreighterModule: class {
+    productId = "freighter";
+  },
+}));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/xbull", () => ({
+  xBullModule: class {
+    productId = "xbull";
+  },
+}));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/lobstr", () => ({
+  LobstrModule: class {
+    productId = "lobstr";
+  },
+}));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/albedo", () => ({
+  AlbedoModule: class {
+    productId = "albedo";
+  },
+}));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/rabet", () => ({
+  RabetModule: class {
+    productId = "rabet";
+  },
+}));
+
+import { initWalletKit, checkConnection, connectWallet } from "@/lib/stellar";
+
+// ---------------------------------------------------------------------------
 // We test the session helpers directly, without mocking the DOM.
 // ---------------------------------------------------------------------------
 
@@ -140,19 +194,45 @@ describe("session — expiry", () => {
 // multi-wallet: kit not ready (browser-only code, unit tested via stub)
 // ---------------------------------------------------------------------------
 
-describe("multi-wallet — kit guards (#459)", () => {
-  it("checkConnection returns false when kit module is not available in test env", async () => {
-    // In the test environment the Stellar SDK imports fail (axios needs location.href).
-    // We verify the guard behaviour directly by calling the helpers with a mocked module.
-    const checkConnectionFn = async (): Promise<boolean> => {
-      // Simulate _kitReady = false guard
-      const kitReady = false;
-      if (!kitReady || typeof window === "undefined") return false;
-      return true;
-    };
-    expect(await checkConnectionFn()).toBe(false);
+describe("checkConnection (#549)", () => {
+  beforeEach(() => {
+    mockSelectedModule = null;
   });
 
+  it("returns false when no wallet has been selected", async () => {
+    await initWalletKit(null);
+    mockSelectedModule = null;
+    expect(await checkConnection()).toBe(false);
+  });
+
+  it("returns true once a wallet is selected", async () => {
+    await initWalletKit(null);
+    mockSelectedModule = { productId: "freighter" };
+    expect(await checkConnection()).toBe(true);
+  });
+});
+
+describe("connectWallet (#560)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSelectedModule = null;
+  });
+
+  it("returns the address when the user selects a wallet", async () => {
+    await initWalletKit(null);
+    mockAuthModal.mockResolvedValue({ address: "GABC" });
+    mockSelectedModule = { productId: "freighter" };
+    await expect(connectWallet()).resolves.toBe("GABC");
+  });
+
+  it("returns null when the user dismisses the selection modal", async () => {
+    await initWalletKit(null);
+    mockAuthModal.mockRejectedValue(new Error("User closed the modal"));
+    await expect(connectWallet()).resolves.toBeNull();
+  });
+});
+
+describe("multi-wallet — kit guards (#459)", () => {
   it("getWalletAddress returns null when kit is not ready", async () => {
     const getWalletAddressFn = async (): Promise<string | null> => {
       const kitReady = false;
