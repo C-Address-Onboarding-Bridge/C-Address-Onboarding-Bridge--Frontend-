@@ -221,6 +221,7 @@ export async function getSorobanRpcServer(network: StellarNetwork): Promise<rpc.
   return new rpc.Server(url);
 }
 
+/** The network passphrase Horizon/Soroban RPC requests for `network` must sign with. */
 export async function getNetworkPassphrase(network: StellarNetwork): Promise<string> {
   return network === "PUBLIC" ? Networks.PUBLIC : Networks.TESTNET;
 }
