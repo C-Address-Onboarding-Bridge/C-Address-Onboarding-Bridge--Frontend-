@@ -7,14 +7,17 @@
  *   (`/bridge`, `/onramp`, `/cex`) that also appear in the navbar.
  * - "Resources" column: external links (Soroban docs, GitHub, Stellar.org),
  *   all opened via `target="_blank"` with `rel="noopener noreferrer"`.
+ * - A language switcher row so users can change locale without scrolling back
+ *   to the navbar (#462).
  * - A bottom bar with a disclaimer and the protocol name.
  *
- * Purely presentational — no state, no props. Memoized since it never
- * changes across route navigations.
+ * Purely presentational — no state beyond the locale switcher. Memoized since
+ * it never changes across route navigations.
  */
 import React, { memo } from "react";
-import { Wallet } from "lucide-react";
+import { Wallet, Globe } from "lucide-react";
 import { PrefetchLink } from "./prefetch-link";
+import { useLocale, SUPPORTED_LOCALES, type Locale } from "@/contexts/LocaleContext";
 
 // Internal destinations must go through the router, not a raw <a>. A bare
 // anchor triggers a full document load, which remounts WalletProvider and
@@ -27,7 +30,16 @@ const protocolLinks = [
   { href: "/cex", label: "CEX Withdrawal" },
 ];
 
+const LOCALE_FULL_LABELS: Record<Locale, string> = {
+  en: "English",
+  es: "Español",
+  fr: "Français",
+  pt: "Português",
+};
+
 const Footer = () => {
+  const { locale, setLocale } = useLocale();
+
   return (
     <footer className="border-t border-[var(--border)] bg-[var(--surface)]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -64,14 +76,66 @@ const Footer = () => {
           <div>
             <h3 className="text-sm font-semibold mb-3">Resources</h3>
             <ul className="space-y-2">
-              <li><a href="https://soroban.stellar.org" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]">Soroban Docs</a></li>
-              <li><a href="https://github.com" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]">GitHub</a></li>
-              <li><a href="https://stellar.org" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]">Stellar</a></li>
+              <li>
+                <a
+                  href="https://soroban.stellar.org"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]"
+                >
+                  Soroban Docs
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://github.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]"
+                >
+                  GitHub
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://stellar.org"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]"
+                >
+                  Stellar
+                </a>
+              </li>
             </ul>
           </div>
         </div>
 
-        <div className="mt-8 pt-8 border-t border-[var(--border)] flex flex-col sm:flex-row items-center justify-between gap-4">
+        {/* Language switcher row (#462) */}
+        <div className="mt-8 pt-6 border-t border-[var(--border)]">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+              <Globe className="w-3.5 h-3.5" aria-hidden="true" />
+              Language
+            </span>
+            {SUPPORTED_LOCALES.map((l) => (
+              <button
+                key={l}
+                onClick={() => setLocale(l)}
+                aria-pressed={l === locale}
+                lang={l}
+                className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                  l === locale
+                    ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary-light)] font-medium"
+                    : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--foreground)] hover:border-[var(--text-muted)]"
+                }`}
+              >
+                {LOCALE_FULL_LABELS[l]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-6 pt-6 border-t border-[var(--border)] flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-xs text-[var(--text-muted)]">
             Built for the Stellar Soroban ecosystem. Not financial advice.
           </p>

@@ -12,6 +12,8 @@ import Footer from "@/components/footer";
 import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
 import { OfflineBanner } from "@/components/offline-banner";
 import { HelpProvider } from "@/contexts/HelpContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
+import { LocaleProvider } from "@/contexts/LocaleContext";
 
 const geist = Geist({
   subsets: ["latin"],
@@ -72,6 +74,20 @@ export const metadata: Metadata = {
   },
 };
 
+/**
+ * Flash-prevention script for theme (#461).
+ *
+ * Runs synchronously before the first paint (strategy="beforeInteractive").
+ * Reads the persisted preference from localStorage; falls back to the OS
+ * prefers-color-scheme; defaults to dark. Adds .dark to <html> when needed.
+ * This keeps the DOM class in sync with the ThemeContext initial state so
+ * there is no visible flicker on first load.
+ *
+ * Kept as a raw string rather than a separate file so it is inlined by the
+ * bundler and executed before any stylesheet has finished parsing.
+ */
+const themeScript = `(function(){try{var s=localStorage.getItem('ui:theme');if(s==='dark'||(s!=='light'&&!window.matchMedia('(prefers-color-scheme: light)').matches)){document.documentElement.classList.add('dark')}}catch(e){}})()`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const structuredData = {
     "@context": "https://schema.org",
@@ -97,6 +113,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${geist.variable} ${jetbrainsMono.variable}`}>
       <head>
+        {/*
+         * Flash-prevention: must run before any stylesheet to avoid a visible
+         * flash of the wrong theme. strategy="beforeInteractive" inlines the
+         * script in the <head> before hydration.
+         */}
+        <Script
+          id="theme-init"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{ __html: themeScript }}
+        />
         <Script
           id="structured-data"
           type="application/ld+json"
@@ -106,29 +132,33 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="antialiased">
-        <FeatureFlagProvider>
-          <WalletProvider>
-            <HelpProvider>
-              <StatusBanner />
-            <div className="min-h-screen flex flex-col">
-              <a
-                href="#main-content"
-                className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-[var(--primary)] focus:text-white focus:font-medium focus:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-light)]"
-              >
-                Skip to main content
-              </a>
-              <Navbar />
-              <main id="main-content" tabIndex={-1} className="flex-1 pt-16">
-                {children}
-              </main>
-              <Footer />
-            </div>
-            <FeatureFlagPanel />
-              <ServiceWorkerRegistrar />
-              <OfflineBanner />
-            </HelpProvider>
-          </WalletProvider>
-        </FeatureFlagProvider>
+        <ThemeProvider>
+          <LocaleProvider>
+          <FeatureFlagProvider>
+            <WalletProvider>
+              <HelpProvider>
+                <StatusBanner />
+              <div className="min-h-screen flex flex-col">
+                <a
+                  href="#main-content"
+                  className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:rounded-lg focus:bg-[var(--primary)] focus:text-white focus:font-medium focus:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-light)]"
+                >
+                  Skip to main content
+                </a>
+                <Navbar />
+                <main id="main-content" tabIndex={-1} className="flex-1 pt-16">
+                  {children}
+                </main>
+                <Footer />
+              </div>
+              <FeatureFlagPanel />
+                <ServiceWorkerRegistrar />
+                <OfflineBanner />
+              </HelpProvider>
+            </WalletProvider>
+          </FeatureFlagProvider>
+          </LocaleProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

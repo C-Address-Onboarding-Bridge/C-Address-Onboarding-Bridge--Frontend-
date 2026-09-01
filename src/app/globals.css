@@ -1,6 +1,46 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens — two complete colour palettes.
+ *
+ * Light theme lives on :root; dark theme overrides those variables when the
+ * `.dark` class is present on <html>. The flash-prevention script in
+ * layout.tsx sets `.dark` before the first paint, so there is no flicker.
+ *
+ * WCAG AA audit: see src/__tests__/contrast.test.ts.
+ * The --text-muted value for each theme is chosen so every surface it appears
+ * over clears the 4.5:1 ratio for normal text.
+ */
+
+/* ── Light theme (default) ─────────────────────────────────────────────── */
 :root {
+  --background: #f5f6fa;
+  --foreground: #0d0e14;
+  --primary: #5b4de0;
+  --primary-light: #7c6ef5;
+  --secondary: #00a8a5;
+  --accent: #e8527a;
+  --surface: #ffffff;
+  --surface-2: #ecedf3;
+  --border: #d0d1da;
+  /* #5d5f6d achieves >= 4.5:1 on every surface --text-muted renders over,
+     including --surface-2 (#ecedf3) and tinted overlays (primary/10%,
+     success/10%, error/10% on --surface). Verified by contrast.test.ts. */
+  --text-muted: #5d5f6d;
+  --success: #007a63;
+  --warning: #c07800;
+  --error: #c0392b;
+
+  /* Channel forms for alpha variants — kept in sync with --primary / --secondary. */
+  --primary-rgb: 91 77 224;
+  --secondary-rgb: 0 168 165;
+
+  /* The brand gradient, used by .gradient-text and .gradient-border. */
+  --gradient-brand: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+}
+
+/* ── Dark theme ─────────────────────────────────────────────────────────── */
+:root.dark {
   --background: #0a0b0e;
   --foreground: #e8eaed;
   --primary: #6c5ce7;
@@ -163,4 +203,3 @@ html {
     box-shadow: none !important;
   }
 }
-

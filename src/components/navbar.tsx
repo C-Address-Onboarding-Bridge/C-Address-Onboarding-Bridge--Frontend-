@@ -12,12 +12,31 @@
 import React, { memo, useState, useCallback, useMemo, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Wallet, ArrowLeftRight, CreditCard, Building2, LayoutDashboard, UserRound, BookUser, Menu, X, AlertTriangle, LogOut } from "lucide-react";
+import {
+  Wallet,
+  ArrowLeftRight,
+  CreditCard,
+  Building2,
+  LayoutDashboard,
+  UserRound,
+  BookUser,
+  Menu,
+  X,
+  AlertTriangle,
+  LogOut,
+  Sun,
+  Moon,
+  HelpCircle,
+  Globe,
+} from "lucide-react";
 import { useWallet } from "./wallet-provider";
 import { PrefetchLink } from "./prefetch-link";
 import NotificationCentre from "./notification-centre";
 import { formatNetworkLabel } from "@/lib/stellar";
 import { useHelp } from "@/contexts/HelpContext";
+import { useTheme } from "@/contexts/ThemeContext";
+import { useLocale, SUPPORTED_LOCALES, type Locale } from "@/contexts/LocaleContext";
+import { APP_NETWORK, type StellarNetwork, type WalletNetworkState } from "@/lib/types";
 
 const navLinks = [
   { href: "/bridge", label: "Bridge", icon: ArrowLeftRight },
@@ -27,6 +46,21 @@ const navLinks = [
   { href: "/address-book", label: "Address Book", icon: BookUser },
   { href: "/profile", label: "Profile", icon: UserRound },
 ];
+
+/** Human-readable labels for each locale. */
+const LOCALE_LABELS: Record<Locale, string> = {
+  en: "EN",
+  es: "ES",
+  fr: "FR",
+  pt: "PT",
+};
+
+const LOCALE_FULL_LABELS: Record<Locale, string> = {
+  en: "English",
+  es: "Español",
+  fr: "Français",
+  pt: "Português",
+};
 
 interface NetworkBadgeProps {
   label: string;
@@ -44,6 +78,112 @@ const NetworkBadge = ({ label, className, title }: NetworkBadgeProps) => (
     {label}
   </span>
 );
+
+// ---------------------------------------------------------------------------
+// ThemeToggle
+// ---------------------------------------------------------------------------
+
+const ThemeToggle = memo(function ThemeToggle() {
+  const { theme, toggleTheme } = useTheme();
+  const isDark = theme === "dark";
+  return (
+    <button
+      onClick={toggleTheme}
+      aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+      title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+      className="p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+    >
+      {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+    </button>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Language Switcher (desktop dropdown)
+// ---------------------------------------------------------------------------
+
+const LanguageSwitcher = memo(function LanguageSwitcher() {
+  const { locale, setLocale } = useLocale();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  // Close on outside click.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  // Close on Escape.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        btnRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="relative hidden sm:block">
+      <button
+        ref={btnRef}
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Language: ${LOCALE_FULL_LABELS[locale]}`}
+        title="Change language"
+        className="flex items-center gap-1 p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+      >
+        <Globe className="w-4 h-4" />
+        <span className="text-xs font-medium">{LOCALE_LABELS[locale]}</span>
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Select language"
+          className="absolute right-0 top-full mt-1 w-36 rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-lg z-50 py-1"
+        >
+          {SUPPORTED_LOCALES.map((l) => (
+            <button
+              key={l}
+              role="option"
+              aria-selected={l === locale}
+              onClick={() => {
+                setLocale(l);
+                setOpen(false);
+              }}
+              className={`w-full flex items-center justify-between px-3 py-2 text-sm transition-colors hover:bg-[var(--surface-2)] ${
+                l === locale
+                  ? "text-[var(--primary-light)] font-medium"
+                  : "text-[var(--text-muted)] hover:text-[var(--foreground)]"
+              }`}
+            >
+              <span>{LOCALE_FULL_LABELS[l]}</span>
+              {l === locale && (
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)]" />
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Navbar
+// ---------------------------------------------------------------------------
 
 const Navbar = () => {
   const pathname = usePathname();
@@ -68,12 +208,15 @@ const Navbar = () => {
   const [networkMenuOpen, setNetworkMenuOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<StellarNetwork | null>(null);
   const [switchHint, setSwitchHint] = useState<string | null>(null);
+  // Mobile language dropdown
+  const [mobileLangOpen, setMobileLangOpen] = useState(false);
 
   const toggleButtonRef = useRef<HTMLButtonElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const wasOpenRef = useRef(false);
 
   const { openHelp } = useHelp();
+  const { locale, setLocale, t } = useLocale();
 
   const toggleMobile = useCallback(() => setMobileOpen((v) => !v), []);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
@@ -225,14 +368,63 @@ const Navbar = () => {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Persistent network indicator + switcher (#480) */}
+            <div className="relative hidden sm:block">
+              <button
+                onClick={() => setNetworkMenuOpen((v) => !v)}
+                aria-label={`Network: ${switcherBadge.label}. Change network`}
+                aria-haspopup="menu"
+                aria-expanded={networkMenuOpen}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[0.6rem] font-semibold uppercase tracking-wide transition-colors ${switcherBadge.className}`}
+              >
+                {switcherBadge.label}
+              </button>
+              {networkMenuOpen && (
+                <div
+                  role="menu"
+                  aria-label="Switch network"
+                  className="absolute right-0 top-full mt-1 w-40 rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-lg z-50 py-1"
+                >
+                  {(["TESTNET", "PUBLIC"] as StellarNetwork[]).map((target) => {
+                    const isCurrent = isNetworkSupported && networkStatus === target;
+                    return (
+                      <button
+                        key={target}
+                        role="menuitem"
+                        onClick={() => handleSwitchNetwork(target)}
+                        disabled={switchingTo !== null || isCurrent}
+                        className="w-full flex items-center justify-between px-3 py-2 text-sm transition-colors hover:bg-[var(--surface-2)] text-[var(--text-muted)] hover:text-[var(--foreground)] disabled:opacity-50"
+                      >
+                        <span>{target === "PUBLIC" ? "Mainnet" : "Testnet"}</span>
+                        {isCurrent && <span className="text-xs text-[var(--success)]">Current</span>}
+                      </button>
+                    );
+                  })}
+                  {switchHint && (
+                    <p role="status" className="px-3 py-2 text-xs text-[var(--text-muted)] border-t border-[var(--border)]">
+                      {switchHint}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Help */}
             <button
               onClick={openHelp}
-              aria-label="Open help centre"
-              title="Help"
+              aria-label={t("common.help")}
+              title={t("common.help")}
               className="hidden sm:flex p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
             >
               <HelpCircle className="w-4 h-4" />
             </button>
+
+            {/* Language switcher (desktop) */}
+            <LanguageSwitcher />
+
+            {/* Theme toggle */}
+            <ThemeToggle />
+
             {isConnected ? (
               <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
                 <div className="w-2 h-2 rounded-full bg-[var(--success)]" />
@@ -240,8 +432,8 @@ const Navbar = () => {
                 <NetworkBadge {...networkBadge} />
                 <button
                   onClick={handleDisconnect}
-                  aria-label="Disconnect wallet"
-                  title="Disconnect wallet"
+                  aria-label={t("common.disconnect")}
+                  title={t("common.disconnect")}
                   className="ml-1 p-1 rounded text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
                 >
                   <LogOut className="w-3.5 h-3.5" />
@@ -254,7 +446,7 @@ const Navbar = () => {
                 className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--primary)] text-white text-sm font-medium hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50"
               >
                 <Wallet className="w-4 h-4" />
-                {isConnecting ? "Connecting..." : "Connect Wallet"}
+                {isConnecting ? t("common.loading") : t("common.connect_wallet")}
               </button>
             )}
 
@@ -356,8 +548,46 @@ const Navbar = () => {
                 </PrefetchLink>
               );
             })}
+
+            {/* Language switcher (mobile) */}
             <div className="pt-2 mt-2 border-t border-[var(--border)]">
               <div className="flex items-center justify-between px-3 py-1">
+                <span className="text-xs text-[var(--text-muted)] flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5" />
+                  Language
+                </span>
+                <button
+                  onClick={() => setMobileLangOpen((v) => !v)}
+                  aria-expanded={mobileLangOpen}
+                  className="text-xs text-[var(--text-muted)] hover:text-[var(--foreground)] transition-colors"
+                >
+                  {LOCALE_FULL_LABELS[locale]}
+                </button>
+              </div>
+              {mobileLangOpen && (
+                <div className="flex flex-wrap gap-1 px-3 pt-1 pb-2">
+                  {SUPPORTED_LOCALES.map((l) => (
+                    <button
+                      key={l}
+                      onClick={() => {
+                        setLocale(l);
+                        setMobileLangOpen(false);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                        l === locale
+                          ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary-light)]"
+                          : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)]"
+                      }`}
+                    >
+                      {LOCALE_FULL_LABELS[l]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2 mt-2 border-t border-[var(--border)]">
+              <div className="flex items-center gap-2 px-3 py-1">
                 <span className="text-xs text-[var(--text-muted)]">Network</span>
                 <span
                   className={`text-[0.6rem] font-semibold px-1.5 py-0.5 rounded-full uppercase tracking-wide ${switcherBadge.className}`}
@@ -399,7 +629,7 @@ const Navbar = () => {
                   className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border border-[var(--border)] text-sm font-medium text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
                 >
                   <LogOut className="w-4 h-4" />
-                  Disconnect Wallet
+                  {t("common.disconnect")}
                 </button>
               </div>
             ) : (
@@ -409,7 +639,7 @@ const Navbar = () => {
                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[var(--primary)] text-white text-sm font-medium"
               >
                 <Wallet className="w-4 h-4" />
-                {isConnecting ? "Connecting..." : "Connect Wallet"}
+                {isConnecting ? t("common.loading") : t("common.connect_wallet")}
               </button>
             )}
           </div>
@@ -420,4 +650,3 @@ const Navbar = () => {
 };
 
 export default memo(Navbar);
-
