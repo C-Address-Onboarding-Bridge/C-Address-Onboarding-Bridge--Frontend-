@@ -49,6 +49,14 @@ describe("Payment form layout (#341)", () => {
   });
 
   it("imports only the hooks it uses", () => {
-    expect(source).toContain('import { useState } from "react";');
+    // #556 added the provider quote-comparison panel, which needs
+    // useEffect/useCallback/useRef alongside useState (for its polling
+    // refresh + in-flight-request guard) — this list must stay in sync with
+    // what the file actually imports from "react".
+    expect(source).toContain('import { useState, useEffect, useCallback, useRef } from "react";');
+    const importedHooks = ["useState", "useEffect", "useCallback", "useRef"];
+    for (const hook of importedHooks) {
+      expect(source).toContain(hook);
+    }
   });
 });

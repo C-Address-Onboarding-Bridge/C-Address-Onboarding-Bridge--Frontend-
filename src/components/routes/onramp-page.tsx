@@ -1,16 +1,28 @@
 "use client";
 
-import { useState } from "react";
-import { CreditCard, Wallet, ExternalLink, ArrowRight, Check, DollarSign, AlertCircle, HelpCircle } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { CreditCard, Wallet, ExternalLink, ArrowRight, Check, DollarSign, AlertCircle, HelpCircle, RefreshCw, Trophy } from "lucide-react";
 import LiveRegion from "@/components/live-region";
 import { isValidStellarAddress, isCAddress } from "@/lib/stellar";
+import {
+  compareOnrampQuotes,
+  quoteSpread,
+  formatQuoteAge,
+  formatQuoteFeeRate,
+  type OnrampQuoteComparison,
+} from "@/lib/onrampQuotes";
+import type { OnrampProvider } from "@/lib/types";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useHelp } from "@/contexts/HelpContext";
 
 const MOONPAY_API_KEY = process.env.NEXT_PUBLIC_MOONPAY_API_KEY || "";
 const TRANSAK_API_KEY = process.env.NEXT_PUBLIC_TRANSAK_API_KEY || "";
 
-const providers = [
+// Exported (in addition to the pure helpers below) so `src/lib/onrampQuotes.ts`
+// (#556) can compare providers without re-declaring this list — one source of
+// truth for id/name/fee/limits/currencies, same reasoning as exporting
+// getProviderFeeRate/calculateOnrampFeeAndReceive themselves.
+export const providers = [
   {
     id: "moonpay",
     name: "Moonpay",
@@ -95,6 +107,161 @@ export function buildProviderUrl(p: typeof providers[number], cAddress: string, 
           fiatCurrency: fiatCurrency,
         });
   return `${p.baseUrl}?${params}`;
+}
+
+const QUOTE_REFRESH_INTERVAL_MS = 30_000;
+
+/**
+ * Side-by-side provider comparison (#556). Purely additive to the existing
+ * form — `getProviderFeeRate`/`calculateOnrampFeeAndReceive` above still
+ * drive the single-provider "Estimated Output" box; this ranks all
+ * supported providers against each other for the same amount/currency.
+ *
+ * Live quotes are best-effort: `/api/onramp/quotes` degrades to `{ live: {} }`
+ * when no provider has a live-quote URL configured (see that route's docs),
+ * and a request that fails outright (network error, non-2xx, bad JSON) is
+ * treated the same way — `compareOnrampQuotes` always has its own estimate
+ * to fall back on, so a fetch failure never blanks the panel.
+ */
+function QuoteComparisonPanel({
+  fiatAmount,
+  fiatCurrency,
+  isValid,
+}: {
+  fiatAmount: string;
+  fiatCurrency: string;
+  isValid: boolean;
+}) {
+  const [comparisons, setComparisons] = useState<OnrampQuoteComparison[]>([]);
+  const [quotedAt, setQuotedAt] = useState<number | null>(null);
+  const [, forceTick] = useState(0);
+  const requestIdRef = useRef(0);
+
+  const amount = Number(fiatAmount) || 0;
+
+  const refresh = useCallback(async () => {
+    if (!isValid || amount <= 0) {
+      setComparisons([]);
+      setQuotedAt(null);
+      return;
+    }
+    const requestId = ++requestIdRef.current;
+    // Local estimate first, synchronously, so the panel never shows nothing
+    // while the (optional) live fetch is in flight.
+    setComparisons(compareOnrampQuotes(amount, fiatCurrency));
+    setQuotedAt(Date.now());
+
+    try {
+      const res = await fetch(`/api/onramp/quotes?amount=${encodeURIComponent(String(amount))}&currency=${encodeURIComponent(fiatCurrency)}`);
+      if (!res.ok) return;
+      const data: unknown = await res.json();
+      // A slower response for a superseded amount/currency must not clobber
+      // a newer one that already resolved.
+      if (requestId !== requestIdRef.current) return;
+      const live = (data as { live?: Partial<Record<OnrampProvider, { sourceAmount: string; destinationAmount: string; fee: string }>> }).live ?? {};
+      setComparisons(compareOnrampQuotes(amount, fiatCurrency, { liveQuotes: live }));
+      setQuotedAt(Date.now());
+    } catch {
+      // Network failure: the local-estimate comparison set above stands.
+    }
+  }, [amount, fiatCurrency, isValid]);
+
+  useEffect(() => {
+    // Fetch-on-mount/-change, same justified pattern as AddressBookPage's
+    // load effect: synchronizing the panel with the external quote source
+    // (the local estimator + /api/onramp/quotes) whenever amount/currency
+    // change, not deriving state from a render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refresh();
+  }, [refresh]);
+
+  // Timed refresh while a valid amount is entered, plus a 1s tick so the
+  // "quoted Xs ago" age display stays live between refreshes.
+  useEffect(() => {
+    if (!isValid || amount <= 0) return;
+    const refreshTimer = setInterval(refresh, QUOTE_REFRESH_INTERVAL_MS);
+    const tickTimer = setInterval(() => forceTick((n) => n + 1), 1000);
+    return () => {
+      clearInterval(refreshTimer);
+      clearInterval(tickTimer);
+    };
+  }, [refresh, isValid, amount]);
+
+  if (!isValid || amount <= 0) return null;
+
+  const spread = quoteSpread(comparisons);
+
+  return (
+    <div className="card p-5" data-testid="quote-comparison-panel">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold">Compare Providers</h3>
+        <button
+          type="button"
+          onClick={refresh}
+          aria-label="Refresh quotes"
+          data-testid="quote-refresh-button"
+          className="p-1.5 rounded hover:bg-[var(--surface-2)] text-[var(--text-muted)] transition-colors"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {comparisons.length === 0 ? (
+        <p className="text-sm text-[var(--text-muted)]">
+          No provider currently supports {fiatCurrency} for this comparison.
+        </p>
+      ) : (
+        <>
+          <ul className="space-y-2" data-testid="quote-comparison-list">
+            {comparisons.map((q) => (
+              <li
+                key={q.provider}
+                data-testid={`quote-row-${q.provider}`}
+                className={`p-3 rounded-lg border ${
+                  q.isBest ? "border-[var(--primary)] bg-[var(--primary)]/5" : "border-[var(--border)] bg-[var(--surface-2)]"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-sm font-medium flex items-center gap-1.5">
+                    {q.isBest && <Trophy className="w-3.5 h-3.5 text-[var(--primary)]" aria-hidden="true" />}
+                    {q.providerName}
+                    {q.isBest && <span className="sr-only"> — best rate</span>}
+                  </span>
+                  <span className="text-xs text-[var(--text-muted)]">
+                    {q.source === "live" ? "Live" : "Estimated"}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs text-[var(--text-muted)]">
+                  <span>Rate ({formatQuoteFeeRate(q.provider)} fee)</span>
+                  <span className="tabular-nums">-{q.fee} {q.fiatCurrency}</span>
+                </div>
+                <div className="flex justify-between text-sm font-semibold mt-1">
+                  <span className="text-[var(--text-muted)] font-normal text-xs self-center">You receive</span>
+                  <span className="tabular-nums">{q.destinationAmount} USDC</span>
+                </div>
+                {q.withinLimits === false && (
+                  <p className="text-xs text-[var(--error)] mt-1" role="alert">
+                    Outside {q.providerName}&apos;s advertised limits for this amount.
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          {spread && (
+            <p className="text-xs text-[var(--text-muted)] mt-3" data-testid="quote-spread">
+              Best vs. worst: {spread.absolute.toFixed(2)} USDC ({spread.percent.toFixed(1)}%) apart.
+            </p>
+          )}
+          {quotedAt && (
+            <p className="text-xs text-[var(--text-muted)] mt-1" data-testid="quote-age">
+              Quoted {formatQuoteAge(quotedAt)}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 export default function OnrampPage() {
@@ -366,6 +533,12 @@ export default function OnrampPage() {
         </div>
 
         <div className="space-y-4">
+          <QuoteComparisonPanel
+            fiatAmount={debouncedFiatAmount}
+            fiatCurrency={fiatCurrency}
+            isValid={validAmount && debouncedFiatAmount === fiatAmount}
+          />
+
           <div className="card p-5">
             <h3 className="font-semibold mb-3">Supported Providers</h3>
             <div className="space-y-3">

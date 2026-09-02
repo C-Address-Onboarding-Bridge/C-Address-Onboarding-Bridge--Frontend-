@@ -10,6 +10,7 @@ export const ROUTES = {
   ONRAMP: '/onramp',
   CEX: '/cex',
   PROFILE: '/profile',
+  SCHEDULES: '/schedules',
 } as const;
 
 export type RoutePath = (typeof ROUTES)[keyof typeof ROUTES];
