@@ -20,6 +20,7 @@ import {
   LayoutDashboard,
   UserRound,
   BookUser,
+  CalendarClock,
   Menu,
   X,
   AlertTriangle,
@@ -43,7 +44,8 @@ const navLinks = [
   { href: "/onramp", label: "Onramp", icon: CreditCard },
   { href: "/cex", label: "CEX", icon: Building2 },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/address-book", label: "Address Book", icon: BookUser },
+    { href: "/address-book", label: "Address Book", icon: BookUser },
+  { href: "/schedules", label: "Schedules", icon: CalendarClock },
   { href: "/profile", label: "Profile", icon: UserRound },
 ];
 
