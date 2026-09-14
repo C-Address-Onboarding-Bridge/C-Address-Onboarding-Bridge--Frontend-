@@ -18,7 +18,7 @@
   "dependencies": {
     "@creit.tech/stellar-wallets-kit": "2.6.0",
     "@stellar/freighter-api": "^6.0.1",
-    "@stellar/stellar-sdk": "^15.1.0",
+    "@stellar/stellar-sdk": "^17.0.1",
     "lucide-react": "^1.17.0",
     "next": "16.2.7",
     "qrcode": "^1.5.4",
