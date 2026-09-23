@@ -246,7 +246,18 @@ export function AnalyticsSection({ transactions }: { transactions: BridgeTransac
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div className="p-4 rounded-lg bg-[var(--surface-2)]">
               <p className="text-xs text-[var(--text-muted)] mb-1">Volume ({range}D)</p>
-              <p className="text-xl font-bold">{formatVolume(totals.volume)}</p>
+              {Object.keys(totals.byAsset).length === 0 ? (
+                <p className="text-xl font-bold">0</p>
+              ) : (
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  {Object.entries(totals.byAsset).map(([asset, volume]) => (
+                    <p key={asset} className="text-xl font-bold">
+                      {formatVolume(volume)}{" "}
+                      <span className="text-xs font-normal text-[var(--text-muted)]">{asset}</span>
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="p-4 rounded-lg bg-[var(--surface-2)]">
               <p className="text-xs text-[var(--text-muted)] mb-1">Transactions ({range}D)</p>

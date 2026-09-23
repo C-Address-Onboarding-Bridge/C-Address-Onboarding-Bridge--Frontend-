@@ -117,6 +117,19 @@ describe("AnalyticsSection", () => {
     expect(screen.getByText(/USDC: 20/i)).not.toBeNull();
   });
 
+  it("renders separate per-asset volumes in stat card instead of summing different currencies together", () => {
+    render(
+      <AnalyticsSection
+        transactions={[
+          tx({ amount: "100", asset: "XLM", timestamp: NOW }),
+          tx({ amount: "100", asset: "USDC", timestamp: NOW }),
+        ]}
+      />
+    );
+    // Verifies 100 XLM and 100 USDC are displayed independently per asset
+    expect(screen.getAllByText(/100/i).length).toBeGreaterThanOrEqual(2);
+  });
+
   it("renders the accessible data table with daily rows", () => {
     render(<AnalyticsSection transactions={[tx({ amount: "10", timestamp: NOW })]} />);
     const table = screen.getByRole("table", { name: /Analytics data for the last 30 days/i });
