@@ -1,33 +1,30 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState } from 'react';
 
 /**
- * Gates a loading skeleton behind a short delay so a fast response never
- * flashes it. Returns `true` only once `active` has been `true` continuously
- * for at least `delayMs` — if `active` flips back to `false` before the
- * delay elapses (a fast load), the returned value never becomes `true`.
+ * Hook that delays the loading state to avoid flashing skeletons on fast loads.
  *
- * Callers that need to reserve layout space for the eventual skeleton should
- * do so unconditionally (e.g. via `aria-hidden` markup rendered the whole
- * time `active` is true), and use this hook only to gate the skeleton's
- * *visibility* — see dashboard-page.tsx and transaction-history.tsx. (#485)
+ * @param isLoading - The original loading state.
+ * @param delayMs - Delay in milliseconds before showing the loading indicator. Default is 200ms.
+ * @returns A boolean indicating whether the delayed loading state should be shown.
  */
-export function useDelayedLoading(active: boolean, delayMs = 200): boolean {
-  const [show, setShow] = useState(false);
-
-  // Adjusting state during render (react.dev/learn/you-might-not-need-an-effect)
-  // so the reset lands in the same render as `active` going false, instead of
-  // one tick later via an effect.
-  const [prevActive, setPrevActive] = useState(active);
-  if (active !== prevActive) {
-    setPrevActive(active);
-    if (!active) setShow(false);
-  }
+export function useDelayedLoading(isLoading: boolean, delayMs = 200): boolean {
+  const [delayed, setDelayed] = useState(false);
 
   useEffect(() => {
-    if (!active) return;
-    const timer = setTimeout(() => setShow(true), delayMs);
-    return () => clearTimeout(timer);
-  }, [active, delayMs]);
+    if (!isLoading) {
+      // If not loading, immediately clear delayed state
+      setDelayed(false);
+      return;
+    }
 
-  return show;
+    const timer = setTimeout(() => {
+      setDelayed(true);
+    }, delayMs);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [isLoading, delayMs]);
+
+  return delayed;
 }
