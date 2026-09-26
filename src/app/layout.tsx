@@ -108,18 +108,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
          * flash of the wrong theme. strategy="beforeInteractive" inlines the
          * script in the <head> before hydration.
          */}
-        <Script
-          id="theme-init"
-          strategy="beforeInteractive"
-          dangerouslySetInnerHTML={{ __html: themeScript }}
-        />
-        <Script
-          id="structured-data"
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify(structuredData),
-          }}
-        />
+        <Script id="theme-init" strategy="beforeInteractive">
+          {themeScript}
+        </Script>
+        <Script id="structured-data" type="application/ld+json">
+          {JSON.stringify(structuredData)}
+        </Script>
       </head>
       <body className="antialiased">
         <AppChrome>{children}</AppChrome>
