@@ -67,16 +67,9 @@ export const metadata: Metadata = {
 /**
  * Flash-prevention script for theme (#461).
  *
- * Runs synchronously before the first paint (strategy="beforeInteractive").
- * Reads the persisted preference from localStorage; falls back to the OS
- * prefers-color-scheme; defaults to dark. Adds .dark to <html> when needed.
- * This keeps the DOM class in sync with the ThemeContext initial state so
- * there is no visible flicker on first load.
- *
- * Kept as a raw string rather than a separate file so it is inlined by the
- * bundler and executed before any stylesheet has finished parsing.
+ * The static script is loaded with strategy="beforeInteractive" so it still
+ * runs synchronously before the first paint without requiring an inline script.
  */
-const themeScript = `(function(){try{var s=localStorage.getItem('ui:theme');if(s==='dark'||(s!=='light'&&!window.matchMedia('(prefers-color-scheme: light)').matches)){document.documentElement.classList.add('dark')}}catch(e){}})()`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const structuredData = {
@@ -105,21 +98,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         {/*
          * Flash-prevention: must run before any stylesheet to avoid a visible
-         * flash of the wrong theme. strategy="beforeInteractive" inlines the
-         * script in the <head> before hydration.
+         * flash of the wrong theme. The external script is loaded before
+         * hydration without creating an inline script sink.
          */}
-        <Script
-          id="theme-init"
-          strategy="beforeInteractive"
-          dangerouslySetInnerHTML={{ __html: themeScript }}
-        />
-        <Script
-          id="structured-data"
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify(structuredData),
-          }}
-        />
+        <Script id="theme-init" src="/theme-init.js" strategy="beforeInteractive" />
+        <Script id="structured-data" type="application/ld+json">
+          {JSON.stringify(structuredData)}
+        </Script>
       </head>
       <body className="antialiased">
         <AppChrome>{children}</AppChrome>

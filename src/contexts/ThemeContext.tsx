@@ -10,9 +10,9 @@
  * - Applies the active theme by toggling a `.dark` class on `<html>`. CSS custom
  *   properties live under `:root` (light) and `:root.dark` (dark) so there is a
  *   single source of truth in globals.css with no runtime style injection.
- * - A flash-prevention inline script in layout.tsx reads the persisted value
- *   before the first paint, so the class is set synchronously. This context
- *   merely syncs React state with whatever the script already applied.
+ * - A flash-prevention static script loaded by layout.tsx reads the persisted
+ *   value before the first paint, so the class is set synchronously. This
+ *   context merely syncs React state with whatever the script already applied.
  */
 
 import React, {

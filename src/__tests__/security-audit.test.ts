@@ -81,7 +81,7 @@ describe("audit scope", () => {
 });
 
 describe("injection sinks", () => {
-  it.skip("uses no dangerouslySetInnerHTML", () => {
+  it("uses no dangerouslySetInnerHTML", () => {
     expect(findMatches(/dangerouslySetInnerHTML/)).toEqual([]);
   });
 
