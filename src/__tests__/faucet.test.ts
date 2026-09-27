@@ -19,7 +19,7 @@ describe("requestTestXLM", () => {
       } as Response)
     );
 
-    const result = await requestTestXLM(VALID_G_ADDRESS);
+    const result = await requestTestXLM(VALID_G_ADDRESS, "TESTNET");
     expect(result.success).toBe(true);
     expect(result.message).toContain("Test XLM sent!");
     expect(result.message).toContain("abc123de...");
@@ -33,7 +33,7 @@ describe("requestTestXLM", () => {
       } as Response)
     );
 
-    const result = await requestTestXLM(VALID_G_ADDRESS);
+    const result = await requestTestXLM(VALID_G_ADDRESS, "TESTNET");
     expect(result.success).toBe(false);
     expect(result.message).toContain("rate-limited");
   });
@@ -46,13 +46,13 @@ describe("requestTestXLM", () => {
       } as Response)
     );
 
-    const result = await requestTestXLM(VALID_G_ADDRESS);
+    const result = await requestTestXLM(VALID_G_ADDRESS, "TESTNET");
     expect(result.success).toBe(false);
     expect(result.message).toContain("500");
   });
 
   it("returns failure for invalid address", async () => {
-    const result = await requestTestXLM("invalid");
+    const result = await requestTestXLM("invalid", "TESTNET");
     expect(result.success).toBe(false);
     expect(result.message).toBe("Invalid Stellar address.");
   });
@@ -60,8 +60,37 @@ describe("requestTestXLM", () => {
   it("returns failure on network error", async () => {
     global.fetch = vi.fn(() => Promise.reject(new Error("network down")));
 
-    const result = await requestTestXLM(VALID_G_ADDRESS);
+    const result = await requestTestXLM(VALID_G_ADDRESS, "TESTNET");
     expect(result.success).toBe(false);
     expect(result.message).toContain("Network error");
+  });
+
+  it("refuses request when network is PUBLIC without contacting faucet", async () => {
+    const fetchSpy = vi.fn();
+    global.fetch = fetchSpy;
+
+    const result = await requestTestXLM(VALID_G_ADDRESS, "PUBLIC");
+    expect(result.success).toBe(false);
+    expect(result.message).toBe("Friendbot is only available on Testnet.");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses request when network is UNSUPPORTED or UNKNOWN", async () => {
+    const fetchSpy = vi.fn();
+    global.fetch = fetchSpy;
+
+    const resUnsupported = await requestTestXLM(VALID_G_ADDRESS, "UNSUPPORTED");
+    expect(resUnsupported.success).toBe(false);
+    expect(resUnsupported.message).toBe("Friendbot is only available on Testnet.");
+
+    const resUnknown = await requestTestXLM(VALID_G_ADDRESS, "UNKNOWN");
+    expect(resUnknown.success).toBe(false);
+    expect(resUnknown.message).toBe("Friendbot is only available on Testnet.");
+
+    const resEmpty = await requestTestXLM(VALID_G_ADDRESS, "");
+    expect(resEmpty.success).toBe(false);
+    expect(resEmpty.message).toBe("Friendbot is only available on Testnet.");
+
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

@@ -393,7 +393,7 @@ export default function DashboardPage() {
     setFaucetLoading(true);
     setFaucetMessage(null);
     setFaucetError(null);
-    const result = await requestTestXLM(address);
+    const result = await requestTestXLM(address, network);
     if (result.success) {
       setFaucetMessage(result.message ?? "Test XLM requested.");
     } else {

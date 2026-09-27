@@ -940,12 +940,18 @@ export interface FaucetRequest {
 /**
  * Requests test XLM from the Stellar friendbot faucet for the given address.
  *
+ * - Guards against non-TESTNET networks: friendbot is only available on Testnet. (#760)
  * - Rate-limited responses (HTTP 429) return a clear message instead of
  *   silently failing.
- * - The control is only intended for testnet; callers must gate on
- *   `network === "TESTNET"` before invoking.
  */
-export async function requestTestXLM(address: string): Promise<FaucetRequest> {
+export async function requestTestXLM(
+  address: string,
+  network: StellarNetwork | WalletNetworkState | string
+): Promise<FaucetRequest> {
+  if (network !== "TESTNET") {
+    return { success: false, message: "Friendbot is only available on Testnet." };
+  }
+
   if (!StrKey.isValidEd25519PublicKey(address)) {
     return { success: false, message: "Invalid Stellar address." };
   }
