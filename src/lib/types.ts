@@ -139,16 +139,10 @@ export const HORIZON_URL = {
 export const BRIDGE_CONTRACT_ID = process.env.NEXT_PUBLIC_BRIDGE_CONTRACT_ID || "";
 
 /**
- * Maximum number of recipients accepted in a single batch_fund_c_address
- * call (#465).
- *
- * TODO: this is a placeholder. This repo does not vendor the batch contract
- * source or the batch API client, and no existing constant defines the real
- * cap — replace this with the actual contract/API limit once it's available,
- * and update the UI copy that references it (currently derived from this
- * constant, so no other change should be needed).
+ * Maximum number of recipients accepted in a single batch_fund_c_address call.
+ * Matches the contract's MAX_BATCH_SIZE and the backend /fund/batch limit.
  */
-export const MAX_BATCH_RECIPIENTS = 25;
+export const MAX_BATCH_RECIPIENTS = 100;
 
 /**
  * The Stellar network the app connects to. Driven by the `NEXT_PUBLIC_STELLAR_NETWORK`
