@@ -27,7 +27,35 @@ export interface HealthStatus {
   };
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.example.com';
+/**
+ * Resolves the backend API's base URL (#675).
+ *
+ * Every function below already swallows its own request failures (#498) —
+ * that's correct for a transient network blip, but it also meant a
+ * production deploy that forgot NEXT_PUBLIC_API_URL silently sent every
+ * request to a domain this project doesn't control, with nothing ever
+ * surfacing the misconfiguration (the health banner would just quietly show
+ * nothing). Throws immediately instead, but only when NODE_ENV is actually
+ * 'production' — local dev and test runs keep the harmless fallback so
+ * nobody needs this var set just to run `npm test`.
+ *
+ * Every page that transitively imports this module gets evaluated during
+ * `next build`'s static-generation step, so this throw fails the build
+ * itself for a production build, not just the first request at runtime.
+ */
+function resolveApiBaseUrl(): string {
+  const url = process.env.NEXT_PUBLIC_API_URL;
+  if (url) return url;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'NEXT_PUBLIC_API_URL is not set. Set it in your production environment before building/deploying — ' +
+        'without it, every API call silently targets a domain this project does not control.'
+    );
+  }
+  return 'https://api.example.com';
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 /**
  * Fetch the current health status from the API.
