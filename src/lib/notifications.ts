@@ -17,6 +17,11 @@
  * browser the next account must never see the previous account's activity, so
  * each wallet+network pair gets its own storage key and disconnecting clears
  * the active scope.
+ *
+ * Stored hrefs are untrusted (#695): localStorage is user- and
+ * extension-writable, so a `javascript:` or phishing URL could otherwise be
+ * rendered as a link in a trusted UI element. Only same-origin paths and
+ * stellar.expert explorer URLs are accepted; anything else is dropped.
  */
 
 export const NOTIFICATIONS_STORAGE_KEY = "wallet:notifications";
@@ -60,6 +65,40 @@ const NOTIFICATION_KINDS: readonly NotificationKind[] = [
   "failure",
 ];
 
+/** Host whose absolute explorer URLs are trusted for notification links. */
+const TRUSTED_EXPLORER_HOST = "stellar.expert";
+
+/**
+ * Returns true when `href` is safe to render as a link. Only same-origin
+ * (relative) paths and `https://stellar.expert/...` explorer URLs are allowed;
+ * dangerous schemes (`javascript:`, `data:`, `vbscript:`), protocol-relative
+ * URLs (`//evil.com`), backslash tricks, and any other absolute URL are
+ * rejected.
+ */
+export function isSafeNotificationHref(href: string): boolean {
+  if (typeof href !== "string" || href.length === 0) return false;
+  // Reject control characters and whitespace that could smuggle a scheme.
+  if (/[\u0000-\u001f\u007f\s]/.test(href)) return false;
+  // Reject backslashes, which some browsers normalise to slashes.
+  if (href.includes("\\")) return false;
+
+  // Same-origin relative path: a single leading slash, not protocol-relative.
+  if (href.startsWith("/")) {
+    return !href.startsWith("//");
+  }
+
+  // Absolute URL: must be https on the trusted explorer host.
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  if (url.hostname !== TRUSTED_EXPLORER_HOST) return false;
+  return true;
+}
+
 function storage(): Storage | null {
   if (typeof window === "undefined") return null;
   try {
@@ -94,7 +133,8 @@ export function createNotificationId(): string {
  * Coerces an unknown parsed value into a valid notification list, dropping any
  * entry that does not match the expected shape. This is what makes corrupt or
  * hand-edited storage harmless: one bad entry never takes the whole centre
- * down.
+ * down. Hrefs are additionally validated so a stored `javascript:` or
+ * phishing URL is never rendered as a link.
  */
 function parseNotifications(raw: string | null): AppNotification[] {
   if (!raw) return [];
@@ -115,6 +155,7 @@ function parseNotifications(raw: string | null): AppNotification[] {
       typeof candidate.title === "string" &&
       typeof candidate.message === "string" &&
       typeof candidate.href === "string" &&
+      isSafeNotificationHref(candidate.href) &&
       typeof candidate.timestamp === "number" &&
       typeof candidate.read === "boolean" &&
       typeof candidate.kind === "string" &&
@@ -234,9 +275,10 @@ export function unreadNotificationCount(notifications: AppNotification[]): numbe
  * locale date for anything older than a week.
  */
 export function formatNotificationAge(timestamp: number, now: number = Date.now()): string {
-  const diffMs = Math.max(0, now - timestamp);
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 1) return "just now";
+  const diff = Math.max(0, now - timestamp);
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
