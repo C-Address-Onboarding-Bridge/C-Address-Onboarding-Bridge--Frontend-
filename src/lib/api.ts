@@ -258,6 +258,35 @@ export async function getFeeTierPreview(address: string, network: StellarNetwork
 }
 
 /**
+ * Referral statistics (#469).
+ *
+ * PLACEHOLDER INTERFACE: see `src/lib/referrals.ts` for why — no contract
+ * source or referral API route exists anywhere in this repo to build against
+ * yet. The route (`GET /referrals/stats?address=&network=`) and response
+ * shape are a best guess and must be reconciled against the real API once it
+ * lands.
+ *
+ * Returns null both when the request fails and when the account genuinely
+ * has no referral record yet, mirroring `getFeeTierPreview`'s never-throws
+ * contract. Unlike fee tiers, though, a null result here means the whole
+ * view can't render — the referral link/QR need `referralCode` — so the UI
+ * shows a retry rather than silently hiding, since (unlike the supplementary
+ * fee-tier card) this page exists entirely to show that link.
+ */
+export async function getReferralStats(address: string, network: StellarNetwork): Promise<ReferralStats | null> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/referrals/stats?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
+    );
+    if (!response.ok) return null;
+    return (await response.json()) as ReferralStats | null;
+  } catch (error) {
+    console.error('Failed to fetch referral stats:', error);
+    return null;
+  }
+}
+
+/**
  * Transaction export (#470).
  *
  * PLACEHOLDER INTERFACE: this repo vendors no real API client for a
