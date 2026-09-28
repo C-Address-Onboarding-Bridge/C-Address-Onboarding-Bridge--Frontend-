@@ -38,6 +38,29 @@ export interface WidgetConfig {
 export type WidgetConfigError = { ok: false; error: string };
 export type WidgetConfigResult = { ok: true; config: WidgetConfig } | WidgetConfigError;
 
+/**
+ * User-facing message shown when a payment cannot be started because the
+ * configured target is a C-address and C-address bridging is not yet
+ * implemented (#703). The widget must never call `bridgeViaContract` for a
+ * C-address, since that path always throws and would leave every payment in
+ * the error state without ever posting `success`.
+ */
+export const C_ADDRESS_BRIDGING_UNAVAILABLE_MESSAGE =
+  "Payments to C-addresses aren't available yet — C-address bridging is coming soon.";
+
+/**
+ * Whether the widget can currently complete a payment for the given config.
+ *
+ * `parseWidgetConfig` only accepts C-addresses, and the bridge step for
+ * C-address targets (`bridgeViaContract`) is not implemented, so no widget
+ * payment can succeed today. This gate lets the widget hide/disable the
+ * payment action and explain why, instead of driving the user into the
+ * always-failing bridge path (#703).
+ */
+export function isWidgetPaymentAvailable(config: Pick<WidgetConfig, "address">): boolean {
+  return !isCAddress(config.address);
+}
+
 function isWidgetAsset(value: string | null): value is WidgetAsset {
   return value !== null && (WIDGET_ASSETS as readonly string[]).includes(value);
 }
@@ -200,23 +223,4 @@ export function isMessageFromWidget(
   if (iframeWindow !== undefined && event.source !== iframeWindow) return false;
   const data = event.data as { source?: unknown } | null | undefined;
   return !!data && typeof data === "object" && data.source === WIDGET_MESSAGE_SOURCE;
-}
-
-/** Serializes a `WidgetConfig`-shaped set of embed options into a widget URL's query string. */
-export function buildWidgetSearchParams(options: {
-  address: string;
-  asset?: WidgetAsset;
-  amount?: string;
-  theme?: WidgetTheme;
-  network?: StellarNetwork;
-  parentOrigin: string;
-}): URLSearchParams {
-  const params = new URLSearchParams();
-  params.set("address", options.address);
-  if (options.asset) params.set("asset", options.asset);
-  if (options.amount) params.set("amount", options.amount);
-  if (options.theme) params.set("theme", options.theme);
-  if (options.network) params.set("network", options.network);
-  params.set("parentOrigin", options.parentOrigin);
-  return params;
 }

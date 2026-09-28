@@ -15,7 +15,6 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AlertCircle, Check, Loader2, Wallet } from "lucide-react";
 import {
-  bridgeViaContract,
   connectWallet,
   getEstimatedFeeXLM,
   getExplorerUrl,
@@ -31,6 +30,16 @@ import {
 } from "@/lib/widget";
 
 type Phase = "connect" | "form" | "signing" | "submitting" | "success" | "error";
+
+/**
+ * C-address bridging is not implemented yet (see #703): `bridgeViaContract`
+ * throws for every C-address target, so a widget payment can never succeed.
+ * Until that lands, the widget only accepts C-address configs (see
+ * `parseWidgetConfig`) but must not offer a payment action that is guaranteed
+ * to fail. This message is shown in place of the payment form.
+ */
+const C_ADDRESS_BRIDGING_UNAVAILABLE =
+  "Payments to C-addresses aren't available yet. Bridging to C-addresses is still in development — please check back soon.";
 
 function WidgetError({ message }: { message: string }) {
   return (
@@ -50,6 +59,11 @@ function FundingWidget({ config }: { config: WidgetConfig }) {
   const [txHash, setTxHash] = useState<string | null>(null);
 
   const isDark = config.theme === "dark";
+
+  // `parseWidgetConfig` only accepts C-address targets today, and the bridge
+  // step for those isn't implemented yet (#703). Gate the payment flow so we
+  // never call `bridgeViaContract` for a target it can't handle.
+  const paymentUnavailable = config.address.startsWith("C");
 
   // Tell the host we're up, and let it size the iframe to fit — the host
   // has no way to know our content height otherwise.
@@ -91,6 +105,10 @@ function FundingWidget({ config }: { config: WidgetConfig }) {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!address) return;
+    if (paymentUnavailable) {
+      setError(C_ADDRESS_BRIDGING_UNAVAILABLE);
+      return;
+    }
     if (!isValidStellarAmount(amount)) {
       setError("Enter a valid amount (up to 7 decimal places).");
       return;
@@ -134,7 +152,18 @@ function FundingWidget({ config }: { config: WidgetConfig }) {
         </button>
       </header>
 
-      {phase === "connect" && (
+      {paymentUnavailable && (
+        <div
+          data-testid="widget-payment-unavailable"
+          role="status"
+          className="flex flex-col items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-4 text-center text-amber-800"
+        >
+          <AlertCircle className="h-5 w-5" />
+          <p className="text-sm">{C_ADDRESS_BRIDGING_UNAVAILABLE}</p>
+        </div>
+      )}
+
+      {!paymentUnavailable && phase === "connect" && (
         <button
           type="button"
           onClick={handleConnect}
@@ -145,43 +174,45 @@ function FundingWidget({ config }: { config: WidgetConfig }) {
         </button>
       )}
 
-      {(phase === "form" || phase === "signing" || phase === "submitting" || phase === "error") && address && (
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <div className="text-xs text-neutral-500">
-            To <span className="font-mono">{config.address.slice(0, 8)}…{config.address.slice(-4)}</span>
-          </div>
-          <label className="flex flex-col gap-1 text-sm">
-            Amount ({config.asset})
-            <input
-              type="text"
-              inputMode="decimal"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              disabled={!!config.amount || phase === "signing" || phase === "submitting"}
-              className="rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm disabled:opacity-60"
-            />
-          </label>
-          <p className="text-xs text-neutral-500">Estimated fee: {estimatedFee}</p>
-          <button
-            type="submit"
-            disabled={phase === "signing" || phase === "submitting"}
-            className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
-          >
-            {phase === "signing" || phase === "submitting" ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              "Send"
+      {!paymentUnavailable &&
+        (phase === "form" || phase === "signing" || phase === "submitting" || phase === "error") &&
+        address && (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            <div className="text-xs text-neutral-500">
+              To <span className="font-mono">{config.address.slice(0, 8)}…{config.address.slice(-4)}</span>
+            </div>
+            <label className="flex flex-col gap-1 text-sm">
+              Amount ({config.asset})
+              <input
+                type="text"
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                disabled={!!config.amount || phase === "signing" || phase === "submitting"}
+                className="rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm disabled:opacity-60"
+              />
+            </label>
+            <p className="text-xs text-neutral-500">Estimated fee: {estimatedFee}</p>
+            <button
+              type="submit"
+              disabled={phase === "signing" || phase === "submitting"}
+              className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+            >
+              {phase === "signing" || phase === "submitting" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Send"
+              )}
+            </button>
+            {error && (
+              <p role="alert" className="text-xs text-red-600">
+                {error}
+              </p>
             )}
-          </button>
-          {error && (
-            <p role="alert" className="text-xs text-red-600">
-              {error}
-            </p>
-          )}
-        </form>
-      )}
+          </form>
+        )}
 
-      {phase === "success" && txHash && (
+      {!paymentUnavailable && phase === "success" && txHash && (
         <div className="flex flex-col items-center gap-2 py-6 text-center">
           <Check className="h-6 w-6 text-emerald-600" />
           <p className="text-sm">Payment sent</p>
@@ -223,7 +254,7 @@ function WidgetPageInner() {
   }
 
   if (!trusted) {
-    return <WidgetError message="This page can't be embedded here. The embedding origin isn't registered." />;
+    return <WidgetError message="This page can't be embedded here. The embedding origin isn't recognized." />;
   }
 
   return <FundingWidget config={result.config} />;
