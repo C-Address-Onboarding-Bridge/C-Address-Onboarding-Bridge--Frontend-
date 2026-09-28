@@ -7,6 +7,42 @@ import { describe, it, expect } from "vitest";
  * Next.js middleware stack, since that would require a live Edge runtime.
  */
 
+/**
+ * Mirror the production connect-src construction from src/middleware.ts
+ * (issue #700). The API URL, friendbot and any configured Soroban RPC
+ * endpoints must be allowed so health/batch/locks calls, the faucet and
+ * mainnet Soroban RPC are not blocked by the enforced policy.
+ */
+function buildConnectSrc(env: Record<string, string | undefined>): string {
+  const sources = [
+    "'self'",
+    "https://horizon.stellar.org",
+    "https://horizon-testnet.stellar.org",
+    "https://soroban-testnet.stellar.org",
+    "https://friendbot.stellar.org",
+  ];
+
+  const apiUrl = env.NEXT_PUBLIC_API_URL;
+  if (apiUrl) {
+    try {
+      sources.push(new URL(apiUrl).origin);
+    } catch {
+      // ignore malformed URLs
+    }
+  }
+
+  const sorobanRpc = env.NEXT_PUBLIC_SOROBAN_RPC_URL;
+  if (sorobanRpc) {
+    try {
+      sources.push(new URL(sorobanRpc).origin);
+    } catch {
+      // ignore malformed URLs
+    }
+  }
+
+  return ["connect-src", ...Array.from(new Set(sources))].join(" ");
+}
+
 /** Mirror the production CSP construction from src/middleware.ts */
 function buildCsp(nonce: string, isDev: boolean): string {
   return [
@@ -15,12 +51,7 @@ function buildCsp(nonce: string, isDev: boolean): string {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self'",
-    [
-      "connect-src 'self'",
-      "https://horizon.stellar.org",
-      "https://horizon-testnet.stellar.org",
-      "https://soroban-testnet.stellar.org",
-    ].join(" "),
+    buildConnectSrc({}),
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
@@ -43,12 +74,7 @@ function buildWidgetCsp(nonce: string, isDev: boolean): string {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self'",
-    [
-      "connect-src 'self'",
-      "https://horizon.stellar.org",
-      "https://horizon-testnet.stellar.org",
-      "https://soroban-testnet.stellar.org",
-    ].join(" "),
+    buildConnectSrc({}),
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors *",
@@ -111,6 +137,52 @@ describe("CSP nonce middleware", () => {
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("upgrade-insecure-requests");
     expect(csp).toContain("https://horizon.stellar.org");
+  });
+});
+
+describe("CSP connect-src (issue #700)", () => {
+  it("allows the configured API origin", () => {
+    const connectSrc = buildConnectSrc({
+      NEXT_PUBLIC_API_URL: "https://api.example.com/v1",
+    });
+    expect(connectSrc).toContain("https://api.example.com");
+  });
+
+  it("allows friendbot for the faucet", () => {
+    const connectSrc = buildConnectSrc({});
+    expect(connectSrc).toContain("https://friendbot.stellar.org");
+  });
+
+  it("allows a configured mainnet Soroban RPC origin", () => {
+    const connectSrc = buildConnectSrc({
+      NEXT_PUBLIC_SOROBAN_RPC_URL: "https://soroban-mainnet.stellar.org",
+    });
+    expect(connectSrc).toContain("https://soroban-mainnet.stellar.org");
+  });
+
+  it("keeps the default Horizon and testnet Soroban hosts", () => {
+    const connectSrc = buildConnectSrc({});
+    expect(connectSrc).toContain("https://horizon.stellar.org");
+    expect(connectSrc).toContain("https://horizon-testnet.stellar.org");
+    expect(connectSrc).toContain("https://soroban-testnet.stellar.org");
+  });
+
+  it("does not duplicate origins when the API matches a default host", () => {
+    const connectSrc = buildConnectSrc({
+      NEXT_PUBLIC_API_URL: "https://horizon.stellar.org",
+    });
+    const occurrences = connectSrc.split("https://horizon.stellar.org").length - 1;
+    expect(occurrences).toBe(1);
+  });
+
+  it("ignores malformed configured URLs", () => {
+    const connectSrc = buildConnectSrc({
+      NEXT_PUBLIC_API_URL: "not a url",
+      NEXT_PUBLIC_SOROBAN_RPC_URL: "also bad",
+    });
+    expect(connectSrc).toContain("connect-src 'self'");
+    expect(connectSrc).not.toContain("not a url");
+    expect(connectSrc).not.toContain("also bad");
   });
 });
 

@@ -11,13 +11,44 @@ import type { NextRequest } from "next/server";
  */
 const CSP_HEADER_NAME = "Content-Security-Policy";
 
+/**
+ * Origins the app is allowed to talk to. Built from the configured URLs so the
+ * policy can't drift from what the app actually calls (#700): the API
+ * (health/batch/locks), friendbot (faucet), the Horizon hosts and the
+ * configured Soroban RPC endpoints (testnet and mainnet).
+ */
+function toOrigin(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+const connectSrcOrigins = Array.from(
+  new Set(
+    [
+      "'self'",
+      toOrigin(process.env.NEXT_PUBLIC_API_URL),
+      "https://friendbot.stellar.org",
+      "https://horizon.stellar.org",
+      "https://horizon-testnet.stellar.org",
+      toOrigin(process.env.NEXT_PUBLIC_SOROBAN_RPC_URL),
+      toOrigin(process.env.NEXT_PUBLIC_SOROBAN_RPC_TESTNET_URL),
+      toOrigin(process.env.NEXT_PUBLIC_SOROBAN_RPC_MAINNET_URL),
+      "https://soroban-testnet.stellar.org",
+    ].filter((origin): origin is string => Boolean(origin)),
+  ),
+);
+
 const cspHeader = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "font-src 'self'",
-  "connect-src 'self' https://horizon.stellar.org https://horizon-testnet.stellar.org https://soroban-testnet.stellar.org",
+  `connect-src ${connectSrcOrigins.join(" ")}`,
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
