@@ -55,7 +55,9 @@ function resolveApiBaseUrl(): string {
   return 'https://api.example.com';
 }
 
-const API_BASE_URL = resolveApiBaseUrl();
+// Exported so the server-only proxy routes under src/app/api/backend/ (#674)
+// can forward to the same backend without re-resolving/re-validating this.
+export const API_BASE_URL = resolveApiBaseUrl();
 
 /**
  * Fetch the current health status from the API.
@@ -142,7 +144,7 @@ export async function submitBatchFunding(
   recipients: BatchFundingRecipient[],
   network: StellarNetwork
 ): Promise<BatchFundingResponse> {
-  const response = await fetch(`${API_BASE_URL}/batch-fund`, {
+  const response = await fetch(`/api/backend/batch-fund`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -209,7 +211,7 @@ export interface CreateLockParams {
 
 /** Creates a new timelocked transfer. */
 export async function createLock(params: CreateLockParams): Promise<Lock> {
-  const response = await fetch(`${API_BASE_URL}/locks`, {
+  const response = await fetch(`/api/backend/locks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
@@ -224,7 +226,7 @@ export async function createLock(params: CreateLockParams): Promise<Lock> {
 /** Lists locks incoming to `recipient` — both pending and already-claimed. */
 export async function listIncomingLocks(recipient: string, network: StellarNetwork): Promise<Lock[]> {
   const response = await fetch(
-    `${API_BASE_URL}/locks?recipient=${encodeURIComponent(recipient)}&network=${encodeURIComponent(network)}`
+    `/api/backend/locks?recipient=${encodeURIComponent(recipient)}&network=${encodeURIComponent(network)}`
   );
 
   if (!response.ok) {
@@ -242,7 +244,7 @@ export async function listIncomingLocks(recipient: string, network: StellarNetwo
  * just showing a retryable error.
  */
 export async function claimLock(lockId: string, claimant: string, network: StellarNetwork): Promise<Lock> {
-  const response = await fetch(`${API_BASE_URL}/locks/${encodeURIComponent(lockId)}/claim`, {
+  const response = await fetch(`/api/backend/locks/${encodeURIComponent(lockId)}/claim`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ claimant, network }),
@@ -275,7 +277,7 @@ export async function claimLock(lockId: string, claimant: string, network: Stell
 export async function getFeeTierPreview(address: string, network: StellarNetwork): Promise<FeeTierStatus | null> {
   try {
     const response = await fetch(
-      `${API_BASE_URL}/fee-tiers/preview?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
+      `/api/backend/fee-tiers/preview?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
     );
     if (!response.ok) return null;
     return (await response.json()) as FeeTierStatus | null;
@@ -304,7 +306,7 @@ export async function getFeeTierPreview(address: string, network: StellarNetwork
 export async function getReferralStats(address: string, network: StellarNetwork): Promise<ReferralStats | null> {
   try {
     const response = await fetch(
-      `${API_BASE_URL}/referrals/stats?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
+      `/api/backend/referrals/stats?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
     );
     if (!response.ok) return null;
     return (await response.json()) as ReferralStats | null;
@@ -370,7 +372,7 @@ export async function fetchTransactionExportPage(params: ExportTransactionsParam
   });
   if (params.cursor) query.set("cursor", params.cursor);
 
-  const response = await fetch(`${API_BASE_URL}/transactions/export?${query.toString()}`);
+  const response = await fetch(`/api/backend/transactions/export?${query.toString()}`);
   if (!response.ok) {
     throw new Error(await extractApiErrorMessage(response, `Export request failed (${response.status})`));
   }
