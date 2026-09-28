@@ -12,12 +12,33 @@ const POLL_INTERVAL_MS = 3_000;
 /** Hard cap for a single SSE connection before it closes. */
 const MAX_DURATION_MS = 30_000;
 
+/** A Stellar transaction hash is a 64-character hex string. */
+const HASH_PATTERN = /^[0-9a-f]{64}$/i;
+
+const ALLOWED_NETWORKS: readonly StellarNetwork[] = ["TESTNET", "PUBLIC"];
+
 interface StatusResponse {
   hash: string;
   network: StellarNetwork;
   status: BridgeTransactionStatus;
   ledger: number | null;
   createdAt: string | null;
+}
+
+/**
+ * Horizon returns 404 when the transaction is not (yet) known. Any other
+ * failure (network error, 5xx, rate limit) is an upstream problem and must not
+ * be reported as `pending`.
+ */
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "response" in error &&
+    typeof (error as { response?: { status?: unknown } }).response?.status ===
+      "number" &&
+    (error as { response: { status: number } }).response.status === 404
+  );
 }
 
 async function fetchCurrentStatus(
@@ -34,10 +55,23 @@ async function fetchCurrentStatus(
       ledger: tx.ledger_attr ?? null,
       createdAt: tx.created_at ?? null,
     };
-  } catch {
-    // Not on Horizon yet (still in flight) or an invalid hash.
-    return { hash, network, status: "pending", ledger: null, createdAt: null };
+  } catch (error) {
+    if (isNotFound(error)) {
+      // Not on Horizon yet (still in flight).
+      return { hash, network, status: "pending", ledger: null, createdAt: null };
+    }
+    throw error;
   }
+}
+
+function jsonError(message: string, status: number): Response {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    },
+  });
 }
 
 /**
@@ -46,26 +80,41 @@ async function fetchCurrentStatus(
  * Responds with JSON when the client only accepts JSON (single snapshot) and
  * with a Server-Sent Events stream when the client requests `text/event-stream`
  * (the bridge page's live status feed). The stream closes itself once the
- * transaction reaches a terminal state or after MAX_DURATION_MS.
+ * transaction reaches a terminal state, after MAX_DURATION_MS, or as soon as
+ * the client disconnects.
  */
 export async function GET(
   request: Request,
   context: { params: Promise<{ hash: string }> }
 ) {
   const { hash } = await context.params;
+  if (!HASH_PATTERN.test(hash)) {
+    return jsonError("Invalid transaction hash", 400);
+  }
+
   const url = new URL(request.url);
-  const network: StellarNetwork =
-    url.searchParams.get("network") === "PUBLIC" ? "PUBLIC" : "TESTNET";
+  const networkParam = url.searchParams.get("network");
+  if (
+    networkParam !== null &&
+    !ALLOWED_NETWORKS.includes(networkParam as StellarNetwork)
+  ) {
+    return jsonError("Invalid network", 400);
+  }
+  const network: StellarNetwork = (networkParam as StellarNetwork) ?? "TESTNET";
 
   const accept = request.headers.get("accept") ?? "";
   if (!accept.includes("text/event-stream")) {
-    const payload = await fetchCurrentStatus(hash, network);
-    return new Response(JSON.stringify(payload), {
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store",
-      },
-    });
+    try {
+      const payload = await fetchCurrentStatus(hash, network);
+      return new Response(JSON.stringify(payload), {
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        },
+      });
+    } catch {
+      return jsonError("Failed to reach Horizon", 502);
+    }
   }
 
   const encoder = new TextEncoder();
@@ -75,7 +124,20 @@ export async function GET(
       try {
         // eslint-disable-next-line no-constant-condition
         while (Date.now() - startedAt < MAX_DURATION_MS) {
-          const payload = await fetchCurrentStatus(hash, network);
+          if (request.signal.aborted) break;
+          let payload: StatusResponse;
+          try {
+            payload = await fetchCurrentStatus(hash, network);
+          } catch {
+            controller.enqueue(
+              encoder.encode(
+                `event: error\ndata: ${JSON.stringify({
+                  error: "Failed to reach Horizon",
+                })}\n\n`
+              )
+            );
+            break;
+          }
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
           if (payload.status === "confirmed" || payload.status === "failed") break;
           await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
