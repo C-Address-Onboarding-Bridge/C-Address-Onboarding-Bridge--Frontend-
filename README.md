@@ -144,3 +144,8 @@ MIT
 - #639: `buildAndSubmitPayment` already builds the operation for the selected asset via `resolveAsset` (native XLM or the matching trustline asset); only the tests are still skipped.
 - #640: `resolveAsset` already throws `No <CODE> trustline found` and never falls back to XLM; only the test is still skipped.
 - #641: `assertActiveAccountMatches` already names both the active Freighter account and the From address and passes when they match; only the tests are still skipped.
+
+## Handsoff notes
+
+<!-- handsoff-issue-681 -->
+- #681: feat: bridge to C-addresses by invoking the asset's Stellar Asset Contract
