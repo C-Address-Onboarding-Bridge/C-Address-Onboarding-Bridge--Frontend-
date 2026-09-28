@@ -6,6 +6,7 @@ import { getHealthStatus, type HealthStatus } from '@/lib/api';
  *
  * Returns the latest health status and polling state.
  * Automatically stops polling when the component unmounts.
+ * Polling is paused while the tab is hidden and refreshed on visibility (#712).
  */
 
 interface UseHealthStatusOptions {
@@ -99,21 +100,49 @@ export function useHealthStatus(options: UseHealthStatusOptions = {}) {
   }, [isDegraded, retainTime]);
 
   useEffect(() => {
+    const startPolling = () => {
+      if (pollIntervalRef.current) {
+        return;
+      }
+      pollIntervalRef.current = setInterval(checkHealth, pollInterval);
+    };
+
+    const stopPolling = () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        // Pause polling while the tab is hidden (#712).
+        stopPolling();
+      } else {
+        // Refresh immediately when the tab becomes visible again (#712).
+        checkHealth();
+        startPolling();
+      }
+    };
+
     // Start polling after initial delay
     initialDelayRef.current = setTimeout(() => {
       checkHealth();
 
-      // Then poll at regular intervals
-      pollIntervalRef.current = setInterval(checkHealth, pollInterval);
+      // Then poll at regular intervals, unless the tab is already hidden
+      if (document.visibilityState !== 'hidden') {
+        startPolling();
+      }
     }, initialDelay);
 
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (initialDelayRef.current) {
         clearTimeout(initialDelayRef.current);
       }
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-      }
+      stopPolling();
       if (retainTimeoutRef.current) {
         clearTimeout(retainTimeoutRef.current);
       }
