@@ -59,13 +59,6 @@ describe("backend proxy route wiring", () => {
     expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/locks/weird%20id/claim");
   });
 
-  it("GET /api/backend/fee-tiers/preview?... -> /fee-tiers/preview?...", async () => {
-    const { GET } = await import("../fee-tiers/preview/route");
-    const request = makeRequest("http://localhost/api/backend/fee-tiers/preview?address=G1&network=TESTNET");
-    await GET(request);
-    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/fee-tiers/preview?address=G1&network=TESTNET");
-  });
-
   it("GET /api/backend/referrals/stats?... -> /referrals/stats?...", async () => {
     const { GET } = await import("../referrals/stats/route");
     const request = makeRequest("http://localhost/api/backend/referrals/stats?address=G1&network=TESTNET");

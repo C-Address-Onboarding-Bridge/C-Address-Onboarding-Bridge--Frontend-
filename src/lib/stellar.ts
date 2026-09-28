@@ -8,6 +8,9 @@ import {
   rpc,
   Account,
   StrKey,
+  Contract,
+  Address,
+  scValToNative,
 } from "@stellar/stellar-sdk";
 import {
   BRIDGE_CONTRACT_ID,
@@ -1496,4 +1499,63 @@ export async function getTransactionByHash(
     memo: record.memo ?? null,
     sequence: Number.isFinite(sequenceNumber) ? sequenceNumber : null,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* #673 — Fee-tier rebate lookup (Soroban RPC)                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Reads an account's cumulative tier-qualifying volume from the bridge
+ * contract's `rebate_for(user)` view function via a Soroban RPC simulation
+ * (#673). A simulation is read-only and needs no signature or submission,
+ * so this can run for any address, connected or not.
+ *
+ * PLACEHOLDER SHAPE: no contract ABI/bindings for `rebate_for` exist in this
+ * repo — only its name, from the backend's own contract (per issue #673).
+ * The single-Address argument is unambiguous (Soroban's standard Address
+ * ScVal encoding, the same ScVal shape every wallet/SDK produces), but the
+ * RETURN value's meaning is a best guess: assumed to be the account's
+ * cumulative volume (a plain count, not stroops) rather than an
+ * already-computed rate, because feeTiers.ts's tier logic
+ * (progressToNextTier, computeTieredFee) is built entirely around comparing
+ * a volume against tier thresholds — a returned rate would leave nothing to
+ * compute a progress bar from. Must be reconciled against the real contract
+ * once its interface is documented; until then this is the same kind of
+ * best-guess this codebase already carries for #467/#468/#469's routes.
+ *
+ * Returns null on any failure — invalid address, no contract configured,
+ * RPC error, a simulation that errored, or a result whose retval doesn't
+ * decode to a number — rather than throwing, matching this area's existing
+ * never-throws contract (see getFeeTierPreview in src/lib/api.ts).
+ */
+export async function getRebateVolume(address: string, network: StellarNetwork): Promise<number | null> {
+  if (!BRIDGE_CONTRACT_ID) return null;
+  if (!isValidStellarAddress(address)) return null;
+
+  try {
+    const server = await getSorobanRpcServer(network);
+    const passphrase = await getNetworkPassphrase(network);
+    const contract = new Contract(BRIDGE_CONTRACT_ID);
+    // The source account only needs to be a syntactically valid keypair for
+    // the envelope — this transaction is simulated, never submitted, so its
+    // sequence number is never checked against a real account.
+    const account = new Account(address, "0");
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: passphrase,
+    })
+      .addOperation(contract.call("rebate_for", Address.fromString(address).toScVal()))
+      .setTimeout(30)
+      .build();
+
+    const simulation = await server.simulateTransaction(tx);
+    if (!rpc.Api.isSimulationSuccess(simulation) || !simulation.result) return null;
+
+    const native = scValToNative(simulation.result.retval);
+    const volume = Number(native);
+    return Number.isFinite(volume) ? volume : null;
+  } catch {
+    return null;
+  }
 }

@@ -4,7 +4,8 @@
  * Handles health checks, transaction submission, and status polling.
  */
 import type { BridgeTransactionData, StellarNetwork } from "./types";
-import type { FeeTierStatus } from "./feeTiers";
+import { buildFeeTierStatus, type FeeTierStatus } from "./feeTiers";
+import { getRebateVolume } from "./stellar";
 // NOTE(ci-cleanup): without this, `Lock` silently resolved to the DOM Web Locks
 // API type from lib.dom, so every lock field access failed to typecheck.
 import type { Lock } from "./locks";
@@ -260,31 +261,25 @@ export async function claimLock(lockId: string, claimant: string, network: Stell
 }
 
 /**
- * Fee tier preview (#468).
+ * Fee tier preview (#468, #673).
  *
- * PLACEHOLDER INTERFACE: see `src/lib/feeTiers.ts` for why — no contract
- * source or tier API route exists anywhere in this repo to build against
- * yet. The route (`GET /fee-tiers/preview?address=&network=`) and response
- * shape are a best-guess and must be reconciled against the real API once it
- * lands.
+ * Reads the account's cumulative volume on-chain via getRebateVolume (a
+ * Soroban RPC simulation of the bridge contract's rebate_for — see that
+ * function's own doc comment in src/lib/stellar.ts for what's confirmed vs.
+ * still a best guess) and maps it onto the tier ladder with
+ * buildFeeTierStatus. `/fee-tiers/preview` never existed as a backend route
+ * (#673) — this replaces that placeholder entirely rather than proxying to
+ * a route that isn't there.
  *
- * Returns null both when the account has no tier data yet and when the
- * request itself fails — callers treat "no data" as "hide the tier display"
- * either way (#468), so a transient fetch failure degrades to the same
- * silent-hide behavior as tiers genuinely not being configured, rather than
- * surfacing an error for what is supplementary information.
+ * Returns null both when the account has no tier data available (no
+ * contract configured, invalid address, RPC failure) and when nothing was
+ * ever wrong except there's nothing to show — callers treat "no data" as
+ * "hide the tier display" either way (#468), so this never throws.
  */
 export async function getFeeTierPreview(address: string, network: StellarNetwork): Promise<FeeTierStatus | null> {
-  try {
-    const response = await fetch(
-      `/api/backend/fee-tiers/preview?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
-    );
-    if (!response.ok) return null;
-    return (await response.json()) as FeeTierStatus | null;
-  } catch (error) {
-    console.error('Failed to fetch fee tier preview:', error);
-    return null;
-  }
+  const volume = await getRebateVolume(address, network);
+  if (volume === null) return null;
+  return buildFeeTierStatus(volume);
 }
 
 /**
