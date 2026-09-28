@@ -38,16 +38,27 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, workflow, and tes
    cp .env.example .env.local
    ```
 
-   Required env vars (see `.env.example` for all options):
+   All environment variables the app reads are documented in [`.env.example`](.env.example). The table below summarises them:
 
-   | Variable | Required | Description |
-   |---|---|---|
-   | `NEXT_PUBLIC_STELLAR_NETWORK` | Yes | `TESTNET` or `PUBLIC` |
-   | `NEXT_PUBLIC_BRIDGE_CONTRACT_ID` | No | Soroban bridge contract (omits direct payment) |
-   | `NEXT_PUBLIC_SOROBAN_RPC_URL_TESTNET` | No | Soroban RPC endpoint for testnet. Defaults to the official SDF endpoint `https://soroban-testnet.stellar.org` |
-   | `NEXT_PUBLIC_SOROBAN_RPC_URL_PUBLIC` | For mainnet Soroban calls | SDF does not operate a free public mainnet Soroban RPC — set this to your own provider's URL. Soroban RPC calls on `PUBLIC` fail with a clear configuration error until this is set |
-   | `NEXT_PUBLIC_MOONPAY_API_KEY` | For onramp | From [Moonpay dashboard](https://buy.moonpay.com) |
-   | `NEXT_PUBLIC_TRANSAK_API_KEY` | For onramp | From [Transak dashboard](https://global.transak.com) |
+   | Variable | Required | Default | Description |
+   |---|---|---|---|
+   | `NEXT_PUBLIC_STELLAR_NETWORK` | Yes | `TESTNET` | `TESTNET` or `PUBLIC` |
+   | `NEXT_PUBLIC_BRIDGE_CONTRACT_ID` | No | _(empty)_ | Soroban bridge contract (omits direct payment) |
+   | `NEXT_PUBLIC_SOROBAN_RPC_URL_TESTNET` | No | `https://soroban-testnet.stellar.org` | Soroban RPC endpoint for testnet |
+   | `NEXT_PUBLIC_SOROBAN_RPC_URL_PUBLIC` | For mainnet Soroban calls | _(empty)_ | SDF does not operate a free public mainnet Soroban RPC — set this to your own provider's URL. Soroban RPC calls on `PUBLIC` fail with a clear configuration error until this is set |
+   | `NEXT_PUBLIC_API_URL` | No | `http://localhost:3000/api` | Base URL of the backend API |
+   | `NEXT_PUBLIC_TRANSACTION_STATUS_URL` | No | _(empty)_ | Endpoint used to look up transaction status |
+   | `NEXT_PUBLIC_MOONPAY_API_KEY` | For onramp | _(empty)_ | From [Moonpay dashboard](https://buy.moonpay.com) |
+   | `NEXT_PUBLIC_TRANSAK_API_KEY` | For onramp | _(empty)_ | From [Transak dashboard](https://global.transak.com) |
+   | `MOONPAY_QUOTE_API_URL` | No | `https://api.moonpay.com` | Server-side Moonpay quote API endpoint |
+   | `TRANSAK_QUOTE_API_URL` | No | `https://api.transak.com` | Server-side Transak quote API endpoint |
+   | `INDEXER_EVENTS_URL` | No | _(empty)_ | Indexer events endpoint used to read bridge activity |
+   | `NEXT_PUBLIC_FEATURE_FLAGS` | No | _(empty)_ | Comma-separated list of enabled feature flags |
+   | `NEXT_PUBLIC_FLAG_PANEL_TOKEN` | No | _(empty)_ | Token for the internal feature-flag panel; empty disables it |
+   | `NEXT_PUBLIC_ENABLE_SW` | No | `false` | Enable the service worker |
+   | `NEXT_PUBLIC_INITIAL_JS_BUDGET_KB` | No | `300` | Initial client-side JS budget in kilobytes |
+   | `ENFORCE_BUDGET` | No | `false` | Enforce the JS budget during the build |
+   | `ANALYZE` | No | `false` | Enable the Next.js bundle analyzer |
 
    > **Note — Horizon and Soroban RPC endpoints:**
    > Horizon URLs are **hardcoded constants** in `src/lib/types.ts` (`HORIZON_URL`) and are not configurable via environment variables. They always resolve to `https://horizon.stellar.org` (PUBLIC) or `https://horizon-testnet.stellar.org` (TESTNET). Soroban RPC URLs for TESTNET also default to the SDF endpoint (`https://soroban-testnet.stellar.org`) but can be overridden via the env vars above. Soroban RPC for PUBLIC is empty by default — you must provide your own provider URL. See [Sequence Number Caching](docs/sequence-numbers.md) for details on how network requests are managed.
@@ -149,3 +160,6 @@ MIT
 
 <!-- handsoff-issue-704 -->
 - #704: security: onramp builds unsigned MoonPay URLs in the browser, pointed at a C-address
+
+<!-- handsoff-issue-705 -->
+- #705: feat: add .env.example documenting every environment variable the app reads
