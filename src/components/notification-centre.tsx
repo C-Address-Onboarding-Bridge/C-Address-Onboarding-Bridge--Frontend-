@@ -13,6 +13,7 @@ import {
   unreadNotificationCount,
   type AppNotification,
 } from "@/lib/notifications";
+import { useWallet } from "@/hooks/useWallet";
 
 /**
  * Notification centre for transaction and account events (#477).
@@ -23,8 +24,10 @@ import {
  * mark items read (individually or all) or clear the list entirely.
  *
  * Persistence lives in `@/lib/notifications` (localStorage, following the
- * session-store conventions), so the centre is self-contained: it does not
- * depend on wallet state and renders identically connected or not.
+ * session-store conventions). Notifications are scoped to the connected
+ * wallet address and network (#694) so activity from one account is never
+ * shown to the next account on a shared browser; on disconnect the panel is
+ * closed and the list is emptied.
  */
 
 export interface NotificationCentreProps {
@@ -33,19 +36,32 @@ export interface NotificationCentreProps {
 }
 
 const NotificationCentre = ({ closeOnNavigate = true }: NotificationCentreProps) => {
+  const { address, network } = useWallet();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const refresh = useCallback(() => setNotifications(loadNotifications()), []);
+  const refresh = useCallback(
+    () => setNotifications(loadNotifications(address, network)),
+    [address, network]
+  );
 
   useEffect(() => {
-    // Pull the persisted list into React state once on mount; subsequent
-    // updates come from the explicit actions below.
+    // Pull the persisted list into React state once on mount and whenever the
+    // connected wallet/network changes; subsequent updates come from the
+    // explicit actions below.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
   }, [refresh]);
+
+  // On disconnect (or wallet/network switch) close the panel so the next user
+  // never sees the previous account's activity.
+  useEffect(() => {
+    if (!address) {
+      setOpen(false);
+    }
+  }, [address]);
 
   // Escape closes the panel and returns focus to the bell.
   useEffect(() => {
@@ -73,30 +89,30 @@ const NotificationCentre = ({ closeOnNavigate = true }: NotificationCentreProps)
 
   const handleActivate = useCallback(
     (id: string) => {
-      markNotificationRead(id);
+      markNotificationRead(id, address, network);
       refresh();
       if (closeOnNavigate) setOpen(false);
     },
-    [refresh, closeOnNavigate]
+    [refresh, closeOnNavigate, address, network]
   );
 
   const handleDismiss = useCallback(
     (id: string) => {
-      dismissNotification(id);
+      dismissNotification(id, address, network);
       refresh();
     },
-    [refresh]
+    [refresh, address, network]
   );
 
   const handleMarkAllRead = useCallback(() => {
-    markAllNotificationsRead();
+    markAllNotificationsRead(address, network);
     refresh();
-  }, [refresh]);
+  }, [refresh, address, network]);
 
   const handleClearAll = useCallback(() => {
-    clearNotifications();
+    clearNotifications(address, network);
     refresh();
-  }, [refresh]);
+  }, [refresh, address, network]);
 
   return (
     <div className="relative">
@@ -220,9 +236,9 @@ const NotificationCentre = ({ closeOnNavigate = true }: NotificationCentreProps)
                     <button
                       type="button"
                       onClick={() => handleDismiss(notification.id)}
-                      aria-label={`Dismiss notification: ${notification.title}`}
-                      title="Dismiss notification"
-                      className="absolute top-3 right-3 p-1 rounded text-[var(--text-muted)] opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-[var(--error)] transition-opacity"
+                      aria-label={`Dismiss ${notification.title}`}
+                      title="Dismiss"
+                      className="absolute top-2 right-2 p-1 rounded text-[var(--text-muted)] opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-opacity"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>

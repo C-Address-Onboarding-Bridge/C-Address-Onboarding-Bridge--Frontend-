@@ -7,12 +7,16 @@
  * and are surfaced from the navbar's notification centre.
  *
  * The storage conventions mirror `src/lib/session.ts`: records live in
- * `localStorage` under a single key, all accessors are SSR-safe, and unreadable
- * or corrupt stored state falls back to an empty list rather than throwing.
- * Only the kinds of events that actually occur in the app today are produced
- * (transaction outcomes); `claimable` and `schedule` kinds exist so the same
- * store can carry claimable-lock and schedule-execution events once those
- * flows ship.
+ * `localStorage`, all accessors are SSR-safe, and unreadable or corrupt stored
+ * state falls back to an empty list rather than throwing. Only the kinds of
+ * events that actually occur in the app today are produced (transaction
+ * outcomes); `claimable` and `schedule` kinds exist so the same store can
+ * carry claimable-lock and schedule-execution events once those flows ship.
+ *
+ * Notifications are scoped per wallet address and network (#694): on a shared
+ * browser the next account must never see the previous account's activity, so
+ * each wallet+network pair gets its own storage key and disconnecting clears
+ * the active scope.
  */
 
 export const NOTIFICATIONS_STORAGE_KEY = "wallet:notifications";
@@ -39,6 +43,16 @@ export interface AppNotification {
   read: boolean;
 }
 
+/**
+ * Identifies the wallet+network a notification belongs to. Notifications are
+ * stored under a key derived from this so one account's activity is never
+ * shown to the next account on the same browser.
+ */
+export interface NotificationScope {
+  address: string;
+  network: string;
+}
+
 const NOTIFICATION_KINDS: readonly NotificationKind[] = [
   "transaction",
   "claimable",
@@ -54,6 +68,18 @@ function storage(): Storage | null {
     // Access itself throws in some privacy modes.
     return null;
   }
+}
+
+/**
+ * Builds the per-wallet storage key. The address and network are encoded so
+ * they cannot collide with the separator, and an empty scope falls back to the
+ * legacy global key so callers without a connected wallet keep working.
+ */
+export function notificationsStorageKey(scope?: NotificationScope | null): string {
+  if (!scope || !scope.address) return NOTIFICATIONS_STORAGE_KEY;
+  const address = encodeURIComponent(scope.address);
+  const network = encodeURIComponent(scope.network || "");
+  return `${NOTIFICATIONS_STORAGE_KEY}:${network}:${address}`;
 }
 
 /** Collision-resistant id, with a fallback for environments without crypto. */
@@ -108,11 +134,14 @@ function parseNotifications(raw: string | null): AppNotification[] {
   return valid;
 }
 
-function writeNotifications(notifications: AppNotification[]): AppNotification[] {
+function writeNotifications(
+  notifications: AppNotification[],
+  scope?: NotificationScope | null
+): AppNotification[] {
   const store = storage();
   if (!store) return notifications;
   try {
-    store.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notifications));
+    store.setItem(notificationsStorageKey(scope), JSON.stringify(notifications));
   } catch {
     // Quota or privacy-mode failure: the caller keeps its in-memory copy, the
     // only loss is persistence across reloads.
@@ -120,13 +149,16 @@ function writeNotifications(notifications: AppNotification[]): AppNotification[]
   return notifications;
 }
 
-/** Reads the stored notifications. Corrupt or absent storage yields []. */
-export function loadNotifications(): AppNotification[] {
+/**
+ * Reads the stored notifications for a wallet+network scope. Corrupt or absent
+ * storage yields []. When no scope is given the legacy global key is read.
+ */
+export function loadNotifications(scope?: NotificationScope | null): AppNotification[] {
   const store = storage();
   if (!store) return [];
   let raw: string | null = null;
   try {
-    raw = store.getItem(NOTIFICATIONS_STORAGE_KEY);
+    raw = store.getItem(notificationsStorageKey(scope));
   } catch {
     return [];
   }
@@ -136,10 +168,11 @@ export function loadNotifications(): AppNotification[] {
 /**
  * Records a new notification at the top of the list, dropping the oldest entry
  * once {@link MAX_NOTIFICATIONS} is exceeded. New notifications always start
- * unread.
+ * unread. The notification is stored under the given wallet+network scope.
  */
 export function addNotification(
-  input: Omit<AppNotification, "id" | "timestamp" | "read">
+  input: Omit<AppNotification, "id" | "timestamp" | "read">,
+  scope?: NotificationScope | null
 ): AppNotification {
   const notification: AppNotification = {
     ...input,
@@ -147,34 +180,44 @@ export function addNotification(
     timestamp: Date.now(),
     read: false,
   };
-  const next = [notification, ...loadNotifications()].slice(0, MAX_NOTIFICATIONS);
-  writeNotifications(next);
+  const next = [notification, ...loadNotifications(scope)].slice(0, MAX_NOTIFICATIONS);
+  writeNotifications(next, scope);
   return notification;
 }
 
-/** Marks a single notification as read. */
-export function markNotificationRead(id: string): void {
+/** Marks a single notification as read within a wallet+network scope. */
+export function markNotificationRead(id: string, scope?: NotificationScope | null): void {
   writeNotifications(
-    loadNotifications().map((n) => (n.id === id ? { ...n, read: true } : n))
+    loadNotifications(scope).map((n) => (n.id === id ? { ...n, read: true } : n)),
+    scope
   );
 }
 
-/** Marks every notification as read. */
-export function markAllNotificationsRead(): void {
-  writeNotifications(loadNotifications().map((n) => ({ ...n, read: true })));
+/** Marks every notification as read within a wallet+network scope. */
+export function markAllNotificationsRead(scope?: NotificationScope | null): void {
+  writeNotifications(
+    loadNotifications(scope).map((n) => ({ ...n, read: true })),
+    scope
+  );
 }
 
-/** Removes a single notification (dismiss). */
-export function dismissNotification(id: string): void {
-  writeNotifications(loadNotifications().filter((n) => n.id !== id));
+/** Removes a single notification (dismiss) within a wallet+network scope. */
+export function dismissNotification(id: string, scope?: NotificationScope | null): void {
+  writeNotifications(
+    loadNotifications(scope).filter((n) => n.id !== id),
+    scope
+  );
 }
 
-/** Removes every notification (clear all). */
-export function clearNotifications(): void {
+/**
+ * Removes every notification for a wallet+network scope. Called on disconnect
+ * so the next user on a shared browser starts with an empty centre.
+ */
+export function clearNotifications(scope?: NotificationScope | null): void {
   const store = storage();
   if (!store) return;
   try {
-    store.removeItem(NOTIFICATIONS_STORAGE_KEY);
+    store.removeItem(notificationsStorageKey(scope));
   } catch {
     // Nothing useful to do; the list is already gone from memory.
   }
