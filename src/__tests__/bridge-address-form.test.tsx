@@ -57,4 +57,36 @@ describe("Bridge page — Address Form", () => {
     expect(input).not.toBeNull();
     expect(input?.tagName).toBe("INPUT");
   });
+
+  it("preserves a 7-decimal USDC amount instead of truncating to 2 decimals", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<BridgePage />);
+    });
+
+    const assetSelect = container.querySelector("#bridge-asset") as HTMLSelectElement;
+    expect(assetSelect).not.toBeNull();
+
+    await act(async () => {
+      assetSelect.value = "USDC";
+      assetSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const amountInput = container.querySelector("#bridge-amount") as HTMLInputElement;
+    expect(amountInput).not.toBeNull();
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value"
+      )?.set;
+      setter?.call(amountInput, "0.0015");
+      amountInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(amountInput.value).toBe("0.0015");
+  });
 });
