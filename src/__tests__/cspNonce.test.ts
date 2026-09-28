@@ -29,6 +29,39 @@ function buildCsp(nonce: string, isDev: boolean): string {
   ].join("; ");
 }
 
+/**
+ * Mirror the widget CSP construction from src/middleware.ts (issue #699).
+ *
+ * The embeddable widget must be frameable by third-party origins, so its
+ * policy relaxes `frame-ancestors` to `*` while keeping the rest of the
+ * hardening directives intact.
+ */
+function buildWidgetCsp(nonce: string, isDev: boolean): string {
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}'${isDev ? " 'unsafe-eval'" : ""}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    [
+      "connect-src 'self'",
+      "https://horizon.stellar.org",
+      "https://horizon-testnet.stellar.org",
+      "https://soroban-testnet.stellar.org",
+    ].join(" "),
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors *",
+    "object-src 'none'",
+    "upgrade-insecure-requests",
+  ].join("; ");
+}
+
+/** Mirror the path check used by src/middleware.ts to select the widget policy. */
+function isWidgetPath(pathname: string): boolean {
+  return pathname === "/widget" || pathname.startsWith("/widget/");
+}
+
 describe("CSP nonce middleware", () => {
   it("production policy does not contain 'unsafe-inline' in script-src", () => {
     const csp = buildCsp("abc123", false /* production */);
@@ -78,5 +111,36 @@ describe("CSP nonce middleware", () => {
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("upgrade-insecure-requests");
     expect(csp).toContain("https://horizon.stellar.org");
+  });
+});
+
+describe("CSP framing for /widget (issue #699)", () => {
+  it("widget policy allows framing via frame-ancestors *", () => {
+    const csp = buildWidgetCsp("abc123", false);
+    expect(csp).toContain("frame-ancestors *");
+    expect(csp).not.toContain("frame-ancestors 'none'");
+  });
+
+  it("non-widget routes keep the enforcing frame-ancestors 'none'", () => {
+    const csp = buildCsp("abc123", false);
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).not.toContain("frame-ancestors *");
+  });
+
+  it("selects the widget policy only for /widget paths", () => {
+    expect(isWidgetPath("/widget")).toBe(true);
+    expect(isWidgetPath("/widget/embed")).toBe(true);
+    expect(isWidgetPath("/")).toBe(false);
+    expect(isWidgetPath("/dashboard")).toBe(false);
+    expect(isWidgetPath("/widgets")).toBe(false);
+  });
+
+  it("widget policy keeps the remaining hardening directives", () => {
+    const csp = buildWidgetCsp("abc123", false);
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("base-uri 'self'");
+    expect(csp).toContain("form-action 'self'");
+    expect(csp).toContain("upgrade-insecure-requests");
   });
 });
