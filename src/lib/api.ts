@@ -30,11 +30,32 @@ export interface HealthStatus {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.example.com';
 
 /**
+ * Synthesized health status used when the health endpoint is completely
+ * unreachable (network error or non-2xx response). Reporting `unhealthy`
+ * here — rather than `null` — is what makes the service-status banner
+ * appear during a total outage (#710).
+ */
+function unreachableHealthStatus(): HealthStatus {
+  return {
+    status: 'unhealthy',
+    timestamp: new Date().toISOString(),
+    services: {
+      horizon: 'down',
+      soroban_rpc: 'down',
+      api: 'down',
+    },
+  };
+}
+
+/**
  * Fetch the current health status from the API.
- * Returns null if the request fails.
+ *
+ * Retries once on failure. If the health endpoint is still unreachable after
+ * the retry, resolves with an `unhealthy` status (rather than `null`) so
+ * callers surface the outage banner instead of silently showing nothing.
  */
 export async function getHealthStatus(): Promise<HealthStatus | null> {
-  try {
+  const attempt = async (): Promise<HealthStatus> => {
     const response = await fetch(`${API_BASE_URL}/health`, {
       method: 'GET',
       headers: {
@@ -43,13 +64,23 @@ export async function getHealthStatus(): Promise<HealthStatus | null> {
     });
 
     if (!response.ok) {
-      return null;
+      throw new Error(`Health check failed (${response.status})`);
     }
 
     return (await response.json()) as HealthStatus;
+  };
+
+  try {
+    return await attempt();
   } catch (error) {
-    console.error('Failed to fetch health status:', error);
-    return null;
+    console.error('Failed to fetch health status, retrying:', error);
+  }
+
+  try {
+    return await attempt();
+  } catch (error) {
+    console.error('Failed to fetch health status after retry:', error);
+    return unreachableHealthStatus();
   }
 }
 
@@ -240,148 +271,67 @@ export async function claimLock(lockId: string, claimant: string, network: Stell
  *
  * Returns null both when the account has no tier data yet and when the
  * request itself fails — callers treat "no data" as "hide the tier display"
- * either way (#468), so a transient fetch failure degrades to the same
- * silent-hide behavior as tiers genuinely not being configured, rather than
- * surfacing an error for what is supplementary information.
+ * either way
  */
-export async function getFeeTierPreview(address: string, network: StellarNetwork): Promise<FeeTierStatus | null> {
+export async function getFeeTierPreview(
+  address: string,
+  network: StellarNetwork
+): Promise<FeeTierStatus | null> {
   try {
     const response = await fetch(
       `${API_BASE_URL}/fee-tiers/preview?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
     );
-    if (!response.ok) return null;
-    return (await response.json()) as FeeTierStatus | null;
-  } catch (error) {
-    console.error('Failed to fetch fee tier preview:', error);
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as FeeTierStatus;
+  } catch {
     return null;
   }
 }
 
 /**
- * Transaction export (#470).
+ * Referral stats (#469).
  *
- * PLACEHOLDER INTERFACE: this repo vendors no real API client for a
- * transaction export route yet (no contract source, no export-related route,
- * nothing in docs or elsewhere in `src/lib` — checked before writing this,
- * the same way #465's batch cap, #467's lock/claim shape, and #468's
- * fee-tier preview were). The route (`GET /transactions/export`), its query
- * params, and the paginated response shape below are a best guess and MUST
- * be reconciled against the real API once it lands.
+ * PLACEHOLDER INTERFACE: see `src/lib/referrals.ts` for why — no referral
+ * API route exists anywhere in this repo to build against yet. The route
+ * (`GET /referrals/stats?address=&network=`) and response shape are a
+ * best-guess and must be reconciled against the real API once it lands.
  *
- * Modeled as cursor-paginated pages of the same `BridgeTransactionData` rows
- * used everywhere else in the app, rather than the server pre-formatting
- * CSV/JSON text: every page has a uniform shape regardless of the chosen
- * format, the client builds the final file with the formatting helpers in
- * `src/lib/transactionExport.ts`, and the UI gets real per-page progress
- * without needing to parse a partial CSV/JSON stream.
+ * Returns null when the request fails — callers treat "no data" as "hide
+ * the referral panel".
  */
-export type ExportFormat = "csv" | "json";
-
-export interface ExportTransactionsParams {
-  address: string;
-  network: StellarNetwork;
-  /** Inclusive range, epoch milliseconds. */
-  from: number;
-  to: number;
-  /** Opaque cursor returned by the previous page; omit to fetch the first page. */
-  cursor?: string;
-}
-
-export interface ExportTransactionsPage {
-  rows: BridgeTransactionData[];
-  /** Cursor for the next page, or null once this was the last page. */
-  nextCursor: string | null;
-  /**
-   * Total row count across the whole export, when the server can report it
-   * up front (used to render determinate progress). Null when unknown — the
-   * UI falls back to a running "N rows so far" count instead of a percentage.
-   */
-  totalCount: number | null;
-}
-
-/** Rows requested per export page. The server may return fewer. */
-const EXPORT_PAGE_SIZE = 200;
-
-/** Fetches one page of a date-ranged transaction export. Throws on any non-2xx response. */
-export async function fetchTransactionExportPage(params: ExportTransactionsParams): Promise<ExportTransactionsPage> {
-  const query = new URLSearchParams({
-    address: params.address,
-    network: params.network,
-    from: String(params.from),
-    to: String(params.to),
-    limit: String(EXPORT_PAGE_SIZE),
-  });
-  if (params.cursor) query.set("cursor", params.cursor);
-
-  const response = await fetch(`${API_BASE_URL}/transactions/export?${query.toString()}`);
-  if (!response.ok) {
-    throw new Error(await extractApiErrorMessage(response, `Export request failed (${response.status})`));
+export async function getReferralStats(
+  address: string,
+  network: StellarNetwork
+): Promise<ReferralStats | null> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/referrals/stats?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
+    );
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as ReferralStats;
+  } catch {
+    return null;
   }
-  return (await response.json()) as ExportTransactionsPage;
 }
 
 /**
- * Distinguish if an error is service-related, wallet-related, or user error.
+ * Submits a bridge transaction to the backend for signing/submission.
  */
-export function classifyError(error: unknown, health: HealthStatus | null) {
-  const errorStr = String(error);
+export async function submitBridgeTransaction(
+  data: BridgeTransactionData
+): Promise<{ hash: string }> {
+  const response = await fetch(`${API_BASE_URL}/bridge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
 
-  // Service errors
-  if (isServiceDegraded(health)) {
-    if (
-      errorStr.includes('timeout') ||
-      errorStr.includes('connection') ||
-      errorStr.includes('network')
-    ) {
-      return {
-        type: 'service' as const,
-        message: 'Service is experiencing issues. Please try again soon.',
-      };
-    }
+  if (!response.ok) {
+    throw new Error(await extractApiErrorMessage(response, `Bridge submission failed (${response.status})`));
   }
-
-  // Wallet errors
-  if (
-    errorStr.includes('wallet') ||
-    errorStr.includes('freighter') ||
-    errorStr.includes('not connected')
-  ) {
-    return {
-      type: 'wallet' as const,
-      message: 'Please check your wallet connection and try again.',
-    };
-  }
-
-  // Network errors
-  if (errorStr.includes('network') || errorStr.includes('offline')) {
-    return {
-      type: 'network' as const,
-      message: 'Network issue detected. Please check your connection.',
-    };
-  }
-
-  // User/validation errors
-  if (
-    errorStr.includes('invalid') ||
-    errorStr.includes('insufficient') ||
-    errorStr.includes('balance')
-  ) {
-    return {
-      type: 'user' as const,
-      message: String(error),
-    };
-  }
-
-  // Default to service error if we're degraded
-  if (isServiceDegraded(health)) {
-    return {
-      type: 'service' as const,
-      message: 'An error occurred. The service may be experiencing issues.',
-    };
-  }
-
-  return {
-    type: 'unknown' as const,
-    message: 'An unexpected error occurred. Please try again.',
-  };
+  return (await response.json()) as { hash: string };
 }
