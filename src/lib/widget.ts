@@ -47,6 +47,76 @@ function isStellarNetwork(value: string | null): value is StellarNetwork {
 }
 
 /**
+ * Registered embedder origins allowed to frame the widget. Read from the
+ * `NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS` env var (comma-separated absolute
+ * origins). When unset/empty the allowlist is empty, which means no origin
+ * is trusted — the widget refuses to run framed by an unregistered host.
+ */
+export function getAllowedEmbedderOrigins(
+  raw: string | undefined = typeof process !== "undefined"
+    ? process.env.NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS
+    : undefined
+): string[] {
+  if (!raw) return [];
+  const origins: string[] = [];
+  for (const entry of raw.split(",")) {
+    const value = entry.trim();
+    if (!value) continue;
+    try {
+      const parsed = new URL(value);
+      if (parsed.origin === value && !origins.includes(value)) origins.push(value);
+    } catch {
+      // Ignore malformed entries rather than trusting them.
+    }
+  }
+  return origins;
+}
+
+/**
+ * Builds the `frame-ancestors` CSP directive from the registered embedder
+ * allowlist. Falls back to `'none'` when nothing is registered so the widget
+ * can never be framed by an arbitrary site.
+ */
+export function buildFrameAncestorsCsp(allowedOrigins: string[]): string {
+  const sources = allowedOrigins.length > 0 ? allowedOrigins.join(" ") : "'none'";
+  return `frame-ancestors ${sources}`;
+}
+
+/**
+ * Cross-checks a self-declared `parentOrigin` against the browser's own
+ * view of who is framing us: `location.ancestorOrigins` (Chromium) and
+ * `document.referrer`. Returns true only when the declared origin is on the
+ * allowlist AND, when the browser exposes framing info, it agrees with the
+ * declaration. A page that merely sets `parentOrigin` in the URL can't pass
+ * this check unless it is genuinely the registered embedder.
+ */
+export function isTrustedParentOrigin(
+  parentOrigin: string,
+  allowedOrigins: string[],
+  evidence: { ancestorOrigins?: readonly string[] | null; referrer?: string | null } = {}
+): boolean {
+  if (!allowedOrigins.includes(parentOrigin)) return false;
+
+  const ancestors = evidence.ancestorOrigins;
+  if (ancestors && ancestors.length > 0) {
+    // The immediate parent is the last entry in ancestorOrigins.
+    const immediateParent = ancestors[ancestors.length - 1];
+    if (immediateParent && immediateParent !== parentOrigin) return false;
+  }
+
+  const referrer = evidence.referrer;
+  if (referrer) {
+    try {
+      if (new URL(referrer).origin !== parentOrigin) return false;
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * Validates and normalizes the widget's URL query params into a
  * `WidgetConfig`, or a single user-facing error describing the first
  * problem found. Used by the widget page on mount, and safe to call

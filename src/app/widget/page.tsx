@@ -23,6 +23,7 @@ import {
   toSafeErrorMessage,
 } from "@/lib/stellar";
 import {
+  isTrustedParentOrigin,
   parseWidgetConfig,
   postWidgetMessage,
   type WidgetConfig,
@@ -204,6 +205,25 @@ function WidgetPageInner() {
 
   if (!result.ok) {
     return <WidgetError message={result.error} />;
+  }
+
+  // The widget must not trust the self-declared `parentOrigin` query param:
+  // any site can embed it with its own origin and overlay it to trick users
+  // into signing a funding transaction (clickjacking). Cross-check the
+  // declared origin against the browser-reported ancestor origin(s) before
+  // rendering anything that can move funds.
+  const [trusted, setTrusted] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    setTrusted(isTrustedParentOrigin(result.config.parentOrigin));
+  }, [result.config.parentOrigin]);
+
+  if (trusted === null) {
+    return null;
+  }
+
+  if (!trusted) {
+    return <WidgetError message="This page can't be embedded here. The embedding origin isn't registered." />;
   }
 
   return <FundingWidget config={result.config} />;
