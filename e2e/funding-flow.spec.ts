@@ -19,6 +19,32 @@ import { setupMockWallet, connectMockWallet, setMockWalletRejectSign } from './f
 const MOCK_G_ADDRESS = 'GDZST3XVCDTUJ76ZAV2HA72KYXM4Y5LTTKCMDUHV4DZUMVAWPHFMEQZT';
 const MOCK_C_ADDRESS = 'CBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4';
 
+test.describe('Content Security Policy', () => {
+  test('loads the app with no CSP violations', async ({ page }) => {
+    const cspViolations: string[] = [];
+
+    page.on('console', (msg) => {
+      const text = msg.text();
+      if (/content security policy|refused to (execute|load|apply)/i.test(text)) {
+        cspViolations.push(text);
+      }
+    });
+
+    page.on('pageerror', (error) => {
+      if (/content security policy/i.test(error.message)) {
+        cspViolations.push(error.message);
+      }
+    });
+
+    await page.goto('/');
+
+    // Give inline scripts (theme-init) a chance to run and report violations.
+    await page.waitForLoadState('networkidle');
+
+    expect(cspViolations).toEqual([]);
+  });
+});
+
 test.describe.skip('Funding Flow', () => {
   test.beforeEach(async ({ page }) => {
     // Setup mock wallet for each test
