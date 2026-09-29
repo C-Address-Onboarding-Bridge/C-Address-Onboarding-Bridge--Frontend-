@@ -256,11 +256,14 @@ export default function AddressBookPage() {
             data-testid="import-errors"
             className="mb-4 p-3 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 space-y-1"
           >
-            {importErrors.map((err, i) => (
-              <p key={i} className="text-xs text-[var(--error)]">
-                {err}
-              </p>
-            ))}
+            {importErrors.map((err) => {
+              const line = err.match(/^Entry (\d+):/)?.[1] ?? "file";
+              return (
+                <p key={`${line}:${err}`} className="text-xs text-[var(--error)]">
+                  {err}
+                </p>
+              );
+            })}
           </div>
         )}
 

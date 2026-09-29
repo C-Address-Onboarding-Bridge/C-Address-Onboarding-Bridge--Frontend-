@@ -11,6 +11,7 @@ const getHydratedSnapshot = () => true;
 const getServerHydrationSnapshot = () => false;
 
 export interface ChecklistStep {
+  id: string;
   title: string;
   description: string;
   href: string;
@@ -143,7 +144,7 @@ export function OnboardingChecklist({ steps }: OnboardingChecklistProps) {
           const done = completedSteps[index];
           return (
             <Link
-              key={index}
+              key={step.id}
               href={step.href}
               onClick={() => handleStepClick(index)}
               className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
