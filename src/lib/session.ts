@@ -76,6 +76,12 @@ function parseSession(raw: string | null): WalletSession | null {
  * Reads the stored session. Returns a fresh session when nothing is stored, the
  * record is unparseable, or it has expired — and drops the expired record so it
  * is not re-parsed on every call.
+ *
+ * A record stamped in the future (clock skew, or a tampered value) is also
+ * treated as expired here, on top of `isSessionExpired`'s own TTL check:
+ * `isSessionExpired` alone would see a negative age and call it "not yet
+ * past the TTL", so this rejection has to live at the call site that owns
+ * discarding the record.
  */
 export function loadSession(now: number = Date.now()): WalletSession {
   const store = storage();
@@ -84,7 +90,7 @@ export function loadSession(now: number = Date.now()): WalletSession {
   const raw = store.getItem(SESSION_STORAGE_KEY);
   const session = parseSession(raw);
 
-  if (!session || isSessionExpired(session, now)) {
+  if (!session || session.updatedAt > now || isSessionExpired(session, now)) {
     if (raw !== null) store.removeItem(SESSION_STORAGE_KEY);
     return freshSession(now);
   }
