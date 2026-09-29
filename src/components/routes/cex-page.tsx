@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, Copy, Check, ExternalLink, Wallet, X, Clock, HelpCircle } from "lucide-react";
+import { Building2, Copy, Check, ExternalLink, Wallet, X, AlertTriangle, HelpCircle } from "lucide-react";
 import { CEX_LIST, type CexConfig } from "@/lib/types";
 import { isCAddress } from "@/lib/stellar";
+import { buildCexDepositMemo, buildCexDepositUri } from "@/lib/cexDeposit";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { useDebounce } from "@/hooks/useDebounce";
 import LiveRegion from "@/components/live-region";
+import QrCode from "@/components/qr-code";
 import { useHelp } from "@/contexts/HelpContext";
 
 /**
@@ -16,20 +18,33 @@ import { useHelp } from "@/contexts/HelpContext";
  * - Validates the C-address input with isCAddress() (StrKey.isValidContract)
  *   and shows an inline error when the value is not a valid Soroban contract
  *   address. (#299)
- * - Bridge deposit address and memo are not yet wired up; the section is
- *   reframed as "Coming Soon" to avoid misleading users into expecting a
- *   real deposit address. (#299)
+ * - Real deposit-address/memo routing instructions (#680): once a valid
+ *   C-address is entered and NEXT_PUBLIC_CEX_BRIDGE_DEPOSIT_ADDRESS is
+ *   configured, shows the bridge's deposit G-address, the
+ *   `bridge:{exchange}:{suffix}` memo the backend already documents for
+ *   correlating deposits to a target C-address, a QR code encoding both via
+ *   a SEP-0007 payment URI, and an explicit warning about the memo. Falls
+ *   back to a "not yet configured" state (not a fabricated address) when the
+ *   operator hasn't set the env var yet.
  * - Copy button uses the shared useCopyToClipboard hook — shows "Copy failed"
  *   in the error state instead of a success checkmark. (#300)
  */
 export default function CexPage() {
   const { openHelp } = useHelp();
+  // Read per-render (not as a module-level constant) so this reflects the
+  // current environment at call time. Public by design — this is where
+  // users send funds, not a secret. Unset until the operator provisions one.
+  const CEX_DEPOSIT_ADDRESS = process.env.NEXT_PUBLIC_CEX_BRIDGE_DEPOSIT_ADDRESS || "";
   // Annotated with CexConfig rather than inferred: CEX_LIST is `as const`, so
   // the inferred type would be the literal type of Binance alone and selecting
   // any other exchange would not type-check. (#346)
   const [selectedCex, setSelectedCex] = useState<CexConfig>(CEX_LIST[0]);
   const [cAddress, setCAddress] = useState("");
   const { status: copyStatus, copy: copyToClipboard } = useCopyToClipboard();
+  // Independent copy-feedback state per field — copying the memo must not
+  // clobber (or be clobbered by) the deposit address's own "Copied!" state.
+  const { status: depositCopyStatus, copy: copyDepositAddress } = useCopyToClipboard();
+  const { status: memoCopyStatus, copy: copyMemo } = useCopyToClipboard();
 
   // Debounce address so validation only runs 200 ms after the user stops
   // typing — avoids re-validating on every keystroke while keeping the
@@ -48,12 +63,31 @@ export default function CexPage() {
   // added overhead without any memoization benefit.
   const withdrawalUrl = selectedCex.withdrawalUrl;
 
+  // Only computed once there's a valid target C-address to encode into the
+  // memo -- an exchange name alone isn't enough to build a usable deposit
+  // instruction.
+  const depositMemo = addressValid ? buildCexDepositMemo(selectedCex.name, debouncedCAddress) : null;
+  const depositUri =
+    CEX_DEPOSIT_ADDRESS && depositMemo ? buildCexDepositUri(CEX_DEPOSIT_ADDRESS, depositMemo) : null;
+
   // Copy feedback is icon-only (plus a visible "Copy failed" label), so the
   // outcome has to be announced for it to exist at all for AT users.
   const copyAnnouncement =
     copyStatus === "copied"
       ? "C-address copied to clipboard."
       : copyStatus === "error"
+        ? "Copy failed. Check clipboard permissions and try again."
+        : "";
+  const depositCopyAnnouncement =
+    depositCopyStatus === "copied"
+      ? "Deposit address copied to clipboard."
+      : depositCopyStatus === "error"
+        ? "Copy failed. Check clipboard permissions and try again."
+        : "";
+  const memoCopyAnnouncement =
+    memoCopyStatus === "copied"
+      ? "Memo copied to clipboard."
+      : memoCopyStatus === "error"
         ? "Copy failed. Check clipboard permissions and try again."
         : "";
 
@@ -155,20 +189,110 @@ export default function CexPage() {
                 and goes with addressValid) — a live region inserted at the same
                 moment it gains text can go unannounced. */}
             <LiveRegion message={copyAnnouncement} />
+            <LiveRegion message={depositCopyAnnouncement} />
+            <LiveRegion message={memoCopyAnnouncement} />
 
-            {/* Bridge deposit address — coming soon (#299) */}
-            <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface-2)] p-4 mb-4 flex items-start gap-3">
-              <Clock className="w-5 h-5 text-[var(--text-muted)] flex-shrink-0 mt-0.5" aria-hidden="true" />
-              <div>
-                <p className="text-sm font-medium mb-1">Bridge deposit address — coming soon</p>
-                <p className="text-xs text-[var(--text-muted)]">
-                  Direct CEX-to-C-address routing via a Soroban bridge contract is under
-                  development. Once available, a dedicated deposit address and memo will
-                  appear here. In the meantime, use the Bridge tab to convert a G-address
-                  payment to your C-address.
-                </p>
+            {!CEX_DEPOSIT_ADDRESS ? (
+              // Honest "not configured" state rather than a fabricated address —
+              // the operator hasn't provisioned a bridge deposit G-address yet.
+              <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface-2)] p-4 mb-4 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-[var(--text-muted)] flex-shrink-0 mt-0.5" aria-hidden="true" />
+                <div>
+                  <p className="text-sm font-medium mb-1">Bridge deposit address not yet configured</p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    This deployment hasn&apos;t set up a bridge deposit address yet. In the
+                    meantime, use the Bridge tab to convert a G-address payment to your
+                    C-address.
+                  </p>
+                </div>
               </div>
-            </div>
+            ) : !addressValid ? (
+              <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface-2)] p-4 mb-4 text-xs text-[var(--text-muted)]">
+                Enter a valid C-address above to get your deposit address and memo.
+              </div>
+            ) : (
+              <div className="space-y-4 mb-4">
+                <div
+                  role="alert"
+                  className="rounded-lg border border-red-400/50 bg-red-500/10 p-4 flex items-start gap-3"
+                >
+                  <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                  <div>
+                    <p className="text-sm font-medium mb-1 text-red-500">You must include the memo</p>
+                    <p className="text-xs text-[var(--text-muted)]">
+                      This deposit address is shared by every user of this bridge. Without the
+                      exact memo below, your withdrawal cannot be matched to your C-address and
+                      the funds may be permanently unrecoverable. Most exchanges have a separate
+                      &quot;Memo&quot; or &quot;Tag&quot; field on the withdrawal form — do not
+                      append it to the address.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-4">
+                  {depositUri && (
+                    <div className="flex-shrink-0 self-center sm:self-start">
+                      <QrCode
+                        value={depositUri}
+                        size={160}
+                        label={`Stellar payment QR code for ${selectedCex.name} withdrawal to bridge deposit address, with memo pre-filled`}
+                      />
+                    </div>
+                  )}
+                  <div className="flex-1 space-y-3 min-w-0">
+                    <div>
+                      <label className="block text-xs text-[var(--text-muted)] mb-1">
+                        Deposit Address (Stellar G-address)
+                      </label>
+                      <div className="flex items-start gap-2">
+                        <code className="flex-1 p-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-xs font-mono break-all">
+                          {CEX_DEPOSIT_ADDRESS}
+                        </code>
+                        <button
+                          onClick={() => copyDepositAddress(CEX_DEPOSIT_ADDRESS)}
+                          aria-label="Copy deposit address"
+                          title={depositCopyStatus === "error" ? "Copy failed — check clipboard permissions" : "Copy deposit address"}
+                          className="p-3 rounded-lg border border-[var(--border)] hover:bg-[var(--surface-2)] transition-colors flex-shrink-0"
+                        >
+                          {depositCopyStatus === "copied" ? (
+                            <Check className="w-4 h-4 text-green-500" />
+                          ) : depositCopyStatus === "error" ? (
+                            <X className="w-4 h-4 text-red-500" />
+                          ) : (
+                            <Copy className="w-4 h-4 text-[var(--text-muted)]" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-[var(--text-muted)] mb-1">
+                        Memo (required — MEMO_TEXT)
+                      </label>
+                      <div className="flex items-start gap-2">
+                        <code className="flex-1 p-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-xs font-mono break-all">
+                          {depositMemo}
+                        </code>
+                        <button
+                          onClick={() => depositMemo && copyMemo(depositMemo)}
+                          aria-label="Copy memo"
+                          title={memoCopyStatus === "error" ? "Copy failed — check clipboard permissions" : "Copy memo"}
+                          className="p-3 rounded-lg border border-[var(--border)] hover:bg-[var(--surface-2)] transition-colors flex-shrink-0"
+                        >
+                          {memoCopyStatus === "copied" ? (
+                            <Check className="w-4 h-4 text-green-500" />
+                          ) : memoCopyStatus === "error" ? (
+                            <X className="w-4 h-4 text-red-500" />
+                          ) : (
+                            <Copy className="w-4 h-4 text-[var(--text-muted)]" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* C-address copy row — only shown when address is valid */}
             {addressValid && (
@@ -240,14 +364,15 @@ export default function CexPage() {
               <li className="flex gap-2">
                 <span className="text-[var(--primary-light)] font-medium">2.</span>
                 <span>
-                  Bridge deposit routing is coming soon — you will withdraw from your CEX
-                  to a bridge address linked to your C-address
+                  Withdraw from your exchange to the bridge deposit address shown, with the
+                  memo attached exactly as shown
                 </span>
               </li>
               <li className="flex gap-2">
                 <span className="text-[var(--primary-light)] font-medium">3.</span>
                 <span>
-                  Until then, use the Bridge tab to fund your C-address via a G-address
+                  The bridge matches your deposit by its memo and funds your C-address
+                  automatically
                 </span>
               </li>
             </ol>
