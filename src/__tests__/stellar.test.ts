@@ -246,11 +246,10 @@ describe("getAccountBalances cache", () => {
     expect(loadAccount).toHaveBeenCalledTimes(1);
   });
 
-  it("returns the fallback and does not cache failures", async () => {
+  it("throws on a network error instead of reporting a zero balance, and does not cache it (#719)", async () => {
     loadAccount.mockRejectedValueOnce(new Error("network down"));
 
-    const failed = await getAccountBalances(G_ADDRESS, "TESTNET");
-    expect(failed).toEqual({ total: "0", balances: [] });
+    await expect(getAccountBalances(G_ADDRESS, "TESTNET")).rejects.toThrow("network down");
 
     // Next call within the TTL must retry rather than serve the fallback.
     loadAccount.mockResolvedValue(account("50"));
@@ -271,6 +270,13 @@ describe("getAccountBalances cache", () => {
 
     expect(recovered.total).toBe("25");
     expect(loadAccount).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws on a Horizon 500 instead of reporting a zero balance (#719)", async () => {
+    const serverError = { response: { status: 500 } };
+    loadAccount.mockRejectedValueOnce(serverError);
+
+    await expect(getAccountBalances(G_ADDRESS, "TESTNET")).rejects.toBe(serverError);
   });
 
   it("clearAccountBalancesCache forces a refetch", async () => {

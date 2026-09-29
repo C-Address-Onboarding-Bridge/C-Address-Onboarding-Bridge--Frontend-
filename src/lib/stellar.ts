@@ -480,7 +480,9 @@ async function withBalanceFallback(
     if (isUnfundedAccountError(err)) {
       return { total: "0", balances: [], unfunded: true };
     }
-    return { total: "0", balances: [] };
+    // Any other failure (5xx, network error) is surfaced to the caller rather
+    // than masked as a 0 balance, so an outage is never shown as "0 XLM". (#719)
+    throw err;
   }
 }
 
