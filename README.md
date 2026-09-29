@@ -152,3 +152,6 @@ MIT
 
 <!-- handsoff-issue-726 -->
 - #726: perf: the wallet poller makes three extension calls every 3 seconds
+
+<!-- handsoff-issue-727 -->
+- #727: chore: sitemap and robots.txt hard-code c-address-bridge.example.com
