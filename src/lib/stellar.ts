@@ -1553,3 +1553,24 @@ export async function getTransactionByHash(
     sequence: Number.isFinite(sequenceNumber) ? sequenceNumber : null,
   };
 }
+
+/**
+ * Resolves a transaction hash without assuming the viewer's wallet network
+ * (#717). An explicit network (e.g. from a shared link's `?network=`) is used
+ * as-is; otherwise the preferred network is tried first and the other one is
+ * checked when the hash isn't found there.
+ */
+export async function findTransactionByHash(
+  hash: string,
+  preferredNetwork: StellarNetwork,
+  explicitNetwork?: StellarNetwork | null
+): Promise<TransactionDetails | null> {
+  if (explicitNetwork) return getTransactionByHash(hash, explicitNetwork);
+  const preferred = await getTransactionByHash(hash, preferredNetwork);
+  if (!preferred || preferred.status !== "pending") return preferred;
+  const other = await getTransactionByHash(
+    hash,
+    preferredNetwork === "PUBLIC" ? "TESTNET" : "PUBLIC"
+  );
+  return other && other.status !== "pending" ? other : preferred;
+}

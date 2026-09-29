@@ -9,6 +9,7 @@ import {
   clearAccountBalancesCache,
   getHorizonServer,
   fetchRecentTransactions,
+  findTransactionByHash,
 } from "@/lib/stellar";
 import { HORIZON_URL } from "@/lib/types";
 
@@ -17,6 +18,7 @@ import { HORIZON_URL } from "@/lib/types";
 // checksum-valid StrKeys rather than hand-rolled look-alikes.
 const loadAccount = vi.fn();
 const paymentsCall = vi.fn();
+const transactionCall = vi.fn();
 
 vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@stellar/stellar-sdk")>();
@@ -27,7 +29,9 @@ vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
       Server: vi.fn().mockImplementation(function MockHorizonServer(this: {
         loadAccount: typeof loadAccount;
         payments: () => unknown;
-      }) {
+        transactions: () => unknown;
+        operations: () => unknown;
+      }, url: string) {
         this.loadAccount = loadAccount;
         const builder = {
           forAccount: () => builder,
@@ -36,6 +40,8 @@ vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
           call: paymentsCall,
         };
         this.payments = () => builder;
+        this.transactions = () => ({ transaction: (hash: string) => ({ call: () => transactionCall(url, hash) }) });
+        this.operations = () => ({ forTransaction: () => ({ call: async () => ({ records: [] }) }) });
       }),
     },
   };
@@ -360,5 +366,35 @@ describe("fetchRecentTransactions (#720)", () => {
     expect(txs[2]).toMatchObject({ fromAddress: OTHER_G, toAddress: G_ADDRESS, amount: "3", asset: "XLM" });
     expect(txs[3]).toMatchObject({ fromAddress: OTHER_G, toAddress: G_ADDRESS });
     expect(txs[4]).toMatchObject({ fromAddress: G_ADDRESS, toAddress: C_ADDRESS, amount: "5", asset: "XLM" });
+  });
+});
+
+describe("findTransactionByHash (#717)", () => {
+  const HASH = "a".repeat(64);
+  const record = { hash: HASH, successful: true, source_account_sequence: "1" };
+
+  beforeEach(() => {
+    transactionCall.mockReset();
+  });
+
+  it("falls back to the other network when the hash isn't on the wallet's", async () => {
+    transactionCall.mockImplementation(async (url: string) => {
+      if (url === HORIZON_URL.PUBLIC) return record;
+      throw { response: { status: 404 } };
+    });
+
+    const result = await findTransactionByHash(HASH, "TESTNET");
+
+    expect(result).toMatchObject({ network: "PUBLIC", status: "confirmed" });
+  });
+
+  it("uses the link's network without consulting the wallet's", async () => {
+    transactionCall.mockResolvedValue(record);
+
+    const result = await findTransactionByHash(HASH, "TESTNET", "PUBLIC");
+
+    expect(result?.network).toBe("PUBLIC");
+    expect(transactionCall).toHaveBeenCalledTimes(1);
+    expect(transactionCall).toHaveBeenCalledWith(HORIZON_URL.PUBLIC, HASH);
   });
 });

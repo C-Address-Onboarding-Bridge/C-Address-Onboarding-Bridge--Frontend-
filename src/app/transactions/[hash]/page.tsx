@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
@@ -19,7 +20,7 @@ import {
 import { useWallet } from "@/components/wallet-provider";
 import { IN_FLIGHT_TRANSACTION_KEY } from "@/components/error-boundary";
 import {
-  getTransactionByHash,
+  findTransactionByHash,
   subscribeToTransactionStatus,
   type TransactionDetails,
 } from "@/lib/stellar";
@@ -55,7 +56,11 @@ export default function TransactionDetailPage({
   params: Promise<{ hash: string }>;
 }) {
   const { hash } = params instanceof Promise ? use(params) : params;
-  const { network } = useWallet();
+  const { network: walletNetwork } = useWallet();
+  // The transaction's own network comes from the link (#717); without it we
+  // fall back to trying both networks, starting with the wallet's.
+  const networkParam = useSearchParams()?.get("network");
+  const linkNetwork = networkParam === "PUBLIC" || networkParam === "TESTNET" ? networkParam : null;
 
   const [details, setDetails] = useState<TransactionDetails | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -66,7 +71,7 @@ export default function TransactionDetailPage({
   useEffect(() => {
     let cancelled = false;
     setLoadState("loading");
-    getTransactionByHash(hash, network)
+    findTransactionByHash(hash, walletNetwork, linkNetwork)
       .then((result) => {
         if (cancelled) return;
         setDetails(result);
@@ -78,7 +83,7 @@ export default function TransactionDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [hash, network, tick]);
+  }, [hash, walletNetwork, linkNetwork, tick]);
 
   // A well-formed hash that Horizon hasn't ingested yet is still in flight —
   // keep polling until it lands or the user leaves. (#474)
@@ -96,7 +101,7 @@ export default function TransactionDetailPage({
     if (details?.status !== "pending") return;
     const subscription = subscribeToTransactionStatus({
       hash,
-      network,
+      network: details.network,
       onStatus: (status) => {
         if (status === "pending") return;
         setDetails((prev) => (prev ? { ...prev, status } : prev));
@@ -115,7 +120,7 @@ export default function TransactionDetailPage({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLiveTransport(subscription.transport);
     return () => subscription.unsubscribe();
-  }, [hash, network, details?.status]);
+  }, [hash, details?.network, details?.status]);
 
   // Terminal state: the in-flight marker set by the bridge page is no longer
   // needed, so a later crash won't keep showing the recovery link. (#473)
@@ -131,7 +136,10 @@ export default function TransactionDetailPage({
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      // Pin the transaction's network in the shared link. (#717)
+      const url = new URL(window.location.href);
+      if (details) url.searchParams.set("network", details.network);
+      await navigator.clipboard.writeText(url.toString());
       setCopied(true);
     } catch {
       setCopied(false);
