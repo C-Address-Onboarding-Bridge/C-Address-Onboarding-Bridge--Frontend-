@@ -81,12 +81,12 @@ export default function TransactionDetailPage({
   }, [hash, network, tick]);
 
   // A well-formed hash that Horizon hasn't ingested yet is still in flight —
-  // keep polling until it lands or the user leaves. (#474)
+  // keep polling until it lands or the user leaves, but only when SSE is unavailable. (#474)
   useEffect(() => {
-    if (loadState !== "found" || details?.status !== "pending") return;
+    if (loadState !== "found" || details?.status !== "pending" || liveTransport !== "polling") return;
     const timer = setTimeout(() => setTick((t) => t + 1), IN_FLIGHT_POLL_MS);
     return () => clearTimeout(timer);
-  }, [loadState, details?.status, tick]);
+  }, [loadState, details?.status, liveTransport, tick]);
 
   // Live status via the SSE stream (#471). The subscription closes itself on a
   // terminal state, falls back to polling when SSE is unavailable/failing, and
