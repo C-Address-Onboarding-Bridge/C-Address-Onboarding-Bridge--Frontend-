@@ -152,3 +152,6 @@ MIT
 
 <!-- handsoff-issue-738 -->
 - #738: i18n: translate the address book page
+
+<!-- handsoff-issue-739 -->
+- #739: i18n: translate the funding schedules page
