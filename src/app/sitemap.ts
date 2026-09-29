@@ -1,36 +1,21 @@
-import type { MetadataRoute } from 'next';
+import type { MetadataRoute } from "next";
 
-/**
- * Sitemap for SEO (#497).
- *
- * Lists all public pages that should be discoverable by search engines.
- * User-specific pages (profile, dashboard) are excluded.
- */
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
 export default function sitemap(): MetadataRoute.Sitemap {
+  const baseUrl = SITE_URL.replace(/\/$/, "");
+
   return [
     {
-      url: 'https://c-address-bridge.example.com',
+      url: `${baseUrl}/`,
       lastModified: new Date(),
-      changeFrequency: 'weekly',
+      changeFrequency: "weekly",
       priority: 1,
     },
     {
-      url: 'https://c-address-bridge.example.com/bridge',
+      url: `${baseUrl}/onboarding`,
       lastModified: new Date(),
-      changeFrequency: 'weekly',
-      priority: 0.9,
-    },
-    {
-      url: 'https://c-address-bridge.example.com/onramp',
-      lastModified: new Date(),
-      changeFrequency: 'weekly',
-      priority: 0.9,
-    },
-    {
-      url: 'https://c-address-bridge.example.com/cex',
-      lastModified: new Date(),
-      changeFrequency: 'weekly',
+      changeFrequency: "weekly",
       priority: 0.8,
     },
   ];

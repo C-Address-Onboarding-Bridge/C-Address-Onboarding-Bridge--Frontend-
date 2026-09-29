@@ -1,19 +1,15 @@
-import type { MetadataRoute } from 'next';
+import type { MetadataRoute } from "next";
 
-/**
- * Robots.txt for SEO (#497).
- *
- * Controls which pages search engines can crawl and index.
- * User-specific pages and admin areas are disallowed.
- */
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
 export default function robots(): MetadataRoute.Robots {
+  const baseUrl = SITE_URL.replace(/\/$/, "");
+
   return {
     rules: {
-      userAgent: '*',
-      allow: '/',
-      disallow: ['/profile', '/dashboard', '/admin', '/_next/', '/api/'],
+      userAgent: "*",
+      allow: "/",
     },
-    sitemap: 'https://c-address-bridge.example.com/sitemap.xml',
+    sitemap: `${baseUrl}/sitemap.xml`,
   };
 }
