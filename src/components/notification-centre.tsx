@@ -13,6 +13,7 @@ import {
   unreadNotificationCount,
   type AppNotification,
 } from "@/lib/notifications";
+import { useHydrated } from "@/hooks/useHydrated";
 
 /**
  * Notification centre for transaction and account events (#477).
@@ -33,19 +34,14 @@ export interface NotificationCentreProps {
 }
 
 const NotificationCentre = ({ closeOnNavigate = true }: NotificationCentreProps) => {
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [storedNotifications, setStoredNotifications] = useState<AppNotification[]>([]);
+  const hydrated = useHydrated();
+  const notifications = hydrated ? loadNotifications() : storedNotifications;
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const refresh = useCallback(() => setNotifications(loadNotifications()), []);
-
-  useEffect(() => {
-    // Pull the persisted list into React state once on mount; subsequent
-    // updates come from the explicit actions below.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    refresh();
-  }, [refresh]);
+  const refresh = useCallback(() => setStoredNotifications(loadNotifications()), []);
 
   // Escape closes the panel and returns focus to the bell.
   useEffect(() => {

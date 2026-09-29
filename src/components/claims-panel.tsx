@@ -48,55 +48,56 @@ function truncateAddress(address: string): string {
  */
 export default function ClaimsPanel({ address, network, isNetworkSupported }: ClaimsPanelProps) {
   const [locks, setLocks] = useState<LockRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [errorState, setError] = useState<string | null>(null);
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<ClaimFeedback | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const claimingRef = useRef<string | null>(null);
+  const targetKey = `${address ?? ""}:${network}`;
+  const enabled = Boolean(address && isNetworkSupported);
+  const loading = enabled && loadedKey !== targetKey;
+  const error = loadedKey === targetKey ? errorState : null;
+  const visibleLocks = enabled && loadedKey === targetKey ? locks : [];
 
   const refresh = useMemo(
-    () => async (isInitial: boolean) => {
+    () => async () => {
       if (!address || !isNetworkSupported) return;
-      if (isInitial) setLoading(true);
       try {
         const result = await listIncomingLocks(address, network);
         setLocks(sortLocksByUnlockTime(result));
         setError(null);
+        setLoadedKey(targetKey);
       } catch {
         // A failed poll leaves the last-known list in place rather than
         // clearing it — losing a correct "claimable" state to a transient
         // network blip would be worse than showing slightly stale data.
         setError("Couldn't refresh locked transfers. Retrying shortly.");
-      } finally {
-        if (isInitial) setLoading(false);
+        setLoadedKey(targetKey);
       }
     },
     [address, network, isNetworkSupported]
   );
 
   useEffect(() => {
-    if (!address || !isNetworkSupported) {
-      setLocks([]);
-      setLoading(false);
-      return;
-    }
+    if (!address || !isNetworkSupported) return;
     let cancelled = false;
-    const tick = (isInitial: boolean) => {
+    const tick = () => {
       if (cancelled) return;
-      refresh(isInitial);
+      void refresh();
     };
-    tick(true);
+    const initialTimer = setTimeout(tick, 0);
     const interval = setInterval(() => {
       if (document.hidden) return;
-      tick(false);
+      tick();
     }, LOCKS_POLL_INTERVAL_MS);
     const handleVisibilityChange = () => {
-      if (!document.hidden) tick(false);
+      if (!document.hidden) tick();
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       cancelled = true;
+      clearTimeout(initialTimer);
       clearInterval(interval);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
@@ -105,7 +106,7 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
   // Countdown tick: only runs while at least one lock is still pending and
   // unmatured, so the panel doesn't re-render every second once everything
   // is either claimable or claimed.
-  const hasPendingUnmatured = locks.some((l) => l.status === "pending" && !isLockMatured(l, now));
+  const hasPendingUnmatured = visibleLocks.some((l) => l.status === "pending" && !isLockMatured(l, now));
   useEffect(() => {
     if (!hasPendingUnmatured) return;
     const interval = setInterval(() => setNow(Date.now()), COUNTDOWN_TICK_MS);
@@ -130,7 +131,7 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
         // first. Re-check the server's view immediately instead of leaving a
         // stale "claimable" row up, or (worse) leaving it possible to retry.
         setFeedback({ lockId: lock.id, ok: false, message: e.message });
-        await refresh(false);
+        await refresh();
       } else {
         setFeedback({
           lockId: lock.id,
@@ -139,7 +140,7 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
         });
         // The failure might still mean the claim went through server-side
         // (e.g. a dropped response) — re-check rather than assume it didn't.
-        await refresh(false);
+        await refresh();
       }
     } finally {
       claimingRef.current = null;
@@ -173,13 +174,13 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
           <Loader2 className="w-6 h-6 animate-spin motion-reduce:animate-none text-[var(--text-muted)]" />
           <span className="sr-only">Loading locked transfers…</span>
         </div>
-      ) : locks.length === 0 ? (
+      ) : visibleLocks.length === 0 ? (
         <div className="p-12 text-center">
           <p className="text-sm text-[var(--text-muted)]">No locked transfers incoming to this address.</p>
         </div>
       ) : (
         <div className="divide-y divide-[var(--border)]">
-          {locks.map((lock) => {
+          {visibleLocks.map((lock) => {
             const claimable = isLockClaimable(lock, now);
             const isThisClaiming = claimingId === lock.id;
             const rowFeedback = feedback?.lockId === lock.id ? feedback : null;

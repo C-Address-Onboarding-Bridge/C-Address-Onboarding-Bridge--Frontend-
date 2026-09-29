@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useEffect, useState, type ReactNode } from "react";
+import { useHydrated } from "@/hooks/useHydrated";
 import Link from "next/link";
 import {
   AlertCircle,
@@ -59,34 +60,42 @@ export default function TransactionDetailPage({
 
   const [details, setDetails] = useState<TransactionDetails | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadedRequestKey, setLoadedRequestKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [tick, setTick] = useState(0);
-  const [liveTransport, setLiveTransport] = useState<"sse" | "polling">("sse");
+  const hydrated = useHydrated();
+  const [transportOverride, setTransportOverride] = useState<"polling" | null>(null);
+  const liveTransport = transportOverride ?? (hydrated && typeof EventSource === "undefined" ? "polling" : "sse");
+  const requestKey = `${hash}:${network}:${tick}`;
+  const currentLoadState = loadedRequestKey === requestKey ? loadState : "loading";
 
   useEffect(() => {
     let cancelled = false;
-    setLoadState("loading");
     getTransactionByHash(hash, network)
       .then((result) => {
         if (cancelled) return;
         setDetails(result);
         setLoadState(result ? "found" : "not-found");
+        setLoadedRequestKey(requestKey);
       })
       .catch(() => {
-        if (!cancelled) setLoadState("error");
+        if (!cancelled) {
+          setLoadState("error");
+          setLoadedRequestKey(requestKey);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [hash, network, tick]);
+  }, [hash, network, tick, requestKey]);
 
   // A well-formed hash that Horizon hasn't ingested yet is still in flight —
   // keep polling until it lands or the user leaves. (#474)
   useEffect(() => {
-    if (loadState !== "found" || details?.status !== "pending") return;
+    if (currentLoadState !== "found" || details?.status !== "pending") return;
     const timer = setTimeout(() => setTick((t) => t + 1), IN_FLIGHT_POLL_MS);
     return () => clearTimeout(timer);
-  }, [loadState, details?.status, tick]);
+  }, [currentLoadState, details?.status, tick]);
 
   // Live status via the SSE stream (#471). The subscription closes itself on a
   // terminal state, falls back to polling when SSE is unavailable/failing, and
@@ -110,10 +119,8 @@ export default function TransactionDetailPage({
         // record (fees, ledger, timeline) instead of the pending skeleton.
         setTick((t) => t + 1);
       },
-      onError: () => setLiveTransport("polling"),
+      onError: () => setTransportOverride("polling"),
     });
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLiveTransport(subscription.transport);
     return () => subscription.unsubscribe();
   }, [hash, network, details?.status]);
 
@@ -138,7 +145,7 @@ export default function TransactionDetailPage({
     }
   };
 
-  if (loadState === "loading") {
+  if (currentLoadState === "loading") {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
         <div role="status" className="flex items-center justify-center gap-3 text-[var(--text-muted)]">
@@ -149,7 +156,7 @@ export default function TransactionDetailPage({
     );
   }
 
-  if (loadState === "error") {
+  if (currentLoadState === "error") {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-24 text-center">
         <h1 className="text-2xl font-bold mb-2">Could not load transaction</h1>
@@ -168,7 +175,7 @@ export default function TransactionDetailPage({
     );
   }
 
-  if (loadState === "not-found" || !details) {
+  if (currentLoadState === "not-found" || !details) {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-24 text-center">
         <h1 className="text-2xl font-bold mb-2" data-testid="tx-unknown">

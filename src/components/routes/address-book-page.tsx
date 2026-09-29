@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { BookUser, Download, Pencil, Trash2, Upload, X } from "lucide-react";
 import { truncateAddress } from "@/components/AddressForm";
 import LiveRegion from "@/components/live-region";
@@ -15,6 +15,7 @@ import {
   validateRecipient,
   type SavedRecipient,
 } from "@/lib/addressBook";
+import { useHydrated } from "@/hooks/useHydrated";
 
 /**
  * Address book page (#466).
@@ -29,7 +30,9 @@ import {
  * whether or not a wallet is connected.
  */
 export default function AddressBookPage() {
-  const [recipients, setRecipients] = useState<SavedRecipient[]>([]);
+  const [storedRecipients, setStoredRecipients] = useState<SavedRecipient[]>([]);
+  const hydrated = useHydrated();
+  const recipients = hydrated ? loadAddressBook() : storedRecipients;
   const [newLabel, setNewLabel] = useState("");
   const [newAddress, setNewAddress] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
@@ -43,15 +46,7 @@ export default function AddressBookPage() {
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Read from storage after mount only: touching localStorage during render
-  // would produce different server and client output and break hydration —
-  // same guard AvatarUpload/ProfilePage use for their own stores.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRecipients(loadAddressBook());
-  }, []);
-
-  const refresh = () => setRecipients(loadAddressBook());
+  const refresh = () => setStoredRecipients(loadAddressBook());
 
   const handleAdd = (event: React.FormEvent) => {
     event.preventDefault();

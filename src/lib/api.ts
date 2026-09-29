@@ -54,6 +54,27 @@ export async function getHealthStatus(): Promise<HealthStatus | null> {
 }
 
 /**
+ * Fetch referral statistics for an account. The endpoint is a placeholder
+ * until the referral API contract is finalized; failures return null so the
+ * page can offer its retry state instead of crashing.
+ */
+export async function getReferralStats(
+  address: string,
+  network: StellarNetwork
+): Promise<ReferralStats | null> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/referrals/${encodeURIComponent(address)}?network=${encodeURIComponent(network)}`,
+      { method: "GET", headers: { "Content-Type": "application/json" } }
+    );
+    if (!response.ok) return null;
+    return (await response.json()) as ReferralStats;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Determine if a service is experiencing issues based on health status.
  */
 export function isServiceDegraded(health: HealthStatus | null): boolean {

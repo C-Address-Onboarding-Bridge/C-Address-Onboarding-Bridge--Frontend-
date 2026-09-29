@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import BridgePage from "@/app/bridge/page";
 
@@ -49,6 +49,7 @@ vi.mock("@/lib/stellar", () => ({
   getAccountMinimumBalance: () => "1",
   getEstimatedFeeXLM: vi.fn().mockResolvedValue("~0.00001 XLM"),
   toSafeErrorMessage: (_e: unknown, fallback: string) => fallback,
+  shouldWarnOnMainnetAction: () => false,
 }));
 
 const createLockMock = vi.fn();
@@ -81,8 +82,24 @@ function futureDatetimeLocal(msFromNow: number): string {
 }
 
 describe("Bridge form — lock option (#467)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        feeStroops: "100",
+        feeXlm: "0.00001",
+        netAmount: "10",
+        grossAmount: "10",
+        asset: "XLM",
+        recipient: VALID_C_ADDRESS,
+      }),
+    }));
+  });
+
   afterEach(() => {
     createLockMock.mockReset();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -150,6 +167,7 @@ describe("Bridge form — lock option (#467)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Review Locked Transfer/i }));
 
     expect(await screen.findByText("Unlocks")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Confirm & Lock/i })).toBeEnabled();
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Confirm & Lock/i }));

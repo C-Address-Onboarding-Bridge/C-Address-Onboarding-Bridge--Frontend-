@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Wallet, ArrowRightLeft, Sparkles } from "lucide-react";
 import OnboardingModal, {
   type OnboardingOption,
   type OnboardingStep,
 } from "@/components/OnboardingModal";
+import { useHydrated } from "@/hooks/useHydrated";
 
 /**
  * localStorage key that gates the guided flow. A stored value of "completed"
@@ -93,24 +94,22 @@ const ROUTE_BY_OPTION: Record<string, { label: string; href: string }> = {
  */
 export default function OnboardingFlow() {
   const router = useRouter();
-  const [isOpen, setIsOpen] = useState(false);
-  const [chosenRoute, setChosenRoute] = useState<{
-    label: string;
-    href: string;
-  } | null>(null);
-
-  // Read storage only after mount so SSR and the first client render agree
-  // ("closed"), then the effect flips the modal open for first-time visitors.
-  // A stored "completed" value (written when the flow finishes) suppresses it.
-  useEffect(() => {
-    let completed = false;
+  const hydrated = useHydrated();
+  const [openOverride, setOpenOverride] = useState<boolean | null>(null);
+  let completed = false;
+  if (hydrated) {
     try {
       completed = localStorage.getItem(ONBOARDING_STORAGE_KEY) === "completed";
     } catch {
       // Storage unavailable — treat as first visit.
     }
-    if (!completed) setIsOpen(true);
-  }, []);
+  }
+  const isOpen = openOverride ?? (hydrated && !completed);
+  const setIsOpen = (open: boolean) => setOpenOverride(open);
+  const [chosenRoute, setChosenRoute] = useState<{
+    label: string;
+    href: string;
+  } | null>(null);
 
   const steps: OnboardingStep[] = useMemo(() => {
     if (!chosenRoute) return GUIDED_STEPS;

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useState } from "react";
 import {
   getConsentStatus,
   setConsentStatus,
@@ -9,6 +9,7 @@ import {
   type TelemetryConsent,
   captureEvent,
 } from "@/lib/telemetry";
+import { useHydrated } from "@/hooks/useHydrated";
 
 interface TelemetryContextType {
   consent: TelemetryConsent;
@@ -25,28 +26,19 @@ interface TelemetryProviderProps {
 }
 
 export function TelemetryProvider({ children }: TelemetryProviderProps) {
-  const [consent, setConsentState] = useState<TelemetryConsent>("pending");
-  const [isFirstVisitState, setIsFirstVisitState] = useState(true);
-  const [isEnabledState, setIsEnabledState] = useState(false);
-  const [isHydrated, setIsHydrated] = useState(false);
-
-  useEffect(() => {
-    // Only run on client
-    const state = getConsentStatus();
-    const firstVisit = isFirstVisit();
-    const enabled = isTelemetryEnabled();
-
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setConsentState(state);
-    setIsFirstVisitState(firstVisit);
-    setIsEnabledState(enabled);
-    setIsHydrated(true);
-  }, []);
+  const hydrated = useHydrated();
+  const [consentOverride, setConsentOverride] = useState<TelemetryConsent | null>(null);
+  const [firstVisitOverride, setFirstVisitOverride] = useState<boolean | null>(null);
+  const consent = consentOverride ?? (hydrated ? getConsentStatus() : "pending");
+  const firstVisit = firstVisitOverride ?? (hydrated ? isFirstVisit() : true);
+  const enabled = consentOverride !== null
+    ? consentOverride === "granted"
+    : hydrated ? isTelemetryEnabled() : false;
 
   const handleSetConsent = (newConsent: TelemetryConsent) => {
     setConsentStatus(newConsent);
-    setConsentState(newConsent);
-    setIsEnabledState(newConsent === "granted");
+    setConsentOverride(newConsent);
+    setFirstVisitOverride(false);
 
     // Capture consent event
     if (newConsent !== "pending") {
@@ -57,15 +49,10 @@ export function TelemetryProvider({ children }: TelemetryProviderProps) {
   const value: TelemetryContextType = {
     consent,
     setConsent: handleSetConsent,
-    isFirstVisit: isFirstVisitState,
-    isEnabled: isEnabledState,
+    isFirstVisit: firstVisit,
+    isEnabled: enabled,
     captureEvent,
   };
-
-  // Don't render children until hydrated to avoid hydration mismatch
-  if (!isHydrated) {
-    return <>{children}</>;
-  }
 
   return <TelemetryContext.Provider value={value}>{children}</TelemetryContext.Provider>;
 }

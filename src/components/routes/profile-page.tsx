@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Wallet, Copy, Check, X, Save, Trash2, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useWallet } from "@/components/wallet-provider";
@@ -21,6 +21,7 @@ import {
   shortenAddress,
   validateDisplayName,
 } from "@/lib/profile";
+import { useHydrated } from "@/hooks/useHydrated";
 
 /**
  * Profile page (#325).
@@ -46,25 +47,16 @@ export default function ProfilePage() {
   } = useWallet();
   const { status: copyStatus, copy: copyToClipboard } = useCopyToClipboard();
 
-  const [name, setName] = useState("");
-  const [savedName, setSavedName] = useState<string | null>(null);
+  const hydrated = useHydrated();
+  const [nameEdit, setNameEdit] = useState<{ address: string | null; name: string; savedName: string | null } | null>(null);
+  const storedName = hydrated ? loadDisplayName(address) : null;
+  const name = nameEdit?.address === address ? nameEdit.name : storedName ?? "";
+  const savedName = nameEdit?.address === address ? nameEdit.savedName : storedName;
   const [nameError, setNameError] = useState<string | null>(null);
   const [nameNotice, setNameNotice] = useState("");
   // Controls the "reopen onboarding" modal (#472); the guide is reachable again
   // from the profile page even after it was completed or skipped.
   const [onboardingOpen, setOnboardingOpen] = useState(false);
-
-  // Read from storage after mount only: touching localStorage during render
-  // would produce different server and client output and break hydration.
-  // Re-runs on address change so switching wallets loads that wallet's name.
-  useEffect(() => {
-    const stored = loadDisplayName(address);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSavedName(stored);
-    setName(stored ?? "");
-    setNameError(null);
-    setNameNotice("");
-  }, [address]);
 
   const handleSaveName = (event: React.FormEvent) => {
     event.preventDefault();
@@ -82,17 +74,15 @@ export default function ProfilePage() {
       return;
     }
     setNameError(null);
-    setSavedName(validation.value);
+    setNameEdit({ address, savedName: validation.value, name: validation.value });
     // Show the normalised value, so trailing whitespace visibly disappears
     // rather than silently differing from what was stored.
-    setName(validation.value);
     setNameNotice("Display name saved.");
   };
 
   const handleClearName = () => {
     clearDisplayName(address);
-    setSavedName(null);
-    setName("");
+    setNameEdit({ address, savedName: null, name: "" });
     setNameError(null);
     setNameNotice("Display name removed.");
   };
@@ -166,7 +156,7 @@ export default function ProfilePage() {
               type="text"
               value={name}
               onChange={(event) => {
-                setName(event.target.value);
+                setNameEdit({ address, name: event.target.value, savedName });
                 setNameError(null);
                 setNameNotice("");
               }}
