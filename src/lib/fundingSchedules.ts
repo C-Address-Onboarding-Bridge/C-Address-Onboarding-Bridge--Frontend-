@@ -53,6 +53,8 @@ export interface FundingSchedule {
   amount: string;
   asset: FundingLinkAsset;
   frequency: FundingFrequency;
+  /** The network this schedule is for (TESTNET or PUBLIC). */
+  network: "TESTNET" | "PUBLIC";
   /** Epoch ms the next funding is due. */
   nextRunAt: number;
   createdAt: number;
@@ -262,7 +264,8 @@ export function createFundingSchedule(
   rawAmount: string,
   asset: string,
   frequency: string,
-  startAt: number = Date.now()
+  startAt: number = Date.now(),
+  network: "TESTNET" | "PUBLIC" = "TESTNET"
 ): FundingSchedule | null {
   const result = validateFundingSchedule(rawLabel, rawTargetAddress, rawAmount, asset, frequency);
   if (!result.ok) return null;
@@ -278,6 +281,7 @@ export function createFundingSchedule(
     amount: result.amount,
     asset: result.asset,
     frequency: result.frequency,
+    network,
     nextRunAt: computeNextRunAt(result.frequency, startAt),
     createdAt: now,
     updatedAt: now,
@@ -301,7 +305,8 @@ export function updateFundingSchedule(
   rawTargetAddress: string,
   rawAmount: string,
   asset: string,
-  frequency: string
+  frequency: string,
+  network?: "TESTNET" | "PUBLIC"
 ): boolean {
   const result = validateFundingSchedule(rawLabel, rawTargetAddress, rawAmount, asset, frequency);
   if (!result.ok) return false;
@@ -319,6 +324,7 @@ export function updateFundingSchedule(
     amount: result.amount,
     asset: result.asset,
     frequency: result.frequency,
+    network: network ?? current.network,
     nextRunAt: frequencyChanged ? computeNextRunAt(result.frequency, Date.now()) : current.nextRunAt,
     updatedAt: Date.now(),
   };
@@ -395,13 +401,15 @@ export function markScheduleCompleted(id: string, now: number = Date.now()): Fun
 /**
  * Builds a pre-filled funding link for a schedule via `fundingLink.ts`'s
  * `buildFundingLink`, so acting on a due schedule never means re-typing the
- * address/amount by hand.
+ * address/amount by hand. Encodes the network so users can't accidentally
+ * send mainnet funds to testnet addresses (or vice versa). (#716)
  */
-export function buildScheduleFundingLink(baseUrl: string, schedule: Pick<FundingSchedule, "targetAddress" | "amount" | "asset">): string {
+export function buildScheduleFundingLink(baseUrl: string, schedule: Pick<FundingSchedule, "targetAddress" | "amount" | "asset" | "network">): string {
   return buildFundingLink(baseUrl, {
     target: schedule.targetAddress,
     amount: schedule.amount,
     asset: schedule.asset,
+    network: schedule.network,
   });
 }
 

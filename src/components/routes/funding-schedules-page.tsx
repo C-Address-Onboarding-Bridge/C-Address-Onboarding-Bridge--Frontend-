@@ -42,6 +42,7 @@ export default function FundingSchedulesPage() {
   const [newAmount, setNewAmount] = useState("");
   const [newAsset, setNewAsset] = useState<string>(FUNDING_LINK_ASSETS[0]);
   const [newFrequency, setNewFrequency] = useState<string>(FUNDING_FREQUENCIES[0]);
+  const [newNetwork, setNewNetwork] = useState<"TESTNET" | "PUBLIC">("TESTNET");
   const [addError, setAddError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -50,6 +51,7 @@ export default function FundingSchedulesPage() {
   const [editAmount, setEditAmount] = useState("");
   const [editAsset, setEditAsset] = useState<string>(FUNDING_LINK_ASSETS[0]);
   const [editFrequency, setEditFrequency] = useState<string>(FUNDING_FREQUENCIES[0]);
+  const [editNetwork, setEditNetwork] = useState<"TESTNET" | "PUBLIC">("TESTNET");
   const [editError, setEditError] = useState<string | null>(null);
 
   const [notice, setNotice] = useState("");
@@ -73,7 +75,7 @@ export default function FundingSchedulesPage() {
       setNotice("");
       return;
     }
-    const created = createFundingSchedule(newLabel, newAddress, newAmount, newAsset, newFrequency);
+    const created = createFundingSchedule(newLabel, newAddress, newAmount, newAsset, newFrequency, Date.now(), newNetwork);
     if (!created) {
       setAddError("Couldn't save — you may have reached the schedule limit, or browser storage is full.");
       setNotice("");
@@ -83,6 +85,7 @@ export default function FundingSchedulesPage() {
     setNewLabel("");
     setNewAddress("");
     setNewAmount("");
+    setNewNetwork("TESTNET");
     refresh();
     setNotice(`Saved "${created.label}".`);
   };
@@ -94,6 +97,7 @@ export default function FundingSchedulesPage() {
     setEditAmount(schedule.amount);
     setEditAsset(schedule.asset);
     setEditFrequency(schedule.frequency);
+    setEditNetwork(schedule.network);
     setEditError(null);
   };
 
@@ -111,7 +115,7 @@ export default function FundingSchedulesPage() {
       setEditError(validation.error);
       return;
     }
-    if (!updateFundingSchedule(editingId, editLabel, editAddress, editAmount, editAsset, editFrequency)) {
+    if (!updateFundingSchedule(editingId, editLabel, editAddress, editAmount, editAsset, editFrequency, editNetwork)) {
       setEditError("Couldn't save — browser storage may be full.");
       return;
     }
