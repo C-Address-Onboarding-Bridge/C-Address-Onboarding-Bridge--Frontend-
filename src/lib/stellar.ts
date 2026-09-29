@@ -657,8 +657,8 @@ async function buildSignAndSubmit(
           // Check for in-band error (e.g. user declined access)
           if ("error" in netResult && (netResult as { error?: unknown }).error) {
             throw new Error(
-              `Network changed in Freighter — please retry. ` +
-              `Transaction was built for ${network} but Freighter is now on UNKNOWN.`
+              `Network changed in your wallet — please retry. ` +
+              `Transaction was built for ${network} but your wallet is now on UNKNOWN.`
             );
           }
           // Compare the actual reported network
@@ -666,15 +666,15 @@ async function buildSignAndSubmit(
           const reported = (reportedRaw ?? "").toUpperCase() as WalletNetworkState;
           if (reported && reported !== network) {
             throw new Error(
-              `Network changed in Freighter — please retry. ` +
-              `Transaction was built for ${network} but Freighter is now on ${reported}.`
+              `Network changed in your wallet — please retry. ` +
+              `Transaction was built for ${network} but your wallet is now on ${reported}.`
             );
           }
         }
         // If netResult is undefined/null, we can't verify the network — proceed
       } catch (networkErr) {
         // Re-throw errors we raised ourselves
-        if (networkErr instanceof Error && networkErr.message.includes("Network changed in Freighter")) {
+        if (networkErr instanceof Error && networkErr.message.includes("Network changed in your wallet")) {
           throw networkErr;
         }
         // getNetwork() itself rejected (Freighter locked, locked extension, etc.)
@@ -753,14 +753,14 @@ export async function assertActiveAccountMatches(sourceAddress: string): Promise
 
   if (!active) {
     throw new Error(
-      "Couldn't read Freighter's active account. Connect (or unlock) Freighter and try again."
+      "Couldn't read your wallet's active account. Connect (or unlock) your wallet and try again."
     );
   }
 
   if (active !== sourceAddress) {
     throw new Error(
-      `Freighter's active account (${truncateAddress(active)}) doesn't match the From address (${truncateAddress(sourceAddress)}). ` +
-        "Switch accounts in Freighter or use the connected address."
+      `Your wallet's active account (${truncateAddress(active)}) doesn't match the From address (${truncateAddress(sourceAddress)}). ` +
+        "Switch accounts in your wallet or use the connected address."
     );
   }
 }

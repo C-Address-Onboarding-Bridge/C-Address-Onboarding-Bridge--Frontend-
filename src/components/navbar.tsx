@@ -310,7 +310,7 @@ const Navbar = () => {
       if (result === "switched") {
         setNetworkMenuOpen(false);
       } else if (result === "manual") {
-        setSwitchHint("Change the network in Freighter — this app will update automatically.");
+        setSwitchHint("Change the network in your wallet — this app will update automatically.");
       } else {
         setSwitchHint("The network change was cancelled in the wallet.");
       }
@@ -334,8 +334,8 @@ const Navbar = () => {
       className: "bg-[var(--error)]/15 text-[var(--error)]",
       title:
         networkStatus === "UNSUPPORTED"
-          ? `Freighter is on ${label}, which this app does not support`
-          : "Freighter's network could not be read",
+          ? `Your wallet is on ${label}, which this app does not support`
+          : "Your wallet's network could not be read",
     };
   }, [networkStatus, walletNetworkName]);
 
@@ -479,7 +479,7 @@ const Navbar = () => {
             <span>
               {networkStatus === "UNSUPPORTED" ? (
                 <>
-                  <strong>Unsupported network</strong> — Freighter is on{" "}
+                  <strong>Unsupported network</strong> — your wallet is on{" "}
                   <span className="font-mono font-semibold">
                     {formatNetworkLabel(networkStatus, walletNetworkName)}
                   </span>
@@ -487,7 +487,7 @@ const Navbar = () => {
                 </>
               ) : (
                 <>
-                  <strong>Network unavailable</strong> — Freighter&apos;s network couldn&apos;t be
+                  <strong>Network unavailable</strong> — your wallet&apos;s network couldn&apos;t be
                   read. Unlock the extension and reload before bridging.
                 </>
               )}
@@ -506,7 +506,7 @@ const Navbar = () => {
             <div className="flex items-center gap-2 text-yellow-400 text-sm">
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
               <span>
-                <strong>Network changed</strong> — Freighter is now on{" "}
+                <strong>Network changed</strong> — your wallet is now on{" "}
                 <span className="font-mono font-semibold">
                   {network === "PUBLIC" ? "Mainnet" : "Testnet"}
                 </span>

@@ -19,13 +19,11 @@ jobs:
           cache: npm
       - run: npm ci
 
-      # TODO(next-bounty): non-blocking. Every remaining advisory is transitive
-      # through @creit.tech/stellar-wallets-kit (which pulls the Solana wallet
-      # adapters) and @stellar/stellar-sdk, and clearing them needs major
-      # version bumps of both. Triage them deliberately, then drop this flag.
-      - name: Audit dependencies (advisory)
+      # Blocking. Transitive advisories through @creit.tech/stellar-wallets-kit
+      # and @stellar/stellar-sdk are pinned to patched versions via `overrides`
+      # in package.json.
+      - name: Audit dependencies
         run: npm audit --audit-level=high
-        continue-on-error: true
 
       - run: npm run lint
       - run: npm run typecheck

@@ -326,8 +326,8 @@ export default function BridgePage() {
     if (!isNetworkSupported) {
       setTxError(
         networkStatus === "UNSUPPORTED"
-          ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
-          : "Freighter's network couldn't be read. Unlock the extension and reload before submitting."
+          ? `Your wallet is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
+          : "Your wallet's network couldn't be read. Unlock the extension and reload before submitting."
       );
       setTxStatus("error");
       return;
@@ -397,8 +397,8 @@ export default function BridgePage() {
     if (!isNetworkSupported) {
       setTxError(
         networkStatus === "UNSUPPORTED"
-          ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
-          : "Freighter's network couldn't be read. Unlock the extension and reload before submitting."
+          ? `Your wallet is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
+          : "Your wallet's network couldn't be read. Unlock the extension and reload before submitting."
       );
       setTxStatus("error");
       return;
@@ -427,8 +427,8 @@ export default function BridgePage() {
     if (!isNetworkSupported) {
       throw new Error(
         networkStatus === "UNSUPPORTED"
-          ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
-          : "Freighter's network couldn't be read. Unlock the extension and reload before submitting."
+          ? `Your wallet is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
+          : "Your wallet's network couldn't be read. Unlock the extension and reload before submitting."
       );
     }
     const response = await submitBatchFunding(fromAddress, recipients, network);
@@ -522,15 +522,15 @@ export default function BridgePage() {
                     <AlertCircle className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
                     <p className="text-xs text-[var(--text-muted)]">
                       {networkStatus === "UNSUPPORTED"
-                        ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
-                        : "Freighter's network couldn't be read. Unlock the extension and reload."}
+                        ? `Your wallet is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
+                        : "Your wallet's network couldn't be read. Unlock the extension and reload."}
                     </p>
                   </div>
                 )}
                 {!isConnected && (
                   <div className="p-4 rounded-lg bg-[var(--surface-2)] border border-dashed border-[var(--border)]">
                     <p className="text-xs text-[var(--text-muted)]">
-                      Connect Freighter to choose the source account before submitting a batch.
+                      Connect your wallet to choose the source account before submitting a batch.
                     </p>
                   </div>
                 )}
@@ -571,13 +571,13 @@ export default function BridgePage() {
                     <div>
                       <p className="text-sm font-medium text-[var(--error)]">
                         {networkStatus === "UNSUPPORTED"
-                          ? `Freighter is on ${networkLabel}`
-                          : "Freighter's network couldn't be read"}
+                          ? `Your wallet is on ${networkLabel}`
+                          : "Your wallet's network couldn't be read"}
                       </p>
                       <p className="text-xs text-[var(--text-muted)] mt-1">
                         {networkStatus === "UNSUPPORTED"
-                          ? "Switch to Testnet or Mainnet in Freighter to use the bridge. Balances and transactions are blocked until then, because the app can't tell which chain to use."
-                          : "Unlock the Freighter extension and reload the page. Nothing is submitted while the network is unknown — assuming Testnet would build transactions for the wrong chain."}
+                          ? "Switch to Testnet or Mainnet in your wallet to use the bridge. Balances and transactions are blocked until then, because the app can't tell which chain to use."
+                          : "Unlock your wallet and reload the page. Nothing is submitted while the network is unknown — assuming Testnet would build transactions for the wrong chain."}
                       </p>
                     </div>
                   </div>
@@ -601,14 +601,14 @@ export default function BridgePage() {
                         />
                       </div>
                       <p id="from-address-help" className="text-xs text-[var(--text-muted)] mt-1">
-                        Freighter signs with its active account, so the source must be the connected
-                        wallet. To send from a different account, switch accounts in Freighter.
+                        Your wallet signs with its active account, so the source must be the connected
+                        wallet. To send from a different account, switch accounts in your wallet.
                       </p>
                     </>
                   ) : (
                     <div className="p-4 rounded-lg bg-[var(--surface-2)] border border-dashed border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <p className="text-xs text-[var(--text-muted)]">
-                        Connect Freighter to choose the source account.
+                        Connect your wallet to choose the source account.
                       </p>
                       <button
                         onClick={connect}
@@ -1035,7 +1035,7 @@ export default function BridgePage() {
               className="w-full flex items-center justify-center gap-2 px-4 py-3 min-h-[44px] rounded-xl border border-[var(--primary)]/30 text-[var(--primary-light)] font-medium hover:bg-[var(--primary)]/5 transition-colors text-sm"
             >
               <Wallet className="w-4 h-4" />
-              Connect Freighter Wallet
+              Connect Wallet
             </button>
           )}
         </div>

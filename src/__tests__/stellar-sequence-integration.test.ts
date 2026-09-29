@@ -2,17 +2,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Keypair } from "@stellar/stellar-sdk";
 import { buildAndSubmitPayment } from "@/lib/stellar";
 import { clearAllSequenceCache } from "@/lib/sequenceManager";
-import * as freighter from "@stellar/freighter-api";
 
 const G_SOURCE = Keypair.random().publicKey();
 const G_DEST = Keypair.random().publicKey();
 
-vi.mock("@stellar/freighter-api", () => ({
+// Wallet signing goes through @creit.tech/stellar-wallets-kit; these are
+// local stand-ins for the former @stellar/freighter-api mocks.
+const freighter = {
   signTransaction: vi.fn(),
   isConnected: vi.fn(),
   getAddress: vi.fn(),
   getNetwork: vi.fn(),
-}));
+};
 
 /**
  * Sequence numbers keyed by the Horizon URL the server was constructed with —
