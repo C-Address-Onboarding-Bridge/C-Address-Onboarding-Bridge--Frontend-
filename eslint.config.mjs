@@ -13,12 +13,6 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Storybook/Percy were removed from devDependencies during the CI cleanup —
-    // these files no longer have a toolchain to parse or run them. Delete the
-    // ignores (and restore the deps) if visual regression testing comes back.
-    ".storybook/**",
-    "src/stories/**",
-    "scripts/capture-visual-regression.js",
   ]),
   {
     plugins: { "react-hooks": reactHooks },
