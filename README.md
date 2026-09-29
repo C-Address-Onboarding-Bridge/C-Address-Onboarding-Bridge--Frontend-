@@ -149,3 +149,6 @@ MIT
 
 <!-- handsoff-issue-737 -->
 - #737: i18n: translate the dashboard page
+
+<!-- handsoff-issue-738 -->
+- #738: i18n: translate the address book page
