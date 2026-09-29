@@ -127,10 +127,18 @@ function QuoteComparisonPanel({
   fiatAmount,
   fiatCurrency,
   isValid,
+  cAddress,
 }: {
   fiatAmount: string;
   fiatCurrency: string;
   isValid: boolean;
+  /**
+   * Destination C-address, when a valid one has been entered. The backend's
+   * live quote endpoint requires an address (#678), but this panel can
+   * render before one is entered -- omitting it here simply skips the live
+   * fetch for this refresh and keeps the local estimate. (#678)
+   */
+  cAddress?: string;
 }) {
   const [comparisons, setComparisons] = useState<OnrampQuoteComparison[]>([]);
   const [quotedAt, setQuotedAt] = useState<number | null>(null);
@@ -152,7 +160,9 @@ function QuoteComparisonPanel({
     setQuotedAt(Date.now());
 
     try {
-      const res = await fetch(`/api/onramp/quotes?amount=${encodeURIComponent(String(amount))}&currency=${encodeURIComponent(fiatCurrency)}`);
+      const params = new URLSearchParams({ amount: String(amount), currency: fiatCurrency });
+      if (cAddress) params.set("cAddress", cAddress);
+      const res = await fetch(`/api/onramp/quotes?${params.toString()}`);
       if (!res.ok) return;
       const data: unknown = await res.json();
       // A slower response for a superseded amount/currency must not clobber
@@ -164,7 +174,7 @@ function QuoteComparisonPanel({
     } catch {
       // Network failure: the local-estimate comparison set above stands.
     }
-  }, [amount, fiatCurrency, isValid]);
+  }, [amount, fiatCurrency, isValid, cAddress]);
 
   useEffect(() => {
     // Fetch-on-mount/-change, same justified pattern as AddressBookPage's
@@ -537,6 +547,14 @@ export default function OnrampPage() {
             fiatAmount={debouncedFiatAmount}
             fiatCurrency={fiatCurrency}
             isValid={validAmount && debouncedFiatAmount === fiatAmount}
+            cAddress={
+              debouncedCAddress &&
+              debouncedCAddress === cAddress &&
+              isValidStellarAddress(debouncedCAddress) &&
+              isCAddress(debouncedCAddress)
+                ? debouncedCAddress
+                : undefined
+            }
           />
 
           <div className="card p-5">
