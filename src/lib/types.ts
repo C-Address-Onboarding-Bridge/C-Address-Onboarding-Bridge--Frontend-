@@ -28,8 +28,19 @@ export interface WalletState {
  */
 export type BridgeTransactionStatus = "pending" | "confirmed" | "failed";
 
-/** How funds reached the destination C-address. */
-export type BridgeTransactionKind = "g-to-c" | "fiat" | "cex";
+/**
+ * How funds moved. `g-to-c`/`fiat`/`cex` are the bridge flows; the rest are
+ * the Horizon operation types a plain account history can contain. (#720)
+ */
+export type BridgeTransactionKind =
+  | "g-to-c"
+  | "fiat"
+  | "cex"
+  | "payment"
+  | "path-payment"
+  | "create-account"
+  | "account-merge"
+  | "contract-transfer";
 
 /** Fiat on-ramp providers the app can quote against. */
 export type OnrampProvider = "moonpay" | "transak";

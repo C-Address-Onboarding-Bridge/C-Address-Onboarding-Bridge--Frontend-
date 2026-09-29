@@ -14,6 +14,7 @@ import {
   HORIZON_URL,
   SOROBAN_RPC_URL,
   type BridgeTransactionStatus,
+  type BridgeTransactionKind,
   type StellarNetwork,
   type WalletNetworkState,
   type BridgeTransactionData,
@@ -417,6 +418,90 @@ interface HorizonPayment {
   transaction_hash?: string;
   funder?: string;
   account?: string;
+  /** Destination of an account_merge operation. (#720) */
+  into?: string;
+  /** Token movements of an invoke_host_function (e.g. SAC transfer). (#720) */
+  asset_balance_changes?: Array<{
+    asset_type?: string;
+    asset_code?: string;
+    type?: string;
+    from?: string;
+    to?: string;
+    amount?: string;
+  }>;
+}
+
+/**
+ * Maps a Horizon payments-endpoint record to a transaction row, classifying
+ * it by operation type. Returns null for records that move no funds (e.g. an
+ * invoke_host_function with no token transfer). (#720)
+ */
+function mapHorizonPayment(p: HorizonPayment): BridgeTransactionData | null {
+  let type: BridgeTransactionKind;
+  let fromAddress = p.from || "";
+  let toAddress = p.to || "";
+  let amount = p.amount || "0";
+  let asset = p.asset_type === "native" ? "XLM" : (p.asset_code || "XLM");
+
+  switch (p.type) {
+    case "payment":
+      type = "payment";
+      break;
+    case "path_payment_strict_send":
+    case "path_payment_strict_receive":
+      type = "path-payment";
+      break;
+    // create_account operations use `funder`/`account` and `starting_balance`
+    // instead of the `from`/`to`/`amount` fields present on payment ops. (#294)
+    case "create_account":
+      type = "create-account";
+      fromAddress = p.funder || "";
+      toAddress = p.account || "";
+      amount = p.starting_balance || "0";
+      asset = "XLM";
+      break;
+    case "account_merge":
+      type = "account-merge";
+      fromAddress = p.account || "";
+      toAddress = p.into || "";
+      asset = "XLM";
+      break;
+    case "invoke_host_function": {
+      const transfer = p.asset_balance_changes?.find((c) => c.type === "transfer");
+      if (!transfer) return null;
+      fromAddress = transfer.from || "";
+      toAddress = transfer.to || "";
+      amount = transfer.amount || "0";
+      asset = transfer.asset_type === "native" ? "XLM" : (transfer.asset_code || "XLM");
+      // A SAC transfer from a classic account into a contract account is the
+      // G → C bridge this app performs.
+      type = isGAddress(fromAddress) && isCAddress(toAddress) ? "g-to-c" : "contract-transfer";
+      break;
+    }
+    default:
+      return null;
+  }
+
+  // When `transaction_successful` is absent (older Horizon versions) we
+  // treat the record as pending rather than assuming it failed. (#294)
+  let status: BridgeTransactionStatus;
+  if (p.transaction_successful === undefined || p.transaction_successful === null) {
+    status = "pending";
+  } else {
+    status = p.transaction_successful ? "confirmed" : "failed";
+  }
+
+  return {
+    id: p.id,
+    fromAddress,
+    toAddress,
+    amount,
+    asset,
+    status,
+    timestamp: new Date(p.created_at || Date.now()).getTime(),
+    type,
+    hash: p.transaction_hash,
+  };
 }
 
 /**
@@ -539,48 +624,17 @@ export async function fetchRecentTransactions(
   }
   const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 200);
   const server = await getHorizonServer(network);
-  try {
-    const payments = await server
-      .payments()
-      .forAccount(address)
-      .limit(safeLimit)
-      .order("desc")
-      .call();
+  // Errors propagate so an outage is shown as an error, not an empty history. (#720)
+  const payments = await server
+    .payments()
+    .forAccount(address)
+    .limit(safeLimit)
+    .order("desc")
+    .call();
 
-    return (payments.records as HorizonPayment[]).map((p) => {
-      // create_account operations use `funder`/`account` and `starting_balance`
-      // instead of the `from`/`to`/`amount` fields present on payment ops. (#294)
-      const isCreateAccount = p.type === "create_account";
-      const fromAddress = isCreateAccount ? (p.funder || "") : (p.from || "");
-      const toAddress = isCreateAccount ? (p.account || "") : (p.to || "");
-      const amount = isCreateAccount
-        ? (p.starting_balance || "0")
-        : (p.amount || "0");
-
-      // When `transaction_successful` is absent (older Horizon versions) we
-      // treat the record as pending rather than assuming it failed. (#294)
-      let status: BridgeTransactionStatus;
-      if (p.transaction_successful === undefined || p.transaction_successful === null) {
-        status = "pending";
-      } else {
-        status = p.transaction_successful ? "confirmed" : "failed";
-      }
-
-      return {
-        id: p.id,
-        fromAddress,
-        toAddress,
-        amount,
-        asset: p.asset_type === "native" || isCreateAccount ? "XLM" : (p.asset_code || "XLM"),
-        status,
-        timestamp: new Date(p.created_at || Date.now()).getTime(),
-        type: "g-to-c" as const,
-        hash: p.transaction_hash,
-      };
-    });
-  } catch {
-    return [];
-  }
+  return (payments.records as HorizonPayment[])
+    .map(mapHorizonPayment)
+    .filter((tx): tx is BridgeTransactionData => tx !== null);
 }
 
 /**
