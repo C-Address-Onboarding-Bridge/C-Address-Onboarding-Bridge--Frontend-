@@ -51,7 +51,7 @@ describe("TransactionHistory — loading, empty, and populated states (#485)", (
     expect(status.textContent).toContain("Loading recent transactions");
   });
 
-  it.skip("does not visually show the skeleton before the ~200ms delay elapses (no flash on fast loads)", () => {
+  it("does not visually show the skeleton before the ~200ms delay elapses (no flash on fast loads)", () => {
     const { container } = render(<TransactionHistory transactions={[]} loading network="TESTNET" />);
 
     const skeletonWrapper = container.querySelector('[aria-hidden="true"].divide-y');
@@ -60,7 +60,7 @@ describe("TransactionHistory — loading, empty, and populated states (#485)", (
     expect(skeletonWrapper?.className).toContain("invisible");
   });
 
-  it.skip("reveals the skeleton once the loading delay elapses", () => {
+  it("reveals the skeleton once the loading delay elapses", () => {
     const { container } = render(<TransactionHistory transactions={[]} loading network="TESTNET" />);
 
     act(() => {
@@ -90,7 +90,7 @@ describe("TransactionHistory — loading, empty, and populated states (#485)", (
     expect(screen.getByText(/No transactions found/i)).not.toBeNull();
   });
 
-  it.skip("shows a distinct empty state (not a spinner/skeleton) once loading finishes with no data", () => {
+  it("shows a distinct empty state (not a spinner/skeleton) once loading finishes with no data", () => {
     render(<TransactionHistory transactions={[]} loading={false} network="TESTNET" />);
 
     expect(screen.queryByRole("status")).toBeNull();
