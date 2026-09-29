@@ -21,6 +21,19 @@ import { hasControlChars } from "./profile";
 /** 32 characters — same budget as a profile display name (`DISPLAY_NAME_MAX_LENGTH`). */
 export const RECIPIENT_LABEL_MAX_LENGTH = 32;
 
+/**
+ * Upper bound on the size of an imported JSON file, in bytes. A larger file is
+ * rejected before parsing so a huge upload can't freeze the page while it is
+ * validated or fill the storage quota for the whole origin.
+ */
+export const IMPORT_MAX_FILE_BYTES = 256 * 1024;
+
+/**
+ * Upper bound on the number of entries accepted from a single import. Entries
+ * beyond this cap are skipped and reported rather than silently dropped.
+ */
+export const IMPORT_MAX_ENTRIES = 500;
+
 const STORAGE_KEY = "addressBook:recipients";
 
 export interface SavedRecipient {
@@ -198,8 +211,26 @@ export function exportAddressBook(): string {
  * Each entry is independently validated — a malformed or invalid entry is
  * skipped (reported in `errors`) rather than aborting the whole import, and
  * an address already in the book is skipped rather than duplicated.
+ *
+ * The input is bounded before parsing: a file larger than
+ * `IMPORT_MAX_FILE_BYTES` is rejected outright, and only the first
+ * `IMPORT_MAX_ENTRIES` entries are considered — anything beyond the cap is
+ * counted as skipped and reported so the user knows what was left out.
  */
 export function importAddressBook(json: string): ImportResult {
+  const byteLength = typeof TextEncoder !== "undefined"
+    ? new TextEncoder().encode(json).length
+    : json.length;
+  if (byteLength > IMPORT_MAX_FILE_BYTES) {
+    return {
+      imported: 0,
+      skipped: 0,
+      errors: [
+        `File is too large (${byteLength} bytes). The maximum is ${IMPORT_MAX_FILE_BYTES} bytes.`,
+      ],
+    };
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -217,7 +248,16 @@ export function importAddressBook(json: string): ImportResult {
   const errors: string[] = [];
   let skipped = 0;
 
-  parsed.forEach((entry, index) => {
+  const entries = parsed.slice(0, IMPORT_MAX_ENTRIES);
+  const overflow = parsed.length - entries.length;
+  if (overflow > 0) {
+    skipped += overflow;
+    errors.push(
+      `Only the first ${IMPORT_MAX_ENTRIES} entries were imported; ${overflow} beyond the limit were skipped.`,
+    );
+  }
+
+  entries.forEach((entry, index) => {
     if (typeof entry !== "object" || entry === null) {
       errors.push(`Entry ${index + 1}: not an object.`);
       skipped++;
@@ -249,7 +289,7 @@ export function importAddressBook(json: string): ImportResult {
     return {
       imported: 0,
       skipped: skipped + toAdd.length,
-      errors: [...errors, "Couldn't save — browser storage may be full."],
+      errors: [...errors, "Could not save imported recipients (storage may be full)."],
     };
   }
 
