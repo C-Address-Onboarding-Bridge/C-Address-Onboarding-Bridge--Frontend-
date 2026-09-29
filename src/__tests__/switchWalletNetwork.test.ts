@@ -79,7 +79,7 @@ describe("switchWalletNetwork (#480)", () => {
   // Skipped with its two siblings above: all three depend on the wallet-kit
   // singleton resolving under these mocks, which it never does. This one only
   // passed before because the (failing) siblings warmed the kit first.
-  it.skip("returns cancelled when the wallet never lands on the target within the timeout", async () => {
+  it("returns cancelled when the wallet never lands on the target within the timeout", async () => {
     const setNetwork = vi.fn().mockResolvedValue(undefined);
     injectFreighter(setNetwork);
     // The wallet stays on TESTNET while we ask for PUBLIC.

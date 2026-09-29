@@ -9,6 +9,7 @@ import {
   Account,
   StrKey,
 } from "@stellar/stellar-sdk";
+import { getNetwork as getFreighterNetwork } from "@stellar/freighter-api";
 import {
   BRIDGE_CONTRACT_ID,
   HORIZON_URL,
@@ -190,10 +191,15 @@ export async function switchWalletNetwork(target: StellarNetwork): Promise<Switc
     return "cancelled";
   }
 
+  // Confirm against Freighter's own getNetwork() rather than the multi-wallet
+  // kit's getWalletNetwork(): we already bypassed the kit above to call the
+  // injected setNetwork directly, and the kit's singleton is not guaranteed
+  // to be initialised (or fast) at this point.
   const deadline = Date.now() + SWITCH_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const { status } = await getWalletNetwork();
-    if (status === target) {
+    const result = await getFreighterNetwork().catch(() => null);
+    const name = String(result?.network ?? "").toUpperCase();
+    if (!result?.error && name === target) {
       return "switched";
     }
     await new Promise((resolve) => setTimeout(resolve, SWITCH_POLL_INTERVAL_MS));
