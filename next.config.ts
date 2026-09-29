@@ -26,25 +26,17 @@ const withBundleAnalyzer = bundleAnalyzer({
 /**
  * Initial JS budget for the client entrypoint, in bytes.
  *
- * 1100 KB is a **ratchet, not a target**: it is set just above what the largest
- * route (`/profile`, ~1000 KB) actually ships today, so the build fails when a
- * change makes things worse. The number this config previously carried was
- * 100 KB, which no route has met for a long time — with enforcement wired up
- * again, that value would fail every CI build regardless of the change under
- * test, which is why it is not restored as-is.
- *
- * Lower it as routes get smaller; the biggest single win available is the
- * ~700 KB `@stellar/stellar-sdk` pulled into every wallet-aware route.
+ * 700 KB is a **ratchet, not a target**: the largest route currently loads
+ * 675 KB of JavaScript on first render. The Stellar SDK remains available in a
+ * deferred chunk and is fetched only when a Stellar network/transaction
+ * operation needs it.
  */
-// TODO(next-bounty): raised 1100 -> 1150 during the CI cleanup. `npm ci` had
-// been failing for the whole bounty programme, so this budget never actually
-// ran in CI and drifted ~6 KB over: `app/layout` now ships ~1106 KB. The
-// ratchet is deliberately still tight -- it catches a real regression, it just
-// no longer fails on the pre-existing overage. Bringing the entrypoint back
-// under 1100 KB (code-splitting @stellar/stellar-sdk out of the shared layout
-// is the obvious lever) and lowering this number is its own piece of work.
 const initialJsBudgetBytes =
-  Number(process.env.NEXT_PUBLIC_INITIAL_JS_BUDGET_KB ?? "1150") * 1024;
+  Number(process.env.NEXT_PUBLIC_INITIAL_JS_BUDGET_KB ?? "700") * 1024;
+
+// The transaction-only SDK chunk exceeds the initial route budget. Keep a
+// separate 1 MB per-asset ceiling so lazy transaction code doesn't trip it.
+const maxJsAssetBytes = 1024 * 1024;
 
 // In CI, flip webpack performance hints from "warning" to "error" so that
 // bundle-size budget violations fail the build instead of scrolling past.
@@ -187,7 +179,7 @@ const nextConfig: NextConfig = {
       config.performance = {
         ...config.performance,
         maxEntrypointSize: initialJsBudgetBytes,
-        maxAssetSize: Math.max(initialJsBudgetBytes, 200 * 1024),
+        maxAssetSize: Math.max(maxJsAssetBytes, initialJsBudgetBytes),
         hints:
           process.env.NODE_ENV === "production"
             ? enforceBudget

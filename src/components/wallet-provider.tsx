@@ -223,11 +223,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [setPending]);
 
-  // Initialise the Stellar Wallets Kit on mount, restoring the previously
-  // selected wallet so the user does not have to re-choose after a reload. (#459)
+  // Only restore the wallet kit for a session that previously connected a
+  // wallet. First-time visitors should not download wallet adapters up front.
   useEffect(() => {
     const session = loadSession();
-    void initWalletKit(session.selectedWalletId);
+    if (session.selectedWalletId && !session.manuallyDisconnected) {
+      void initWalletKit(session.selectedWalletId);
+    }
   }, []);
 
   // Connectivity awareness: keep `isOnline` in sync and replay safe operations

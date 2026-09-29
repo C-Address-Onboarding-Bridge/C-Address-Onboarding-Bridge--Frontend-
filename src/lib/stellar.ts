@@ -1,14 +1,5 @@
-import {
-  TransactionBuilder,
-  Operation,
-  BASE_FEE,
-  Networks,
-  Asset,
-  Horizon,
-  rpc,
-  Account,
-  StrKey,
-} from "@stellar/stellar-sdk";
+import type { Asset, Horizon, rpc } from "@stellar/stellar-sdk";
+import { isValidEd25519PublicKey, isValidContract } from "./strkey";
 import {
   BRIDGE_CONTRACT_ID,
   HORIZON_URL,
@@ -138,12 +129,12 @@ interface FreighterInjectedApi {
 
 const NETWORK_PARAMS: Record<StellarNetwork, { passphrase: string; name: string; url: string }> = {
   PUBLIC: {
-    passphrase: Networks.PUBLIC,
+    passphrase: "Public Global Stellar Network ; September 2015",
     name: "Public Global Stellar Network ; September 2015",
     url: HORIZON_URL.PUBLIC,
   },
   TESTNET: {
-    passphrase: Networks.TESTNET,
+    passphrase: "Test SDF Network ; September 2015",
     name: "Test SDF Network ; September 2015",
     url: HORIZON_URL.TESTNET,
   },
@@ -202,6 +193,7 @@ export async function switchWalletNetwork(target: StellarNetwork): Promise<Switc
 }
 
 export async function getHorizonServer(network: StellarNetwork): Promise<Horizon.Server> {
+  const { Horizon } = await import("@stellar/stellar-sdk");
   return new Horizon.Server(HORIZON_URL[network]);
 }
 
@@ -218,12 +210,15 @@ export async function getSorobanRpcServer(network: StellarNetwork): Promise<rpc.
       `No Soroban RPC URL configured for ${network}. Set NEXT_PUBLIC_SOROBAN_RPC_URL_${network} in your environment.`
     );
   }
+  const { rpc } = await import("@stellar/stellar-sdk");
   return new rpc.Server(url);
 }
 
 /** The network passphrase Horizon/Soroban RPC requests for `network` must sign with. */
 export async function getNetworkPassphrase(network: StellarNetwork): Promise<string> {
-  return network === "PUBLIC" ? Networks.PUBLIC : Networks.TESTNET;
+  return network === "PUBLIC"
+    ? "Public Global Stellar Network ; September 2015"
+    : "Test SDF Network ; September 2015";
 }
 
 /**
@@ -358,7 +353,7 @@ export function formatNetworkLabel(
 // hand-rolled regex cannot verify the checksum and, as [G|C] showed, is easy
 // to get subtly wrong (that character class also accepted a leading '|').
 export function isValidStellarAddress(address: string): boolean {
-  return StrKey.isValidEd25519PublicKey(address) || StrKey.isValidContract(address);
+  return isValidEd25519PublicKey(address) || isValidContract(address);
 }
 
 export function isValidStellarAmount(amount: string): boolean {
@@ -370,12 +365,12 @@ export function isValidStellarAmount(amount: string): boolean {
 
 /** Whether `address` is a valid Soroban contract address (a `C...` StrKey). */
 export function isCAddress(address: string): boolean {
-  return StrKey.isValidContract(address);
+  return isValidContract(address);
 }
 
 /** Whether `address` is a valid Stellar account address (a `G...` ed25519 StrKey). */
 export function isGAddress(address: string): boolean {
-  return StrKey.isValidEd25519PublicKey(address);
+  return isValidEd25519PublicKey(address);
 }
 
 export interface PaymentResult {
@@ -395,6 +390,23 @@ interface HorizonBalance {
   asset_code?: string;
   asset_issuer?: string;
   balance: string;
+}
+
+interface HorizonCollection<T> {
+  _embedded?: { records?: T[] };
+}
+
+/** Make lightweight Horizon reads without loading the Stellar SDK client. */
+async function fetchHorizonJson<T>(network: StellarNetwork, path: string): Promise<T> {
+  const response = await fetch(`${HORIZON_URL[network].replace(/\/+$/, "")}${path}`);
+  if (!response.ok) {
+    const error = new Error(`Horizon request failed (${response.status})`) as Error & {
+      response: { status: number };
+    };
+    error.response = { status: response.status };
+    throw error;
+  }
+  return (await response.json()) as T;
 }
 
 interface HorizonPayment {
@@ -446,9 +458,11 @@ async function loadAccountBalances(
   address: string,
   network: StellarNetwork
 ): Promise<AccountBalances> {
-  const server = await getHorizonServer(network);
-  const account = await server.loadAccount(address);
-  const balances = (account.balances as HorizonBalance[]).map((b) => ({
+  const account = await fetchHorizonJson<{ balances?: HorizonBalance[] }>(
+    network,
+    `/accounts/${encodeURIComponent(address)}`
+  );
+  const balances = (account.balances ?? []).map((b) => ({
     asset: b.asset_type === "native" ? "XLM" : (b.asset_code || "unknown"),
     amount: b.balance,
   }));
@@ -536,16 +550,13 @@ export async function fetchRecentTransactions(
     return [];
   }
   const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 200);
-  const server = await getHorizonServer(network);
   try {
-    const payments = await server
-      .payments()
-      .forAccount(address)
-      .limit(safeLimit)
-      .order("desc")
-      .call();
+    const payments = await fetchHorizonJson<HorizonCollection<HorizonPayment>>(
+      network,
+      `/accounts/${encodeURIComponent(address)}/payments?limit=${safeLimit}&order=desc`
+    );
 
-    return (payments.records as HorizonPayment[]).map((p) => {
+    return (payments._embedded?.records ?? []).map((p) => {
       // create_account operations use `funder`/`account` and `starting_balance`
       // instead of the `from`/`to`/`amount` fields present on payment ops. (#294)
       const isCreateAccount = p.type === "create_account";
@@ -610,6 +621,7 @@ async function buildSignAndSubmit(
   passphrase: string,
   onPhase?: (phase: "signing" | "submitting") => void
 ): Promise<PaymentResult> {
+  const { TransactionBuilder, Operation, Account } = await import("@stellar/stellar-sdk");
   // Fetch a dynamic fee bid (2× base fee, capped at 10 000 stroops) so the
   // transaction is not rejected during surge-pricing windows. (#301)
   const fee = await getRecommendedFee(network);
@@ -776,6 +788,7 @@ async function resolveAsset(
   sourceAddress: string,
   assetCode: string
 ): Promise<Asset> {
+  const { Asset } = await import("@stellar/stellar-sdk");
   if (assetCode === "XLM") {
     return Asset.native();
   }
@@ -912,15 +925,17 @@ export function getAccountMinimumBalance(): string {
 export async function getRecommendedFee(network: StellarNetwork): Promise<string> {
   const MAX_FEE_STROOPS = 10_000;
   try {
-    const server = await getHorizonServer(network);
-    // fetchBaseFee() returns a number representing the current minimum fee in stroops.
-    const baseFee = await server.fetchBaseFee();
+    const feeStats = await fetchHorizonJson<{ last_ledger_base_fee?: string }>(
+      network,
+      "/fee_stats"
+    );
+    const baseFee = Number.parseInt(feeStats.last_ledger_base_fee ?? "", 10) || 100;
     const bid = Math.min(baseFee * 2, MAX_FEE_STROOPS);
     return String(bid);
   } catch {
     // Fall back to the hardcoded BASE_FEE constant if the fee-stats call fails
     // so the transaction is still submitted rather than silently blocked.
-    return BASE_FEE;
+    return "100";
   }
 }
 
@@ -946,7 +961,7 @@ export interface FaucetRequest {
  *   `network === "TESTNET"` before invoking.
  */
 export async function requestTestXLM(address: string): Promise<FaucetRequest> {
-  if (!StrKey.isValidEd25519PublicKey(address)) {
+  if (!isValidEd25519PublicKey(address)) {
     return { success: false, message: "Invalid Stellar address." };
   }
 
@@ -1413,10 +1428,19 @@ export async function getTransactionByHash(
 ): Promise<TransactionDetails | null> {
   if (!TRANSACTION_HASH_PATTERN.test(hash)) return null;
 
-  const server = new Horizon.Server(HORIZON_URL[network]);
-  let record: Horizon.ServerApi.TransactionRecord;
+  const basePath = `/transactions/${encodeURIComponent(hash)}`;
+  let record: {
+    hash?: string;
+    successful?: boolean;
+    created_at?: string;
+    ledger_attr?: number;
+    fee_charged?: number | string;
+    max_fee?: number | string;
+    memo?: string;
+    source_account_sequence?: string;
+  };
   try {
-    record = await server.transactions().transaction(hash).call();
+    record = await fetchHorizonJson(network, basePath);
   } catch {
     // Not ingested yet → still in flight, not unknown.
     return {
@@ -1445,8 +1469,11 @@ export async function getTransactionByHash(
   // Payment-like operations carry the two ends of the transfer. Best-effort:
   // a failed fetch of the operations page still renders the record above.
   try {
-    const operations = await server.operations().forTransaction(hash).call();
-    const payment = operations.records.find((op) => op.type === "payment");
+    const operations = await fetchHorizonJson<HorizonCollection<HorizonPayment & {
+      type?: string;
+      transaction_successful?: boolean;
+    }>>(network, `${basePath}/operations?limit=200`);
+    const payment = operations._embedded?.records?.find((op) => op.type === "payment");
     if (payment && payment.type === "payment") {
       fromAddress = payment.from ?? null;
       toAddress = payment.to ?? null;
@@ -1469,10 +1496,10 @@ export async function getTransactionByHash(
   let ledgerClosedAt: string | null = null;
   if (record.ledger_attr != null) {
     try {
-      const ledgerRecord = (await server
-        .ledgers()
-        .ledger(record.ledger_attr)
-        .call()) as unknown as { closed_at?: string | null };
+      const ledgerRecord = await fetchHorizonJson<{ closed_at?: string | null }>(
+        network,
+        `/ledgers/${record.ledger_attr}`
+      );
       ledgerClosedAt = ledgerRecord.closed_at ?? null;
     } catch {
       // Best-effort — the record alone is enough to render the detail page.

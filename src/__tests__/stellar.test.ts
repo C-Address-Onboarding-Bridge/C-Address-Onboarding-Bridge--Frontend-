@@ -179,11 +179,16 @@ describe("getAccountBalances cache", () => {
   beforeEach(() => {
     clearAccountBalancesCache();
     loadAccount.mockReset();
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      const payload = await loadAccount();
+      return { ok: true, status: 200, json: async () => payload };
+    }));
     vi.useFakeTimers();
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("parses the native balance into total", async () => {

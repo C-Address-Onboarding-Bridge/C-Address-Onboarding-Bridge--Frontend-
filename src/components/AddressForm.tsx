@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useId } from 'react';
-import { StrKey } from '@stellar/stellar-sdk';
+import { isValidContract, isValidEd25519PublicKey } from '@/lib/strkey';
 import { loadAddressBook } from '@/lib/addressBook';
 import { useHydrated } from '@/hooks/useHydrated';
 
@@ -42,7 +42,7 @@ export function validateStellarAddress(address: string): {
   // explicitly instead of falling through to "must start with G" turns the
   // project's central premise — G vs C — from a confusing generic error into
   // an actionable one.
-  if (StrKey.isValidContract(trimmed)) {
+  if (isValidContract(trimmed)) {
     return {
       valid: false,
       error:
@@ -69,7 +69,7 @@ export function validateStellarAddress(address: string): {
   }
 
   try {
-    if (!StrKey.isValidEd25519PublicKey(trimmed)) {
+    if (!isValidEd25519PublicKey(trimmed)) {
       return {
         valid: false,
         error: 'Invalid address — the checksum does not match. Double-check for a mistyped or altered character.',
