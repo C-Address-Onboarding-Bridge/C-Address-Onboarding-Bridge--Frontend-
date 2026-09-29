@@ -149,3 +149,6 @@ MIT
 
 <!-- handsoff-issue-725 -->
 - #725: bug: one failed wallet poll logs the user out visually
+
+<!-- handsoff-issue-726 -->
+- #726: perf: the wallet poller makes three extension calls every 3 seconds
