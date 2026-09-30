@@ -761,9 +761,15 @@ async function buildSignAndSubmit(
 
       // #242 — Runtime shape guard on the wallet's response.  A version
       // mismatch, API change, or compromised extension could return a missing
-      // or non-string `signedTxXdr`.  The kit throws on signing errors, so we
-      // only need to guard against a missing/empty XDR here.
-      const signedXDR = signedResult.signedTxXdr;
+      // or non-string `signedTxXdr`.  The response is untrusted input, so the
+      // object itself is checked before anything is read from it: a missing
+      // response, or one carrying an `error` field, is rejected even if it
+      // also holds something that looks like a signed transaction. (#652)
+      const response: unknown = signedResult;
+      const signedXDR =
+        typeof response === "object" && response !== null && !("error" in response && response.error)
+          ? (response as { signedTxXdr?: unknown }).signedTxXdr
+          : undefined;
       if (typeof signedXDR !== "string" || !signedXDR) {
         // Deliberately avoids wallet-API jargon (XDR) so the message stays
         // readable for a user who just saw a malformed wallet response.

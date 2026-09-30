@@ -244,7 +244,7 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     mockFreighterNetwork("TESTNET");
   });
 
-  it.skip("proceeds normally when signedTxXdr is a non-empty string", async () => {
+  it("proceeds normally when signedTxXdr is a non-empty string", async () => {
     mockValidSign();
 
     const result = await buildAndSubmitPayment(
@@ -258,7 +258,7 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     expect(result.successful).toBe(true);
   });
 
-  it.skip("throws a clear error when signedTxXdr is undefined (missing field)", async () => {
+  it("throws a clear error when signedTxXdr is undefined (missing field)", async () => {
     // Simulate a wallet extension that omits the field entirely.
     signTransaction.mockResolvedValue({} as never);
 
@@ -267,7 +267,7 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     ).rejects.toThrow(/unexpected response/i);
   });
 
-  it.skip("throws a clear error when signedTxXdr is an empty string", async () => {
+  it("throws a clear error when signedTxXdr is an empty string", async () => {
     signTransaction.mockResolvedValue({ signedTxXdr: "" } as never);
 
     await expect(
@@ -275,7 +275,7 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     ).rejects.toThrow(/unexpected response/i);
   });
 
-  it.skip("throws a clear error when signedTxXdr is a number", async () => {
+  it("throws a clear error when signedTxXdr is a number", async () => {
     signTransaction.mockResolvedValue({ signedTxXdr: 12345 } as never);
 
     await expect(
@@ -283,7 +283,7 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     ).rejects.toThrow(/unexpected response/i);
   });
 
-  it.skip("throws a clear error when signedTxXdr is null", async () => {
+  it("throws a clear error when signedTxXdr is null", async () => {
     signTransaction.mockResolvedValue({ signedTxXdr: null } as never);
 
     await expect(
@@ -299,7 +299,7 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     ).rejects.toThrow();
   });
 
-  it.skip("does not reach TransactionBuilder.fromXDR when signedTxXdr is missing", async () => {
+  it("does not reach TransactionBuilder.fromXDR when signedTxXdr is missing", async () => {
     // If the guard is absent, fromXDR would throw a low-level parse error.
     // With the guard in place the error message must be our own, not the SDK's.
     signTransaction.mockResolvedValue({ signedTxXdr: undefined } as never);
@@ -317,5 +317,29 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     expect((error as Error).message).toMatch(/unexpected response/i);
     expect((error as Error).message).not.toMatch(/decode/i);
     expect((error as Error).message).not.toMatch(/XDR/i);
+  });
+
+  // #652 — the response object itself is untrusted too.
+  it.each([
+    ["undefined", undefined],
+    ["null", null],
+  ])("throws a clear error when the whole response is %s (#652)", async (_label, response) => {
+    signTransaction.mockResolvedValue(response as never);
+
+    await expect(
+      buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "XLM", "TESTNET")
+    ).rejects.toThrow(/unexpected response/i);
+  });
+
+  it("does not submit when the wallet reports an error alongside a signed transaction (#652)", async () => {
+    signTransaction.mockImplementation(async (xdr: string) => ({
+      signedTxXdr: xdr,
+      signerAddress: G_SOURCE,
+      error: { code: -4, message: "User declined access" },
+    }) as never);
+
+    await expect(
+      buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "XLM", "TESTNET")
+    ).rejects.toThrow(/unexpected response/i);
   });
 });
