@@ -8,6 +8,7 @@ import {
   rpc,
   Account,
   StrKey,
+  Keypair,
 } from "@stellar/stellar-sdk";
 import {
   BRIDGE_CONTRACT_ID,
@@ -17,8 +18,10 @@ import {
   type StellarNetwork,
   type WalletNetworkState,
   type BridgeTransactionData,
+  isSupportedNetwork,
 } from "./types";
 import { withSequenceRetry } from "./sequenceManager";
+import { getNetwork as getFreighterNetwork } from "@stellar/freighter-api";
 
 export type { AppNetwork, WalletNetworkState, BridgeTransactionData } from "./types";
 
@@ -34,6 +37,34 @@ export type WalletId = string | null;
 
 /** Lazy singleton kit reference. Populated by initWalletKit(). */
 let _kitReady = false;
+
+// ---------------------------------------------------------------------------
+// E2E test hook (#669)
+// ---------------------------------------------------------------------------
+// The Stellar Wallets Kit's connect modal and its Freighter module both need
+// a real browser extension to do anything — there is no supported way to
+// drive them deterministically in CI. e2e/fixtures/mock-wallet.ts injects
+// `window.__E2E_WALLET__` via page.addInitScript before the app loads; every
+// kit touchpoint below checks for it first and, when present, resolves with
+// the configured wallet instead of calling the kit. Signing uses the
+// Keypair already imported above against a disposable, friendbot-funded
+// testnet account the e2e fixture creates per run, so this path never
+// handles a real user's secret key.
+export interface E2EWalletConfig {
+  address: string;
+  secret: string;
+  network: StellarNetwork;
+  walletId: string;
+  shouldRejectSign?: boolean;
+}
+
+/** Whether openWalletSelectionModal has "connected" the e2e wallet this session. */
+let _e2eConnected = false;
+
+function e2eWalletConfig(): E2EWalletConfig | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (window as unknown as { __E2E_WALLET__?: E2EWalletConfig }).__E2E_WALLET__;
+}
 
 /**
  * Initialise the Stellar Wallets Kit with the standard set of modules.
@@ -84,6 +115,12 @@ export async function initWalletKit(selectedWalletId?: string | null): Promise<v
  */
 export async function openWalletSelectionModal(): Promise<{ address: string; walletId: string } | null> {
   if (typeof window === "undefined") return null;
+
+  const e2e = e2eWalletConfig();
+  if (e2e) {
+    _e2eConnected = true;
+    return { address: e2e.address, walletId: e2e.walletId };
+  }
 
   const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
 
@@ -155,15 +192,6 @@ const SWITCH_POLL_INTERVAL_MS = 500;
 const SWITCH_POLL_TIMEOUT_MS = 8_000;
 
 /**
- * Asks the wallet to switch to `target` and waits for it to confirm.
- *
- * - `"switched"` — the wallet accepted and is now on `target`.
- * - `"cancelled"` — the wallet declined the prompt or never landed on the
- *   target within the timeout.
- * - `"manual"` — the injected wallet has no programmatic switch API, so the
- *   user must switch inside Freighter; the app's poller detects the change.
- */
-/**
  * Whether a mainnet action needs an explicit warning: the user is on mainnet
  * and the network changed recently, and they haven't acknowledged it yet.
  * Pure so it is unit-testable without rendering the page. (#480)
@@ -176,6 +204,15 @@ export function shouldWarnOnMainnetAction(
   return network === "PUBLIC" && recentlyChangedNetwork && !acknowledged;
 }
 
+/**
+ * Asks the wallet to switch to `target` and waits for it to confirm.
+ *
+ * - `"switched"` — the wallet accepted and is now on `target`.
+ * - `"cancelled"` — the wallet declined the prompt or never landed on the
+ *   target within the timeout.
+ * - `"manual"` — the injected wallet has no programmatic switch API, so the
+ *   user must switch inside Freighter; the app's poller detects the change.
+ */
 export async function switchWalletNetwork(target: StellarNetwork): Promise<SwitchNetworkResult> {
   const injected = (window as unknown as { freighter?: FreighterInjectedApi }).freighter;
   if (!injected?.setNetwork) {
@@ -190,10 +227,15 @@ export async function switchWalletNetwork(target: StellarNetwork): Promise<Switc
     return "cancelled";
   }
 
+  // Confirm via freighter-api directly rather than the multi-wallet
+  // getWalletNetwork()/StellarWalletsKit abstraction: switchWalletNetwork is
+  // already Freighter-specific (it only runs when window.freighter.setNetwork
+  // exists), and the kit singleton has no bearing on whether *this* request
+  // landed.
   const deadline = Date.now() + SWITCH_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const { status } = await getWalletNetwork();
-    if (status === target) {
+    const result = await getFreighterNetwork();
+    if (!result.error && String(result.network ?? "").toUpperCase() === target) {
       return "switched";
     }
     await new Promise((resolve) => setTimeout(resolve, SWITCH_POLL_INTERVAL_MS));
@@ -252,6 +294,7 @@ export async function connectWallet(): Promise<string | null> {
  * provider, which is both faster and avoids permission-prompt loops. (#459)
  */
 export async function checkConnection(): Promise<boolean> {
+  if (e2eWalletConfig()) return _e2eConnected;
   if (!_kitReady || typeof window === "undefined") return false;
   try {
     const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
@@ -267,6 +310,8 @@ export async function checkConnection(): Promise<boolean> {
  * Return the public key for the currently connected wallet, or null.
  */
 export async function getWalletAddress(): Promise<string | null> {
+  const e2e = e2eWalletConfig();
+  if (e2e) return _e2eConnected ? e2e.address : null;
   if (typeof window === "undefined") return null;
   try {
     if (!_kitReady) {
@@ -304,6 +349,8 @@ export interface WalletNetworkInfo {
  * Now delegates to whichever wallet the user selected via the kit. (#459)
  */
 export async function getWalletNetwork(): Promise<WalletNetworkInfo> {
+  const e2e = e2eWalletConfig();
+  if (e2e) return { status: e2e.network, name: e2e.network };
   try {
     if (!_kitReady) {
       await initWalletKit();
@@ -315,8 +362,9 @@ export async function getWalletNetwork(): Promise<WalletNetworkInfo> {
       return { status: "UNKNOWN", name: null };
     }
     const name = String(result.network ?? "").toUpperCase();
-    if (name === "PUBLIC" || name === "TESTNET") {
-      return { status: name, name };
+    const reported = name as WalletNetworkState;
+    if (isSupportedNetwork(reported)) {
+      return { status: reported, name };
     }
     return { status: "UNSUPPORTED", name: name || null };
   } catch {
@@ -636,6 +684,8 @@ async function buildSignAndSubmit(
 
       onPhase?.("signing");
 
+      const e2eWallet = e2eWalletConfig();
+
       // #241 — Re-fetch the wallet's current network immediately before
       // signing.  The user may have switched networks in Freighter during the
       // time between the app loading and the "Confirm" click.  If the wallet
@@ -650,52 +700,76 @@ async function buildSignAndSubmit(
       //      returned no data) → treat as "can't verify, proceed"
       //   b) getNetwork returns a different known network → abort
       //   c) getNetwork rejects (Freighter locked, etc.) → abort with UNKNOWN
-      try {
-        const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
-        const netResult = await StellarWalletsKit.getNetwork();
-        if (netResult !== undefined && netResult !== null && typeof netResult === "object") {
-          // Check for in-band error (e.g. user declined access)
-          if ("error" in netResult && (netResult as { error?: unknown }).error) {
-            throw new Error(
-              `Network changed in your wallet — please retry. ` +
-              `Transaction was built for ${network} but your wallet is now on UNKNOWN.`
-            );
+      //
+      // Under the e2e test hook (#669) there is no real extension to have
+      // changed networks underneath us — the fixture's configured network is
+      // authoritative, so this check is skipped entirely.
+      if (!e2eWallet) {
+        try {
+          const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+          const netResult = await StellarWalletsKit.getNetwork();
+          if (netResult !== undefined && netResult !== null && typeof netResult === "object") {
+            // Check for in-band error (e.g. user declined access)
+            if ("error" in netResult && (netResult as { error?: unknown }).error) {
+              throw new Error(
+                `Network changed in Freighter — please retry. ` +
+                `Transaction was built for ${network} but Freighter is now on UNKNOWN.`
+              );
+            }
+            // Compare the actual reported network
+            const reportedRaw = (netResult as { network?: string }).network;
+            const reported = (reportedRaw ?? "").toUpperCase() as WalletNetworkState;
+            if (reported && reported !== network) {
+              throw new Error(
+                `Network changed in Freighter — please retry. ` +
+                `Transaction was built for ${network} but Freighter is now on ${reported}.`
+              );
+            }
           }
-          // Compare the actual reported network
-          const reportedRaw = (netResult as { network?: string }).network;
-          const reported = (reportedRaw ?? "").toUpperCase() as WalletNetworkState;
-          if (reported && reported !== network) {
-            throw new Error(
-              `Network changed in your wallet — please retry. ` +
-              `Transaction was built for ${network} but your wallet is now on ${reported}.`
-            );
+          // If netResult is undefined/null, we can't verify the network — proceed
+        } catch (networkErr) {
+          // Re-throw errors we raised ourselves
+          if (networkErr instanceof Error && networkErr.message.includes("Network changed in Freighter")) {
+            throw networkErr;
           }
+          // getNetwork() itself rejected (Freighter locked, locked extension, etc.)
+          throw new Error(
+            "Network changed in wallet — please retry. " +
+            `Transaction was built for ${network} but wallet is now on UNKNOWN.`
+          );
         }
-        // If netResult is undefined/null, we can't verify the network — proceed
-      } catch (networkErr) {
-        // Re-throw errors we raised ourselves
-        if (networkErr instanceof Error && networkErr.message.includes("Network changed in your wallet")) {
-          throw networkErr;
-        }
-        // getNetwork() itself rejected (Freighter locked, locked extension, etc.)
-        throw new Error(
-          "Network changed in wallet — please retry. " +
-          `Transaction was built for ${network} but wallet is now on UNKNOWN.`
-        );
       }
 
       // Use the Stellar Wallets Kit to sign — this works regardless of which
       // wallet (Freighter, xBull, Lobstr, etc.) the user selected. (#459)
-      const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
-      const signedResult = await StellarWalletsKit.signTransaction(tx.toXDR(), {
-        networkPassphrase: passphrase,
-      });
+      // Under the e2e test hook (#669), sign directly with the disposable
+      // testnet keypair the fixture configured instead of going through the
+      // kit, which has no real extension to delegate to in CI.
+      let signedResult: { signedTxXdr: string };
+      if (e2eWallet) {
+        if (e2eWallet.shouldRejectSign) {
+          throw new Error("User declined access");
+        }
+        tx.sign(Keypair.fromSecret(e2eWallet.secret));
+        signedResult = { signedTxXdr: tx.toXDR() };
+      } else {
+        const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+        signedResult = await StellarWalletsKit.signTransaction(tx.toXDR(), {
+          networkPassphrase: passphrase,
+        });
+      }
 
       // #242 — Runtime shape guard on the wallet's response.  A version
       // mismatch, API change, or compromised extension could return a missing
-      // or non-string `signedTxXdr`.  The kit throws on signing errors, so we
-      // only need to guard against a missing/empty XDR here.
-      const signedXDR = signedResult.signedTxXdr;
+      // or non-string `signedTxXdr`.  The response is untrusted input, so the
+      // object itself is checked before anything is read from it: a missing
+      // response, or one carrying an `error` field, is rejected even if it
+      // also holds something that looks like a signed transaction. (#652)
+      const response: unknown = signedResult;
+      const signedXDR =
+        typeof response === "object" && response !== null && !("error" in response && response.error)
+          ? (response as { signedTxXdr?: unknown }).signedTxXdr
+          : undefined;
       if (typeof signedXDR !== "string" || !signedXDR) {
         // Deliberately avoids wallet-API jargon (XDR) so the message stays
         // readable for a user who just saw a malformed wallet response.
@@ -715,6 +789,14 @@ async function buildSignAndSubmit(
     },
     server,
     network
+  );
+}
+
+/** The abort raised when the wallet isn't on the network a transaction was built for. */
+function networkChangedError(expected: StellarNetwork, actual: string): Error {
+  return new Error(
+    `Network changed in Freighter — please retry. ` +
+      `Transaction was built for ${expected} but Freighter is now on ${actual}.`
   );
 }
 
@@ -751,15 +833,19 @@ export function toSafeErrorMessage(error: unknown, fallback: string): string {
 export async function assertActiveAccountMatches(sourceAddress: string): Promise<void> {
   const active = await getWalletAddress();
 
+  // An empty/null address covers no wallet selected, a locked extension, and
+  // a kit error alike: none of them leaves an account that could sign. (#654)
   if (!active) {
     throw new Error(
-      "Couldn't read your wallet's active account. Connect (or unlock) your wallet and try again."
+      "No wallet is connected. Connect (or unlock) your wallet and try again."
     );
   }
 
+  // Refuse rather than substitute the active account: the payment must come
+  // from the address the user reviewed, or not be signed at all. (#654)
   if (active !== sourceAddress) {
     throw new Error(
-      `Your wallet's active account (${truncateAddress(active)}) doesn't match the From address (${truncateAddress(sourceAddress)}). ` +
+      `Your wallet's active account (${truncateAddress(active)}) does not match the source address (${truncateAddress(sourceAddress)}). ` +
         "Switch accounts in your wallet or use the connected address."
     );
   }
@@ -865,6 +951,87 @@ export async function bridgeViaContract(
   // fire on this path; without it the UI sits on "Signing..." until the
   // transaction resolves.
   return buildAndSubmitPayment(sourceAddress, cAddress, amount, assetCode, network, onPhase);
+}
+
+/**
+ * Signs an already-built, unsigned transaction XDR — e.g. one a backend
+ * "prepare" endpoint returned — through the same e2e-aware, kit-abstracted
+ * path buildAndSubmitPayment's own signing step uses (#671). Unlike that
+ * path, this never builds the transaction itself, so it has no source
+ * account or operations of its own to validate; callers that need the
+ * active wallet to match a specific address (as batch funding does) must
+ * call assertActiveAccountMatches themselves first.
+ */
+export async function signPreparedTransaction(unsignedXdr: string, network: StellarNetwork): Promise<string> {
+  const passphrase = await getNetworkPassphrase(network);
+  const e2eWallet = e2eWalletConfig();
+
+  let signedResult: { signedTxXdr: string };
+  if (e2eWallet) {
+    if (e2eWallet.shouldRejectSign) {
+      throw new Error("User declined access");
+    }
+    const tx = TransactionBuilder.fromXDR(unsignedXdr, passphrase);
+    tx.sign(Keypair.fromSecret(e2eWallet.secret));
+    signedResult = { signedTxXdr: tx.toXDR() };
+  } else {
+    const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+    signedResult = await StellarWalletsKit.signTransaction(unsignedXdr, {
+      networkPassphrase: passphrase,
+    });
+  }
+
+  const signedXDR = signedResult.signedTxXdr;
+  if (typeof signedXDR !== "string" || !signedXDR) {
+    throw new Error(
+      "Wallet returned an unexpected response while signing — the signed transaction is missing or empty."
+    );
+  }
+  return signedXDR;
+}
+
+export interface ClaimProof {
+  message: string;
+  signature: string;
+  signerAddress?: string;
+}
+
+/**
+ * Signs a one-time challenge proving the connected wallet controls
+ * `claimant`, for attaching to a lock-claim request (#672).
+ *
+ * PLACEHOLDER SCHEME: the real /locks API this pairs with doesn't exist yet
+ * (see src/lib/api.ts's claimLock), so there's no confirmed message format
+ * or verification method to match. This signs a plain, human-readable
+ * challenge via the wallet kit's SEP-53-style signMessage — a real signature
+ * over a real message, so a false claim can't be forged, but the exact
+ * message format and signature encoding must be reconciled against
+ * whatever the backend actually verifies once that's designed. Under the
+ * e2e test hook (#669), signs directly with the disposable keypair via
+ * Keypair.sign rather than going through the kit's signMessage.
+ */
+export async function signClaimProof(claimant: string, lockId: string, network: StellarNetwork): Promise<ClaimProof> {
+  const message = `Claim lock ${lockId} as ${claimant} on ${network} at ${Date.now()}`;
+  const e2eWallet = e2eWalletConfig();
+
+  if (e2eWallet) {
+    if (e2eWallet.shouldRejectSign) {
+      throw new Error("User declined access");
+    }
+    const signature = Keypair.fromSecret(e2eWallet.secret)
+      .sign(Buffer.from(message, "utf-8"))
+      .toString("base64");
+    return { message, signature, signerAddress: e2eWallet.address };
+  }
+
+  const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+  const result = await StellarWalletsKit.signMessage(message, { address: claimant });
+  if (typeof result.signedMessage !== "string" || !result.signedMessage) {
+    throw new Error(
+      "Wallet returned an unexpected response while signing — the signed message is missing or empty."
+    );
+  }
+  return { message, signature: result.signedMessage, signerAddress: result.signerAddress };
 }
 
 /**
@@ -1496,4 +1663,63 @@ export async function getTransactionByHash(
     memo: record.memo ?? null,
     sequence: Number.isFinite(sequenceNumber) ? sequenceNumber : null,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* #673 — Fee-tier rebate lookup (Soroban RPC)                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Reads an account's cumulative tier-qualifying volume from the bridge
+ * contract's `rebate_for(user)` view function via a Soroban RPC simulation
+ * (#673). A simulation is read-only and needs no signature or submission,
+ * so this can run for any address, connected or not.
+ *
+ * PLACEHOLDER SHAPE: no contract ABI/bindings for `rebate_for` exist in this
+ * repo — only its name, from the backend's own contract (per issue #673).
+ * The single-Address argument is unambiguous (Soroban's standard Address
+ * ScVal encoding, the same ScVal shape every wallet/SDK produces), but the
+ * RETURN value's meaning is a best guess: assumed to be the account's
+ * cumulative volume (a plain count, not stroops) rather than an
+ * already-computed rate, because feeTiers.ts's tier logic
+ * (progressToNextTier, computeTieredFee) is built entirely around comparing
+ * a volume against tier thresholds — a returned rate would leave nothing to
+ * compute a progress bar from. Must be reconciled against the real contract
+ * once its interface is documented; until then this is the same kind of
+ * best-guess this codebase already carries for #467/#468/#469's routes.
+ *
+ * Returns null on any failure — invalid address, no contract configured,
+ * RPC error, a simulation that errored, or a result whose retval doesn't
+ * decode to a number — rather than throwing, matching this area's existing
+ * never-throws contract (see getFeeTierPreview in src/lib/api.ts).
+ */
+export async function getRebateVolume(address: string, network: StellarNetwork): Promise<number | null> {
+  if (!BRIDGE_CONTRACT_ID) return null;
+  if (!isValidStellarAddress(address)) return null;
+
+  try {
+    const server = await getSorobanRpcServer(network);
+    const passphrase = await getNetworkPassphrase(network);
+    const contract = new Contract(BRIDGE_CONTRACT_ID);
+    // The source account only needs to be a syntactically valid keypair for
+    // the envelope — this transaction is simulated, never submitted, so its
+    // sequence number is never checked against a real account.
+    const account = new Account(address, "0");
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: passphrase,
+    })
+      .addOperation(contract.call("rebate_for", Address.fromString(address).toScVal()))
+      .setTimeout(30)
+      .build();
+
+    const simulation = await server.simulateTransaction(tx);
+    if (!rpc.Api.isSimulationSuccess(simulation) || !simulation.result) return null;
+
+    const native = scValToNative(simulation.result.retval);
+    const volume = Number(native);
+    return Number.isFinite(volume) ? volume : null;
+  } catch {
+    return null;
+  }
 }

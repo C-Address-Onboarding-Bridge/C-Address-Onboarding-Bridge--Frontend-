@@ -30,6 +30,37 @@ const freighter = {
   getNetwork: vi.fn(),
 };
 
+// Since #459 stellar.ts reaches the wallet through the Stellar Wallets Kit.
+// Model the kit with Freighter selected: each call delegates to the mocked
+// freighter-api above, so the Freighter mocks below still drive every case.
+vi.mock("@creit.tech/stellar-wallets-kit/sdk", async () => {
+  const api = await import("@stellar/freighter-api");
+  return {
+    StellarWalletsKit: {
+      init: vi.fn(),
+      getAddress: () => api.getAddress(),
+      getNetwork: () => api.getNetwork(),
+      signTransaction: (xdr: string, opts: { networkPassphrase?: string }) =>
+        api.signTransaction(xdr, opts),
+    },
+  };
+});
+vi.mock("@creit.tech/stellar-wallets-kit/modules/freighter", () => ({
+  FreighterModule: class {},
+}));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/xbull", () => ({
+  xBullModule: class {},
+}));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/lobstr", () => ({
+  LobstrModule: class {},
+}));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/albedo", () => ({
+  AlbedoModule: class {},
+}));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/rabet", () => ({
+  RabetModule: class {},
+}));
+
 // Minimal Horizon.Server mock that makes the SDK happy enough to build and
 // submit a real transaction.  The sequence/balances/fee values just need to be
 // plausible; we are not testing the transaction building logic here.
@@ -100,7 +131,7 @@ afterEach(() => {
 // ─── #241: fresh network check immediately before signing ────────────────────
 
 describe("#241 — fresh network check before signing", () => {
-  it.skip("proceeds normally when Freighter network matches the transaction network", async () => {
+  it("proceeds normally when Freighter network matches the transaction network", async () => {
     mockFreighterNetwork("TESTNET");
     mockValidSign();
 
@@ -117,7 +148,7 @@ describe("#241 — fresh network check before signing", () => {
     expect(signTransaction).toHaveBeenCalledOnce();
   });
 
-  it.skip("aborts with a clear error when Freighter has switched to a different supported network", async () => {
+  it("aborts with a clear error when Freighter has switched to a different supported network", async () => {
     // Transaction is built for TESTNET, but Freighter is now on PUBLIC.
     mockFreighterNetwork("PUBLIC");
     mockValidSign();
@@ -130,7 +161,7 @@ describe("#241 — fresh network check before signing", () => {
     expect(signTransaction).not.toHaveBeenCalled();
   });
 
-  it.skip("aborts when Freighter reports an unsupported network (e.g. FUTURENET)", async () => {
+  it("aborts when Freighter reports an unsupported network (e.g. FUTURENET)", async () => {
     mockFreighterNetwork("FUTURENET");
     mockValidSign();
 
@@ -141,7 +172,7 @@ describe("#241 — fresh network check before signing", () => {
     expect(signTransaction).not.toHaveBeenCalled();
   });
 
-  it.skip("aborts when the network cannot be read from Freighter (UNKNOWN)", async () => {
+  it("aborts when the network cannot be read from Freighter (UNKNOWN)", async () => {
     getNetwork.mockRejectedValue(new Error("Freighter is locked"));
     mockValidSign();
 
@@ -152,7 +183,29 @@ describe("#241 — fresh network check before signing", () => {
     expect(signTransaction).not.toHaveBeenCalled();
   });
 
-  it.skip("error message names both the expected and actual networks", async () => {
+  it("aborts when Freighter resolves with no network data (#650: fail closed)", async () => {
+    getNetwork.mockResolvedValue(undefined as never);
+    mockValidSign();
+
+    await expect(
+      buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "XLM", "TESTNET")
+    ).rejects.toThrow(/Network changed in Freighter/);
+
+    expect(signTransaction).not.toHaveBeenCalled();
+  });
+
+  it("aborts when Freighter reports an empty network name (#650: fail closed)", async () => {
+    mockFreighterNetwork("");
+    mockValidSign();
+
+    await expect(
+      buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "XLM", "TESTNET")
+    ).rejects.toThrow(/Network changed in Freighter/);
+
+    expect(signTransaction).not.toHaveBeenCalled();
+  });
+
+  it("error message names both the expected and actual networks", async () => {
     // Built for TESTNET; Freighter now says PUBLIC.
     mockFreighterNetwork("PUBLIC");
 
@@ -169,7 +222,7 @@ describe("#241 — fresh network check before signing", () => {
     expect((error as Error).message).toMatch(/PUBLIC/);
   });
 
-  it.skip("error message tells the user to retry", async () => {
+  it("error message tells the user to retry", async () => {
     mockFreighterNetwork("PUBLIC");
 
     const error = await buildAndSubmitPayment(
@@ -192,7 +245,7 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     mockFreighterNetwork("TESTNET");
   });
 
-  it.skip("proceeds normally when signedTxXdr is a non-empty string", async () => {
+  it("proceeds normally when signedTxXdr is a non-empty string", async () => {
     mockValidSign();
 
     const result = await buildAndSubmitPayment(
@@ -206,7 +259,7 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     expect(result.successful).toBe(true);
   });
 
-  it.skip("throws a clear error when signedTxXdr is undefined (missing field)", async () => {
+  it("throws a clear error when signedTxXdr is undefined (missing field)", async () => {
     // Simulate a wallet extension that omits the field entirely.
     signTransaction.mockResolvedValue({} as never);
 
@@ -215,7 +268,7 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     ).rejects.toThrow(/unexpected response/i);
   });
 
-  it.skip("throws a clear error when signedTxXdr is an empty string", async () => {
+  it("throws a clear error when signedTxXdr is an empty string", async () => {
     signTransaction.mockResolvedValue({ signedTxXdr: "" } as never);
 
     await expect(
@@ -223,7 +276,7 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     ).rejects.toThrow(/unexpected response/i);
   });
 
-  it.skip("throws a clear error when signedTxXdr is a number", async () => {
+  it("throws a clear error when signedTxXdr is a number", async () => {
     signTransaction.mockResolvedValue({ signedTxXdr: 12345 } as never);
 
     await expect(
@@ -231,7 +284,7 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     ).rejects.toThrow(/unexpected response/i);
   });
 
-  it.skip("throws a clear error when signedTxXdr is null", async () => {
+  it("throws a clear error when signedTxXdr is null", async () => {
     signTransaction.mockResolvedValue({ signedTxXdr: null } as never);
 
     await expect(
@@ -247,7 +300,7 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     ).rejects.toThrow();
   });
 
-  it.skip("does not reach TransactionBuilder.fromXDR when signedTxXdr is missing", async () => {
+  it("does not reach TransactionBuilder.fromXDR when signedTxXdr is missing", async () => {
     // If the guard is absent, fromXDR would throw a low-level parse error.
     // With the guard in place the error message must be our own, not the SDK's.
     signTransaction.mockResolvedValue({ signedTxXdr: undefined } as never);
@@ -265,5 +318,29 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     expect((error as Error).message).toMatch(/unexpected response/i);
     expect((error as Error).message).not.toMatch(/decode/i);
     expect((error as Error).message).not.toMatch(/XDR/i);
+  });
+
+  // #652 — the response object itself is untrusted too.
+  it.each([
+    ["undefined", undefined],
+    ["null", null],
+  ])("throws a clear error when the whole response is %s (#652)", async (_label, response) => {
+    signTransaction.mockResolvedValue(response as never);
+
+    await expect(
+      buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "XLM", "TESTNET")
+    ).rejects.toThrow(/unexpected response/i);
+  });
+
+  it("does not submit when the wallet reports an error alongside a signed transaction (#652)", async () => {
+    signTransaction.mockImplementation(async (xdr: string) => ({
+      signedTxXdr: xdr,
+      signerAddress: G_SOURCE,
+      error: { code: -4, message: "User declined access" },
+    }) as never);
+
+    await expect(
+      buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "XLM", "TESTNET")
+    ).rejects.toThrow(/unexpected response/i);
   });
 });

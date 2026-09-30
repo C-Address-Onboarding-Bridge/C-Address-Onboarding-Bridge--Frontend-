@@ -318,21 +318,24 @@ export default function DashboardPage() {
     const fetchData = async (isInitial: boolean) => {
       if (isInitial) setLoading(true);
       setError(null);
+      // The fee tier loads on its own rather than inside the Promise.all
+      // below: a slow or unreachable tier endpoint used to hold the balance and
+      // transaction cards in their loading state, so an empty account looked
+      // stuck instead of showing 0 XLM / 0 transactions. getFeeTierPreview
+      // never throws (it resolves null on any failure). (#653)
+      getFeeTierPreview(address, network).then((tierResult) => {
+        if (!cancelled) setFeeTierStatus(tierResult);
+      });
       try {
-        // getFeeTierPreview never throws (resolves null on any failure), so it
-        // can share this Promise.all without a failed tier fetch aborting the
-        // balance/transaction load or being caught below as a page-level error.
-        const [balResult, txResult, tierResult] = await Promise.all([
+        const [balResult, txResult] = await Promise.all([
           getAccountBalances(address, network),
           fetchRecentTransactions(address, network, 10),
-          getFeeTierPreview(address, network),
         ]);
         if (cancelled) return;
         setBalance(balResult.total);
         // Reuse the previous reference when nothing changed so React bails out
         // of re-rendering the memoized transaction list.
         setTransactions((prev) => (areTransactionsEqual(prev, txResult) ? prev : txResult));
-        setFeeTierStatus(tierResult);
       } catch (e: unknown) {
         if (cancelled) return;
         setError(toSafeErrorMessage(e, "Failed to fetch data. Please try again."));
@@ -535,7 +538,7 @@ export default function DashboardPage() {
                 {shownBalance !== null ? parseFloat(shownBalance).toFixed(2) : "—"}
               </div>
               <div className="text-xs text-[var(--text-muted)]">XLM</div>
-              {network === "TESTNET" && !showLoading && (
+              {network === "TESTNET" && !showLoading && (shownBalance === null || parseFloat(shownBalance) === 0) && (
                 <div className="mt-3">
                   <button
                     onClick={handleFaucet}
