@@ -29,6 +29,19 @@ vi.mock("@/lib/api", async () => {
   };
 });
 
+// The panel itself gates on the locked_transfers flag (#672), which defaults
+// to off — force it on so these tests keep exercising the panel's own
+// polling/claim/countdown logic, which is what's actually under test here.
+// One test below overrides this back to false to cover the gate itself.
+const useFeatureFlagMock = vi.hoisted(() => vi.fn(() => true));
+vi.mock("@/contexts/FeatureFlagContext", () => ({
+  useFeatureFlag: useFeatureFlagMock,
+}));
+
+vi.mock("@/lib/stellar", () => ({
+  signClaimProof: vi.fn().mockResolvedValue({ message: "stub-message", signature: "stub-signature" }),
+}));
+
 const ADDRESS = "GRECIPIENT00000000000000000000000000000000000000000000";
 
 const makeLock = (overrides: Partial<Lock> = {}): Lock => ({
@@ -48,6 +61,7 @@ describe("ClaimsPanel (#467)", () => {
   beforeEach(() => {
     listIncomingLocksMock.mockReset();
     claimLockMock.mockReset();
+    useFeatureFlagMock.mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -58,6 +72,13 @@ describe("ClaimsPanel (#467)", () => {
   it("renders nothing without a connected address", () => {
     const { container } = render(<ClaimsPanel address={null} network="TESTNET" isNetworkSupported={true} />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("renders nothing and never polls when the locked_transfers flag is off (#672)", () => {
+    useFeatureFlagMock.mockReturnValue(false);
+    const { container } = render(<ClaimsPanel address={ADDRESS} network="TESTNET" isNetworkSupported={true} />);
+    expect(container).toBeEmptyDOMElement();
+    expect(listIncomingLocksMock).not.toHaveBeenCalled();
   });
 
   it("shows an empty state when there are no incoming locks", async () => {
@@ -117,7 +138,10 @@ describe("ClaimsPanel (#467)", () => {
       fireEvent.click(button);
 
       expect(await screen.findByTestId(`claim-feedback-${lock.id}`)).toHaveTextContent(/claimed/i);
-      expect(claimLockMock).toHaveBeenCalledWith(lock.id, ADDRESS, "TESTNET");
+      expect(claimLockMock).toHaveBeenCalledWith(lock.id, ADDRESS, "TESTNET", {
+        message: "stub-message",
+        signature: "stub-signature",
+      });
       await waitFor(() => {
         expect(screen.getByTestId(`lock-status-${lock.id}`)).toHaveTextContent("Claimed");
       });
@@ -150,7 +174,10 @@ describe("ClaimsPanel (#467)", () => {
       fireEvent.click(button);
       fireEvent.click(button);
 
-      expect(claimLockMock).toHaveBeenCalledTimes(1);
+      // The double-claim guard (claimingRef) is set synchronously before any
+      // await, so the 2nd/3rd clicks are already no-ops here; claimLock
+      // itself now fires one microtask later, after signClaimProof (#672).
+      await waitFor(() => expect(claimLockMock).toHaveBeenCalledTimes(1));
       resolveClaim({ ...lock, status: "claimed" });
       await waitFor(() => expect(screen.getByTestId(`lock-status-${lock.id}`)).toHaveTextContent("Claimed"));
     });

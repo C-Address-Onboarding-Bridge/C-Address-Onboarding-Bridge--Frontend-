@@ -209,7 +209,7 @@ describe("Navbar network switcher (#480)", () => {
       fireEvent.click(screen.getByRole("menuitem", { name: /Testnet/ }));
     });
 
-    expect(screen.getByRole("status").textContent).toMatch(/Change the network in Freighter/i);
+    expect(screen.getByRole("status").textContent).toMatch(/Change the network in your wallet/i);
   });
 
   it("reports a cancelled wallet prompt", async () => {

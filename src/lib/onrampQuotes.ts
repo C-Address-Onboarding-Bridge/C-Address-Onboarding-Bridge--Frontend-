@@ -3,7 +3,7 @@
  *
  * The onramp page already computes a correct fee/net-receive estimate per
  * provider (`getProviderFeeRate`/`calculateOnrampFeeAndReceive` in
- * `onramp-page.tsx`) — and because the only crypto asset this app on-ramps
+ * `onrampProviders.ts`) — and because the only crypto asset this app on-ramps
  * into is USDC, a dollar-pegged stablecoin, that estimate does not depend on
  * a live crypto price feed the way a BTC/ETH quote would. This module turns
  * that per-provider estimate into a ranked, side-by-side comparison, and
@@ -13,7 +13,7 @@
  * identically, so a provider whose live quote fails or isn't configured
  * degrades to its estimate rather than dropping out of the comparison.
  */
-import { providers, getProviderFeeRate, calculateOnrampFeeAndReceive } from "@/components/routes/onramp-page";
+import { providers, getProviderFeeRate, calculateOnrampFeeAndReceive } from "@/lib/onrampProviders";
 import type { OnrampProvider, OnrampQuote } from "./types";
 import { isOnrampProvider } from "./types";
 

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { BookUser, Download, Pencil, Trash2, Upload, X } from "lucide-react";
 import { truncateAddress } from "@/components/AddressForm";
 import LiveRegion from "@/components/live-region";
 import {
+  MAX_IMPORT_BYTES,
   RECIPIENT_LABEL_MAX_LENGTH,
   deleteRecipient,
   exportAddressBook,
@@ -15,6 +16,7 @@ import {
   validateRecipient,
   type SavedRecipient,
 } from "@/lib/addressBook";
+import { useHydrated } from "@/hooks/useHydrated";
 
 /**
  * Address book page (#466).
@@ -29,7 +31,9 @@ import {
  * whether or not a wallet is connected.
  */
 export default function AddressBookPage() {
-  const [recipients, setRecipients] = useState<SavedRecipient[]>([]);
+  const [storedRecipients, setStoredRecipients] = useState<SavedRecipient[]>([]);
+  const hydrated = useHydrated();
+  const recipients = hydrated ? loadAddressBook() : storedRecipients;
   const [newLabel, setNewLabel] = useState("");
   const [newAddress, setNewAddress] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
@@ -43,15 +47,7 @@ export default function AddressBookPage() {
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Read from storage after mount only: touching localStorage during render
-  // would produce different server and client output and break hydration —
-  // same guard AvatarUpload/ProfilePage use for their own stores.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRecipients(loadAddressBook());
-  }, []);
-
-  const refresh = () => setRecipients(loadAddressBook());
+  const refresh = () => setStoredRecipients(loadAddressBook());
 
   const handleAdd = (event: React.FormEvent) => {
     event.preventDefault();
@@ -136,6 +132,18 @@ export default function AddressBookPage() {
     // Always reset the input so re-picking the same file fires `change` again.
     event.target.value = "";
     if (!file) return;
+
+    // Reject oversized files before reading them into memory so a huge file
+    // can't freeze the page while it's parsed and validated (#731).
+    if (file.size > MAX_IMPORT_BYTES) {
+      setImportErrors([
+        `File is too large (${Math.ceil(file.size / 1024)} KB). The limit is ${Math.floor(
+          MAX_IMPORT_BYTES / 1024
+        )} KB.`,
+      ]);
+      setNotice("Import skipped — file exceeds the size limit.");
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -261,11 +269,14 @@ export default function AddressBookPage() {
             data-testid="import-errors"
             className="mb-4 p-3 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 space-y-1"
           >
-            {importErrors.map((err, i) => (
-              <p key={i} className="text-xs text-[var(--error)]">
-                {err}
-              </p>
-            ))}
+            {importErrors.map((err) => {
+              const line = err.match(/^Entry (\d+):/)?.[1] ?? "file";
+              return (
+                <p key={`${line}:${err}`} className="text-xs text-[var(--error)]">
+                  {err}
+                </p>
+              );
+            })}
           </div>
         )}
 
@@ -355,7 +366,4 @@ export default function AddressBookPage() {
         )}
       </section>
 
-      <LiveRegion message={notice} />
-    </div>
-  );
-}
+/* … truncated 5842 chars — edit only what you need near the top … */

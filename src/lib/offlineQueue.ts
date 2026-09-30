@@ -60,3 +60,35 @@ export function removeOperations(
   const remove = new Set(ids);
   return operations.filter((op) => !remove.has(op.id));
 }
+
+/**
+ * Runs the safe operations that were parked while offline and returns the
+ * operations that could not be replayed (so they stay queued for a later
+ * reconnect). Funding operations are never included here — they require
+ * explicit confirmation via `fundingOperations`.
+ *
+ * This is the missing link the offline banner promises: without it nothing
+ * ever drains the queue, so offline actions silently fail.
+ */
+export async function replaySafeOperations(
+  operations: QueuedOperation[],
+): Promise<{ replayed: QueuedOperation[]; remaining: QueuedOperation[] }> {
+  const replayed: QueuedOperation[] = [];
+  const remaining: QueuedOperation[] = [];
+
+  for (const op of operations) {
+    if (op.kind !== "safe") {
+      remaining.push(op);
+      continue;
+    }
+    try {
+      await op.run?.();
+      replayed.push(op);
+    } catch {
+      // Keep the operation queued so a later reconnect can retry it.
+      remaining.push(op);
+    }
+  }
+
+  return { replayed, remaining };
+}

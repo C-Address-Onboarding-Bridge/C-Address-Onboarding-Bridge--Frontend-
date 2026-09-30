@@ -1,7 +1,9 @@
 "use client";
 
 import { use, useEffect, useState, type ReactNode } from "react";
+import { useHydrated } from "@/hooks/useHydrated";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
@@ -19,6 +21,7 @@ import {
 import { useWallet } from "@/components/wallet-provider";
 import { IN_FLIGHT_TRANSACTION_KEY } from "@/components/error-boundary";
 import {
+  getExplorerUrl,
   getTransactionByHash,
   subscribeToTransactionStatus,
   type TransactionDetails,
@@ -26,13 +29,6 @@ import {
 
 /** Poll interval while the transaction is still in flight. (#474) */
 const IN_FLIGHT_POLL_MS = 5_000;
-
-/** Explorer URL built inline (the app's getExplorerUrl helper is stubbed for
- * another issue; this page must not crash on the detail route). */
-function explorerTxUrl(network: string, hash: string): string {
-  const base = network === "PUBLIC" ? "public" : "testnet";
-  return `https://stellar.expert/explorer/${base}/tx/${encodeURIComponent(hash)}`;
-}
 
 function stroopsToXlm(stroops: number): string {
   if (!Number.isFinite(stroops) || stroops <= 0) return "—";
@@ -55,38 +51,51 @@ export default function TransactionDetailPage({
   params: Promise<{ hash: string }>;
 }) {
   const { hash } = params instanceof Promise ? use(params) : params;
-  const { network } = useWallet();
+  const { network: walletNetwork } = useWallet();
+  // The transaction's own network comes from the link (#717); without it we
+  // fall back to trying both networks, starting with the wallet's.
+  const networkParam = useSearchParams()?.get("network");
+  const linkNetwork = networkParam === "PUBLIC" || networkParam === "TESTNET" ? networkParam : null;
 
   const [details, setDetails] = useState<TransactionDetails | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadedRequestKey, setLoadedRequestKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [tick, setTick] = useState(0);
-  const [liveTransport, setLiveTransport] = useState<"sse" | "polling">("sse");
+  const hydrated = useHydrated();
+  const [transportOverride, setTransportOverride] = useState<"polling" | null>(null);
+  const liveTransport = transportOverride ?? (hydrated && typeof EventSource === "undefined" ? "polling" : "sse");
+  const requestKey = `${hash}:${network}:${tick}`;
+  const currentLoadState = loadedRequestKey === requestKey ? loadState : "loading";
 
   useEffect(() => {
     let cancelled = false;
     setLoadState("loading");
-    getTransactionByHash(hash, network)
+    findTransactionByHash(hash, walletNetwork, linkNetwork)
       .then((result) => {
         if (cancelled) return;
         setDetails(result);
         setLoadState(result ? "found" : "not-found");
+        setLoadedRequestKey(requestKey);
       })
       .catch(() => {
-        if (!cancelled) setLoadState("error");
+        if (!cancelled) {
+          setLoadState("error");
+          setLoadedRequestKey(requestKey);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [hash, network, tick]);
+  }, [hash, walletNetwork, linkNetwork, tick]);
 
   // A well-formed hash that Horizon hasn't ingested yet is still in flight —
-  // keep polling until it lands or the user leaves. (#474)
+  // keep polling until it lands or the user leaves, but only when SSE is unavailable. (#474)
   useEffect(() => {
-    if (loadState !== "found" || details?.status !== "pending") return;
+    if (currentLoadState !== "found" || details?.status !== "pending") return;
     const timer = setTimeout(() => setTick((t) => t + 1), IN_FLIGHT_POLL_MS);
     return () => clearTimeout(timer);
-  }, [loadState, details?.status, tick]);
+  }, [currentLoadState, details?.status, tick]);
 
   // Live status via the SSE stream (#471). The subscription closes itself on a
   // terminal state, falls back to polling when SSE is unavailable/failing, and
@@ -96,7 +105,7 @@ export default function TransactionDetailPage({
     if (details?.status !== "pending") return;
     const subscription = subscribeToTransactionStatus({
       hash,
-      network,
+      network: details.network,
       onStatus: (status) => {
         if (status === "pending") return;
         setDetails((prev) => (prev ? { ...prev, status } : prev));
@@ -110,12 +119,10 @@ export default function TransactionDetailPage({
         // record (fees, ledger, timeline) instead of the pending skeleton.
         setTick((t) => t + 1);
       },
-      onError: () => setLiveTransport("polling"),
+      onError: () => setTransportOverride("polling"),
     });
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLiveTransport(subscription.transport);
     return () => subscription.unsubscribe();
-  }, [hash, network, details?.status]);
+  }, [hash, details?.network, details?.status]);
 
   // Terminal state: the in-flight marker set by the bridge page is no longer
   // needed, so a later crash won't keep showing the recovery link. (#473)
@@ -131,14 +138,17 @@ export default function TransactionDetailPage({
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      // Pin the transaction's network in the shared link. (#717)
+      const url = new URL(window.location.href);
+      if (details) url.searchParams.set("network", details.network);
+      await navigator.clipboard.writeText(url.toString());
       setCopied(true);
     } catch {
       setCopied(false);
     }
   };
 
-  if (loadState === "loading") {
+  if (currentLoadState === "loading") {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
         <div role="status" className="flex items-center justify-center gap-3 text-[var(--text-muted)]">
@@ -149,7 +159,7 @@ export default function TransactionDetailPage({
     );
   }
 
-  if (loadState === "error") {
+  if (currentLoadState === "error") {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-24 text-center">
         <h1 className="text-2xl font-bold mb-2">Could not load transaction</h1>
@@ -168,7 +178,7 @@ export default function TransactionDetailPage({
     );
   }
 
-  if (loadState === "not-found" || !details) {
+  if (currentLoadState === "not-found" || !details) {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-24 text-center">
         <h1 className="text-2xl font-bold mb-2" data-testid="tx-unknown">
@@ -207,7 +217,7 @@ export default function TransactionDetailPage({
         </Link>
         <div className="flex items-center gap-4">
           <a
-            href={explorerTxUrl(details.network, hash)}
+            href={getExplorerUrl(details.network, "tx", hash)}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-sm text-[var(--primary-light)] hover:underline"

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, Clock3, Lock, Loader2, LockOpen } from "lucide-react";
 import { claimLock, listIncomingLocks, LockAlreadyClaimedError } from "@/lib/api";
+import { signClaimProof } from "@/lib/stellar";
 import {
   countdownTo,
   formatCountdown,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/locks";
 import type { StellarNetwork } from "@/lib/types";
 import LiveRegion from "@/components/live-region";
+import { useFeatureFlag } from "@/contexts/FeatureFlagContext";
 
 /** How often the panel re-fetches lock status from the API. */
 const LOCKS_POLL_INTERVAL_MS = 15_000;
@@ -47,56 +49,66 @@ function truncateAddress(address: string): string {
  * last. See `src/lib/locks.ts` for the (placeholder) lock shape.
  */
 export default function ClaimsPanel({ address, network, isNetworkSupported }: ClaimsPanelProps) {
+  // The /locks routes this panel polls and claims against don't exist on the
+  // backend yet, and claiming sent nothing proving the caller controls the
+  // claimant account — hidden until both are resolved. (#672)
+  const enabled = useFeatureFlag("locked_transfers");
   const [locks, setLocks] = useState<LockRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [errorState, setError] = useState<string | null>(null);
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<ClaimFeedback | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const claimingRef = useRef<string | null>(null);
+  const targetKey = `${address ?? ""}:${network}`;
+  const enabled = Boolean(address && isNetworkSupported);
+  const loading = enabled && loadedKey !== targetKey;
+  const error = loadedKey === targetKey ? errorState : null;
+  const visibleLocks = enabled && loadedKey === targetKey ? locks : [];
 
   const refresh = useMemo(
     () => async (isInitial: boolean) => {
-      if (!address || !isNetworkSupported) return;
+      if (!enabled || !address || !isNetworkSupported) return;
       if (isInitial) setLoading(true);
       try {
         const result = await listIncomingLocks(address, network);
         setLocks(sortLocksByUnlockTime(result));
         setError(null);
+        setLoadedKey(targetKey);
       } catch {
         // A failed poll leaves the last-known list in place rather than
         // clearing it — losing a correct "claimable" state to a transient
         // network blip would be worse than showing slightly stale data.
         setError("Couldn't refresh locked transfers. Retrying shortly.");
-      } finally {
-        if (isInitial) setLoading(false);
+        setLoadedKey(targetKey);
       }
     },
-    [address, network, isNetworkSupported]
+    [enabled, address, network, isNetworkSupported]
   );
 
   useEffect(() => {
-    if (!address || !isNetworkSupported) {
+    if (!enabled || !address || !isNetworkSupported) {
       setLocks([]);
       setLoading(false);
       return;
     }
     let cancelled = false;
-    const tick = (isInitial: boolean) => {
+    const tick = () => {
       if (cancelled) return;
-      refresh(isInitial);
+      void refresh();
     };
-    tick(true);
+    const initialTimer = setTimeout(tick, 0);
     const interval = setInterval(() => {
       if (document.hidden) return;
-      tick(false);
+      tick();
     }, LOCKS_POLL_INTERVAL_MS);
     const handleVisibilityChange = () => {
-      if (!document.hidden) tick(false);
+      if (!document.hidden) tick();
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       cancelled = true;
+      clearTimeout(initialTimer);
       clearInterval(interval);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
@@ -105,7 +117,7 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
   // Countdown tick: only runs while at least one lock is still pending and
   // unmatured, so the panel doesn't re-render every second once everything
   // is either claimable or claimed.
-  const hasPendingUnmatured = locks.some((l) => l.status === "pending" && !isLockMatured(l, now));
+  const hasPendingUnmatured = visibleLocks.some((l) => l.status === "pending" && !isLockMatured(l, now));
   useEffect(() => {
     if (!hasPendingUnmatured) return;
     const interval = setInterval(() => setNow(Date.now()), COUNTDOWN_TICK_MS);
@@ -121,7 +133,10 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
     setClaimingId(lock.id);
     setFeedback(null);
     try {
-      const updated = await claimLock(lock.id, address, network);
+      // Proves the connected wallet controls `address` before the claim is
+      // sent — the previous version sent no such proof. (#672)
+      const proof = await signClaimProof(address, lock.id, network);
+      const updated = await claimLock(lock.id, address, network, proof);
       setLocks((prev) => sortLocksByUnlockTime(prev.map((l) => (l.id === updated.id ? updated : l))));
       setFeedback({ lockId: lock.id, ok: true, message: `Claimed ${updated.amount} ${updated.asset}.` });
     } catch (e: unknown) {
@@ -130,7 +145,7 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
         // first. Re-check the server's view immediately instead of leaving a
         // stale "claimable" row up, or (worse) leaving it possible to retry.
         setFeedback({ lockId: lock.id, ok: false, message: e.message });
-        await refresh(false);
+        await refresh();
       } else {
         setFeedback({
           lockId: lock.id,
@@ -139,7 +154,7 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
         });
         // The failure might still mean the claim went through server-side
         // (e.g. a dropped response) — re-check rather than assume it didn't.
-        await refresh(false);
+        await refresh();
       }
     } finally {
       claimingRef.current = null;
@@ -147,7 +162,7 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
     }
   };
 
-  if (!address) return null;
+  if (!enabled || !address) return null;
 
   const announcement = feedback
     ? feedback.ok
@@ -173,13 +188,13 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
           <Loader2 className="w-6 h-6 animate-spin motion-reduce:animate-none text-[var(--text-muted)]" />
           <span className="sr-only">Loading locked transfers…</span>
         </div>
-      ) : locks.length === 0 ? (
+      ) : visibleLocks.length === 0 ? (
         <div className="p-12 text-center">
           <p className="text-sm text-[var(--text-muted)]">No locked transfers incoming to this address.</p>
         </div>
       ) : (
         <div className="divide-y divide-[var(--border)]">
-          {locks.map((lock) => {
+          {visibleLocks.map((lock) => {
             const claimable = isLockClaimable(lock, now);
             const isThisClaiming = claimingId === lock.id;
             const rowFeedback = feedback?.lockId === lock.id ? feedback : null;

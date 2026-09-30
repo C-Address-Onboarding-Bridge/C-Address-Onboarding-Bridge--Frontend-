@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Aframp Widget — Live Example</title>
+    <title>C-Address Onboarding Bridge Widget — Live Example</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       body {
@@ -19,7 +19,7 @@
         color: #555;
         font-size: 0.9rem;
       }
-      #aframp-widget {
+      #caddress-widget {
         border: 1px solid #ddd;
         border-radius: 12px;
         overflow: hidden;
@@ -37,19 +37,19 @@
     </style>
   </head>
   <body>
-    <h1>Aframp Widget — Live Example</h1>
+    <h1>C-Address Onboarding Bridge Widget — Live Example</h1>
     <p>
       This page embeds the funding widget exactly the way a third-party dApp
-      would, via <code>/aframp-widget.js</code>. See
+      would, via <code>/caddress-widget.js</code>. See
       <a href="/docs/embedding.md">docs/embedding.md</a> for the full guide.
     </p>
 
-    <div id="aframp-widget"></div>
+    <div id="caddress-widget"></div>
 
     <p>Messages received from the widget:</p>
     <div id="log">(none yet)</div>
 
-    <script src="/aframp-widget.js"></script>
+    <script src="/caddress-widget.js"></script>
     <script>
       const log = document.getElementById("log");
       let entries = [];
@@ -58,7 +58,7 @@
         log.textContent = entries.join("\n");
       }
 
-      AframpWidget.mount(document.getElementById("aframp-widget"), {
+      CAddressWidget.mount(document.getElementById("caddress-widget"), {
         // This example is served by the app itself, so its own origin is
         // both the widget origin and the host origin — a real third-party
         // dApp would set widgetOrigin to this app's deployed URL instead.
