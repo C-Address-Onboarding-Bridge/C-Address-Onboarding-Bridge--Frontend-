@@ -46,7 +46,10 @@ function collect(dir: string, acc: SourceFile[] = []): SourceFile[] {
       if (entry.name === "__tests__") continue;
       collect(full, acc);
     } else if (/\.(ts|tsx)$/.test(entry.name)) {
-      acc.push({ path: path.relative(repoRoot, full), contents: readFileSync(full, "utf8") });
+      // POSIX separators on every OS, so path checks like
+      // endsWith("src/lib/stellar.ts") also hold on Windows.
+      const relative = path.relative(repoRoot, full).split(path.sep).join("/");
+      acc.push({ path: relative, contents: readFileSync(full, "utf8") });
     }
   }
   return acc;
@@ -81,7 +84,7 @@ describe("audit scope", () => {
 });
 
 describe("injection sinks", () => {
-  it.skip("uses no dangerouslySetInnerHTML", () => {
+  it("uses no dangerouslySetInnerHTML", () => {
     expect(findMatches(/dangerouslySetInnerHTML/)).toEqual([]);
   });
 

@@ -5,8 +5,8 @@ The onboarding layer for Soroban dApps. Fund any Soroban smart account (C-addres
 ## Features
 
 - **G → C Bridge** *(not yet live — see #284)* — Will send XLM or USDC from a Stellar G-address to a Soroban C-address; classic Stellar payments can't target contract addresses, so this requires a Soroban smart-contract transfer step that hasn't shipped. The UI currently blocks this flow with an explanatory message instead of submitting a doomed transaction.
-- **Fiat Onramp** — Buy USDC with a credit/debit card via Moonpay or Transak and send directly to a C-address.
-- **CEX Withdrawal Routing** — Withdraw from Binance, Coinbase, or Kraken to a bridge address that routes funds to your C-address.
+- **Fiat Onramp** *(not yet live — see #733)* — Buy USDC with a credit/debit card via Moonpay or Transak. Providers cannot pay contract addresses directly, so funds cannot be sent straight to a C-address today; the onramp must first deliver to a G-address and then be bridged to the C-address once the G → C bridge ships.
+- **CEX Withdrawal Routing** *(coming soon — see #734)* — Withdraw from Binance, Coinbase, or Kraken. The CEX deposit section is not yet implemented, so it does not currently withdraw to a bridge address that routes funds to your C-address.
 
 ## Tech Stack
 
@@ -38,30 +38,24 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, workflow, and tes
    cp .env.example .env.local
    ```
 
-   All environment variables the app reads are documented in [`.env.example`](.env.example). The table below summarises them:
+   Required env vars (see `.env.example` for all options):
 
-   | Variable | Required | Default | Description |
-   |---|---|---|---|
-   | `NEXT_PUBLIC_STELLAR_NETWORK` | Yes | `TESTNET` | `TESTNET` or `PUBLIC` |
-   | `NEXT_PUBLIC_BRIDGE_CONTRACT_ID` | No | _(empty)_ | Soroban bridge contract (omits direct payment) |
-   | `NEXT_PUBLIC_SOROBAN_RPC_URL_TESTNET` | No | `https://soroban-testnet.stellar.org` | Soroban RPC endpoint for testnet |
-   | `NEXT_PUBLIC_SOROBAN_RPC_URL_PUBLIC` | For mainnet Soroban calls | _(empty)_ | SDF does not operate a free public mainnet Soroban RPC — set this to your own provider's URL. Soroban RPC calls on `PUBLIC` fail with a clear configuration error until this is set |
-   | `NEXT_PUBLIC_API_URL` | No | `http://localhost:3000/api` | Base URL of the backend API |
-   | `NEXT_PUBLIC_TRANSACTION_STATUS_URL` | No | _(empty)_ | Endpoint used to look up transaction status |
-   | `NEXT_PUBLIC_MOONPAY_API_KEY` | For onramp | _(empty)_ | From [Moonpay dashboard](https://buy.moonpay.com) |
-   | `NEXT_PUBLIC_TRANSAK_API_KEY` | For onramp | _(empty)_ | From [Transak dashboard](https://global.transak.com) |
-   | `MOONPAY_QUOTE_API_URL` | No | `https://api.moonpay.com` | Server-side Moonpay quote API endpoint |
-   | `TRANSAK_QUOTE_API_URL` | No | `https://api.transak.com` | Server-side Transak quote API endpoint |
-   | `INDEXER_EVENTS_URL` | No | _(empty)_ | Indexer events endpoint used to read bridge activity |
-   | `NEXT_PUBLIC_FEATURE_FLAGS` | No | _(empty)_ | Comma-separated list of enabled feature flags |
-   | `NEXT_PUBLIC_FLAG_PANEL_TOKEN` | No | _(empty)_ | Token for the internal feature-flag panel; empty disables it |
-   | `NEXT_PUBLIC_ENABLE_SW` | No | `false` | Enable the service worker |
-   | `NEXT_PUBLIC_INITIAL_JS_BUDGET_KB` | No | `300` | Initial client-side JS budget in kilobytes |
-   | `ENFORCE_BUDGET` | No | `false` | Enforce the JS budget during the build |
-   | `ANALYZE` | No | `false` | Enable the Next.js bundle analyzer |
+   | Variable | Required | Description |
+   |---|---|---|
+   | `NEXT_PUBLIC_STELLAR_NETWORK` | Yes | `TESTNET` or `PUBLIC` |
+   | `NEXT_PUBLIC_API_URL` | Yes in production | Base URL of the C-Address Bridge backend. Also the target the server-side proxy routes (below) forward to. A production build fails immediately with a clear error if this is unset (#675); falls back to a placeholder in dev/test |
+   | `BACKEND_API_KEY` | For backend calls beyond `/health` | The backend's `X-API-Key`, attached server-side only by the proxy routes under `src/app/api/backend/` (#674) — **never** put this in a `NEXT_PUBLIC_*` var, which would publish it to every visitor's browser. A request to a proxy route returns `500` if this is unset |
+   | `NEXT_PUBLIC_BRIDGE_CONTRACT_ID` | No | Soroban bridge contract (omits direct payment) |
+   | `NEXT_PUBLIC_SOROBAN_RPC_URL_TESTNET` | No | Soroban RPC endpoint for testnet. Defaults to the official SDF endpoint `https://soroban-testnet.stellar.org` |
+   | `NEXT_PUBLIC_SOROBAN_RPC_URL_PUBLIC` | For mainnet Soroban calls | SDF does not operate a free public mainnet Soroban RPC — set this to your own provider's URL. Soroban RPC calls on `PUBLIC` fail with a clear configuration error until this is set |
+   | `NEXT_PUBLIC_MOONPAY_API_KEY` | For onramp | From [Moonpay dashboard](https://buy.moonpay.com) |
+   | `NEXT_PUBLIC_TRANSAK_API_KEY` | For onramp | From [Transak dashboard](https://global.transak.com) |
 
    > **Note — Horizon and Soroban RPC endpoints:**
    > Horizon URLs are **hardcoded constants** in `src/lib/types.ts` (`HORIZON_URL`) and are not configurable via environment variables. They always resolve to `https://horizon.stellar.org` (PUBLIC) or `https://horizon-testnet.stellar.org` (TESTNET). Soroban RPC URLs for TESTNET also default to the SDF endpoint (`https://soroban-testnet.stellar.org`) but can be overridden via the env vars above. Soroban RPC for PUBLIC is empty by default — you must provide your own provider URL. See [Sequence Number Caching](docs/sequence-numbers.md) for details on how network requests are managed.
+
+   > **Note — backend proxy (#674):**
+   > The browser never talks to the backend directly except for the unauthenticated `/health` check. Every other backend call (locks, batch funding, referrals, transaction export) goes through a same-origin route under `src/app/api/backend/`, which attaches `BACKEND_API_KEY` server-side and applies a per-IP rate limit (`src/lib/rateLimit.ts`, in-memory — resets per server instance, not shared across a multi-instance deployment). `src/lib/api.ts` calls these proxy routes by relative path; it never sends the key itself. Fee-tier data (below) is a separate case — it's read directly from the contract via Soroban RPC, not from this backend at all.
 
 3. Run:
 
@@ -158,8 +152,5 @@ MIT
 
 ## Handsoff notes
 
-<!-- handsoff-issue-704 -->
-- #704: security: onramp builds unsigned MoonPay URLs in the browser, pointed at a C-address
-
-<!-- handsoff-issue-705 -->
-- #705: feat: add .env.example documenting every environment variable the app reads
+<!-- handsoff-issue-735 -->
+- #735: i18n: translate the onramp page
