@@ -18,6 +18,7 @@ import {
   type StellarNetwork,
   type WalletNetworkState,
   type BridgeTransactionData,
+  isSupportedNetwork,
 } from "./types";
 import { withSequenceRetry } from "./sequenceManager";
 import { getNetwork as getFreighterNetwork } from "@stellar/freighter-api";
@@ -361,8 +362,9 @@ export async function getWalletNetwork(): Promise<WalletNetworkInfo> {
       return { status: "UNKNOWN", name: null };
     }
     const name = String(result.network ?? "").toUpperCase();
-    if (name === "PUBLIC" || name === "TESTNET") {
-      return { status: name, name };
+    const reported = name as WalletNetworkState;
+    if (isSupportedNetwork(reported)) {
+      return { status: reported, name };
     }
     return { status: "UNSUPPORTED", name: name || null };
   } catch {
@@ -781,6 +783,14 @@ async function buildSignAndSubmit(
     },
     server,
     network
+  );
+}
+
+/** The abort raised when the wallet isn't on the network a transaction was built for. */
+function networkChangedError(expected: StellarNetwork, actual: string): Error {
+  return new Error(
+    `Network changed in Freighter — please retry. ` +
+      `Transaction was built for ${expected} but Freighter is now on ${actual}.`
   );
 }
 
