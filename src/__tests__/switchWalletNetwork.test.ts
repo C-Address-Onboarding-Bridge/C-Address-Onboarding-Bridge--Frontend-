@@ -40,7 +40,7 @@ describe("switchWalletNetwork (#480)", () => {
     await expect(switchWalletNetwork("TESTNET")).resolves.toBe("manual");
   });
 
-  it.skip("requests the change through the wallet and confirms once it lands on the target", async () => {
+  it("requests the change through the wallet and confirms once it lands on the target", async () => {
     const setNetwork = vi.fn().mockResolvedValue(undefined);
     injectFreighter(setNetwork);
     getNetwork.mockResolvedValue({ network: "TESTNET", networkPassphrase: "" } as never);
@@ -54,7 +54,7 @@ describe("switchWalletNetwork (#480)", () => {
     );
   });
 
-  it.skip("passes the mainnet passphrase, name, and URL for a PUBLIC switch", async () => {
+  it("passes the mainnet passphrase, name, and URL for a PUBLIC switch", async () => {
     const setNetwork = vi.fn().mockResolvedValue(undefined);
     injectFreighter(setNetwork);
     getNetwork.mockResolvedValue({ network: "PUBLIC", networkPassphrase: "" } as never);

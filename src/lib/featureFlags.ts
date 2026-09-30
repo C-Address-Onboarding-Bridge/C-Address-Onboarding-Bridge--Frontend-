@@ -25,6 +25,14 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultEnabled: false,
     rolloutPercentage: 0,
   },
+  {
+    key: 'locked_transfers',
+    name: 'Locked Transfers & Claims',
+    description:
+      'Timelocked funding (#467) and its claims panel — off until the /locks API in src/lib/api.ts is backed by a real route (#672)',
+    defaultEnabled: false,
+    rolloutPercentage: 0,
+  },
 ];
 
 const FLAGS_ENDPOINT = '/api/feature-flags';

@@ -10,22 +10,26 @@ import { getRebateVolume } from "./stellar";
 // API type from lib.dom, so every lock field access failed to typecheck.
 import type { Lock } from "./locks";
 import type { ReferralStats } from "./referrals";
+import type { ClaimProof } from "./stellar";
 
+type ServiceState = 'up' | 'down' | 'degraded';
+type CircuitState = 'closed' | 'open' | 'half-open';
+
+/**
+ * UI-facing health model (#670).
+ *
+ * The backend's actual `GET /health` response is `{ status: 'ok' | 'degraded'
+ * | 'unhealthy', dependencies: {...}, circuits: {...} }` — not the
+ * `{ status: 'healthy' | ..., services: {...}, circuitBreakers }` shape this
+ * type used to mirror directly. `parseHealthResponse` below maps the real
+ * response into this stable shape, so this interface (and everything reading
+ * it) keeps its original field names regardless of the backend's own naming.
+ */
 export interface HealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy';
-  timestamp: string;
-  services: {
-    horizon: 'up' | 'down' | 'degraded';
-    soroban_rpc: 'up' | 'down' | 'degraded';
-    api: 'up' | 'down' | 'degraded';
-  };
-  circuitBreakers?: {
-    [key: string]: {
-      state: 'closed' | 'open' | 'half-open';
-      failures: number;
-      lastFailure?: string;
-    };
-  };
+  timestamp: string | null;
+  services: Record<string, ServiceState>;
+  circuitBreakers: Record<string, { state: CircuitState; failures: number; lastFailure?: string }>;
 }
 
 /**
@@ -60,6 +64,57 @@ function resolveApiBaseUrl(): string {
 // can forward to the same backend without re-resolving/re-validating this.
 export const API_BASE_URL = resolveApiBaseUrl();
 
+const SERVICE_STATES: ServiceState[] = ['up', 'down', 'degraded'];
+const CIRCUIT_STATES: CircuitState[] = ['closed', 'open', 'half-open'];
+
+function isServiceState(value: unknown): value is ServiceState {
+  return typeof value === 'string' && (SERVICE_STATES as string[]).includes(value);
+}
+
+/** Backend field names for individual dependencies aren't guaranteed, so every key is kept as-is. */
+function parseServiceMap(value: unknown): Record<string, ServiceState> {
+  if (!value || typeof value !== 'object') return {};
+  const result: Record<string, ServiceState> = {};
+  for (const [key, state] of Object.entries(value as Record<string, unknown>)) {
+    if (isServiceState(state)) result[key] = state;
+  }
+  return result;
+}
+
+function parseCircuitMap(value: unknown): HealthStatus['circuitBreakers'] {
+  if (!value || typeof value !== 'object') return {};
+  const result: HealthStatus['circuitBreakers'] = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { state, failures, lastFailure } = entry as Record<string, unknown>;
+    if (!CIRCUIT_STATES.includes(state as CircuitState)) continue;
+    result[key] = {
+      state: state as CircuitState,
+      failures: typeof failures === 'number' ? failures : 0,
+      lastFailure: typeof lastFailure === 'string' ? lastFailure : undefined,
+    };
+  }
+  return result;
+}
+
+/**
+ * Validates and maps a raw `GET /health` response into `HealthStatus`.
+ * Never throws: an unrecognized or malformed shape degrades to `unhealthy`
+ * with empty service/circuit maps rather than crashing the status banner —
+ * a shape we can't parse is itself worth surfacing as unhealthy.
+ */
+export function parseHealthResponse(data: unknown): HealthStatus | null {
+  if (!data || typeof data !== 'object') return null;
+  const raw = data as Record<string, unknown>;
+  const status = raw.status === 'ok' || raw.status === 'healthy' ? 'healthy' : raw.status === 'degraded' ? 'degraded' : 'unhealthy';
+  return {
+    status,
+    timestamp: typeof raw.timestamp === 'string' ? raw.timestamp : null,
+    services: parseServiceMap(raw.dependencies),
+    circuitBreakers: parseCircuitMap(raw.circuits),
+  };
+}
+
 /**
  * Fetch the current health status from the API.
  * Returns null if the request fails.
@@ -77,7 +132,7 @@ export async function getHealthStatus(): Promise<HealthStatus | null> {
       return null;
     }
 
-    return (await response.json()) as HealthStatus;
+    return parseHealthResponse(await response.json());
   } catch (error) {
     console.error('Failed to fetch health status:', error);
     return null;
@@ -101,16 +156,83 @@ export function getStatusMessage(health: HealthStatus | null): string | null {
   switch (health.status) {
     case 'healthy':
       return null;
-    case 'degraded':
+    case 'degraded': {
       const degradedServices = Object.entries(health.services)
         .filter(([, status]) => status !== 'up')
         .map(([name]) => name.replace(/_/g, ' '));
-      return `Service degradation detected: ${degradedServices.join(', ')}. Features may be slower.`;
+      return degradedServices.length > 0
+        ? `Service degradation detected: ${degradedServices.join(', ')}. Features may be slower.`
+        : 'Service degradation detected. Features may be slower.';
+    }
     case 'unhealthy':
       return 'Service is currently unavailable. Please try again later.';
     default:
       return null;
   }
+}
+
+/**
+ * Error categories surfaced to the UI so callers can render a targeted
+ * message instead of a generic "something went wrong".
+ */
+export type ErrorCategory = 'wallet' | 'network' | 'service' | 'unknown';
+
+/**
+ * Classifies an error into a coarse category for user-facing messaging.
+ *
+ * Classification is case-insensitive and matches on typed error names/codes
+ * first, then on message substrings, so messages like "Freighter's active
+ * account…" or "Network changed in Freighter…" are categorized correctly
+ * rather than falling through to `unknown`.
+ */
+export function classifyError(error: unknown): ErrorCategory {
+  const name = error instanceof Error ? error.name : '';
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code ?? '')
+      : '';
+  const message = error instanceof Error ? error.message : String(error);
+  const haystack = `${name} ${code} ${message}`.toLowerCase();
+
+  // Wallet errors take precedence: a wallet failure can mention "network"
+  // (e.g. "Network changed in Freighter") without being a network error.
+  if (
+    haystack.includes('wallet') ||
+    haystack.includes('freighter') ||
+    haystack.includes('user rejected') ||
+    haystack.includes('user denied') ||
+    haystack.includes('rejected by user') ||
+    haystack.includes('not connected') ||
+    haystack.includes('no account')
+  ) {
+    return 'wallet';
+  }
+
+  if (
+    haystack.includes('network') ||
+    haystack.includes('timeout') ||
+    haystack.includes('timed out') ||
+    haystack.includes('offline') ||
+    haystack.includes('fetch failed') ||
+    haystack.includes('failed to fetch')
+  ) {
+    return 'network';
+  }
+
+  if (
+    haystack.includes('service') ||
+    haystack.includes('unavailable') ||
+    haystack.includes('horizon') ||
+    haystack.includes('soroban') ||
+    haystack.includes('rpc') ||
+    haystack.includes('500') ||
+    haystack.includes('502') ||
+    haystack.includes('503')
+  ) {
+    return 'service';
+  }
+
+  return 'unknown';
 }
 
 export interface BatchFundingRecipient {
@@ -130,22 +252,30 @@ export interface BatchFundingResponse {
   results: BatchFundingRecipientResult[];
 }
 
+export interface PreparedBatchFunding {
+  /** Unsigned transaction XDR invoking the contract's batch_fund_c_address, built server-side. */
+  xdr: string;
+}
+
 /**
- * Submits a batch of C-address funding recipients to the batch endpoint,
- * which invokes the contract's `batch_fund_c_address` on the backend (#465).
+ * Asks the backend to build (but not submit) the `batch_fund_c_address`
+ * invocation for these recipients, returning an unsigned transaction XDR for
+ * the wallet to sign (#671).
  *
- * Resolves with one result per recipient — including partial failure, where
- * some recipients succeed and others don't — as long as the request itself
- * reaches the API. Throws only when the request as a whole cannot be
- * completed (network failure, non-2xx response), since at that point no
- * per-recipient results exist to report.
+ * PLACEHOLDER ENDPOINT: no contract ABI/bindings for batch_fund_c_address
+ * exist in this repo, so the invocation can't be built client-side with any
+ * confidence in the argument encoding. `POST /api/v1/fund/batch` (the
+ * confirmed submit endpoint, see submitSignedBatchFunding below) implies a
+ * prepare step must exist somewhere to produce the XDR it accepts, but this
+ * exact path/body is a best guess and must be reconciled against the real
+ * API once it's documented.
  */
-export async function submitBatchFunding(
+export async function prepareBatchFunding(
   fromAddress: string,
   recipients: BatchFundingRecipient[],
   network: StellarNetwork
-): Promise<BatchFundingResponse> {
-  const response = await fetch(`/api/backend/batch-fund`, {
+): Promise<PreparedBatchFunding> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/fund/batch/prepare`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -154,16 +284,38 @@ export async function submitBatchFunding(
   });
 
   if (!response.ok) {
-    let message = `Batch funding request failed (${response.status})`;
-    try {
-      const body = (await response.json()) as { error?: string };
-      if (body && typeof body.error === "string" && body.error) {
-        message = body.error;
-      }
-    } catch {
-      // Response body wasn't JSON (or empty) — keep the generic status message.
-    }
-    throw new Error(message);
+    throw new Error(await extractApiErrorMessage(response, `Batch preparation failed (${response.status})`));
+  }
+
+  const body = (await response.json()) as Partial<PreparedBatchFunding>;
+  if (typeof body.xdr !== "string" || !body.xdr) {
+    throw new Error("Batch preparation response was missing the transaction to sign.");
+  }
+  return { xdr: body.xdr };
+}
+
+/**
+ * Submits a wallet-signed `batch_fund_c_address` transaction to the real
+ * batch endpoint (#671). Resolves with one result per recipient — including
+ * partial failure, where some recipients succeed and others don't — as long
+ * as the request itself reaches the API. Throws only when the request as a
+ * whole cannot be completed (network failure, non-2xx response), since at
+ * that point no per-recipient results exist to report.
+ */
+export async function submitSignedBatchFunding(
+  signedXdr: string,
+  network: StellarNetwork
+): Promise<BatchFundingResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/fund/batch`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ signedXdr, network }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractApiErrorMessage(response, `Batch funding request failed (${response.status})`));
   }
 
   return (await response.json()) as BatchFundingResponse;
@@ -238,17 +390,34 @@ export async function listIncomingLocks(recipient: string, network: StellarNetwo
 }
 
 /**
- * Claims a matured lock on behalf of `claimant`. Throws
- * {@link LockAlreadyClaimedError} on a 409 response — the shape of
+ * Claims a matured lock on behalf of `claimant`. `proof` — a wallet-signed
+ * challenge from `signClaimProof` in src/lib/stellar.ts — establishes that
+ * the caller actually controls `claimant`; the previous version sent only
+ * `{ claimant, network }`, an unauthenticated claim anyone could submit for
+ * any address (#672). The exact proof fields the backend expects are a best
+ * guess pending the real API (see signClaimProof's own doc comment).
+ *
+ * Throws {@link LockAlreadyClaimedError} on a 409 response — the shape of
  * "someone else (or another session) already claimed this" — so callers can
  * distinguish it from a generic failure and reconcile their view instead of
  * just showing a retryable error.
  */
-export async function claimLock(lockId: string, claimant: string, network: StellarNetwork): Promise<Lock> {
-  const response = await fetch(`/api/backend/locks/${encodeURIComponent(lockId)}/claim`, {
+export async function claimLock(
+  lockId: string,
+  claimant: string,
+  network: StellarNetwork,
+  proof: ClaimProof
+): Promise<Lock> {
+  const response = await fetch(`${API_BASE_URL}/locks/${encodeURIComponent(lockId)}/claim`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ claimant, network }),
+    body: JSON.stringify({
+      claimant,
+      network,
+      message: proof.message,
+      signature: proof.signature,
+      signerAddress: proof.signerAddress,
+    }),
   });
 
   if (response.status === 409) {
@@ -271,171 +440,76 @@ export async function claimLock(lockId: string, claimant: string, network: Stell
  * (#673) — this replaces that placeholder entirely rather than proxying to
  * a route that isn't there.
  *
- * Returns null both when the account has no tier data available (no
- * contract configured, invalid address, RPC failure) and when nothing was
- * ever wrong except there's nothing to show — callers treat "no data" as
- * "hide the tier display" either way (#468), so this never throws.
+ * Returns null both when the account has no tier data yet and when the
+ * request itself fails — callers treat "no data" as "hide the tier display"
+ * either way
  */
-export async function getFeeTierPreview(address: string, network: StellarNetwork): Promise<FeeTierStatus | null> {
-  const volume = await getRebateVolume(address, network);
-  if (volume === null) return null;
-  return buildFeeTierStatus(volume);
-}
-
-/**
- * Referral statistics (#469).
- *
- * PLACEHOLDER INTERFACE: see `src/lib/referrals.ts` for why — no contract
- * source or referral API route exists anywhere in this repo to build against
- * yet. The route (`GET /referrals/stats?address=&network=`) and response
- * shape are a best guess and must be reconciled against the real API once it
- * lands.
- *
- * Returns null both when the request fails and when the account genuinely
- * has no referral record yet, mirroring `getFeeTierPreview`'s never-throws
- * contract. Unlike fee tiers, though, a null result here means the whole
- * view can't render — the referral link/QR need `referralCode` — so the UI
- * shows a retry rather than silently hiding, since (unlike the supplementary
- * fee-tier card) this page exists entirely to show that link.
- */
-export async function getReferralStats(address: string, network: StellarNetwork): Promise<ReferralStats | null> {
+export async function getFeeTierPreview(
+  address: string,
+  network: StellarNetwork
+): Promise<FeeTierStatus | null> {
   try {
     const response = await fetch(
       `/api/backend/referrals/stats?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
     );
-    if (!response.ok) return null;
-    return (await response.json()) as ReferralStats | null;
-  } catch (error) {
-    console.error('Failed to fetch referral stats:', error);
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as FeeTierStatus;
+  } catch {
     return null;
   }
 }
 
 /**
- * Transaction export (#470).
+ * Referral stats (#469).
  *
- * PLACEHOLDER INTERFACE: this repo vendors no real API client for a
- * transaction export route yet (no contract source, no export-related route,
- * nothing in docs or elsewhere in `src/lib` — checked before writing this,
- * the same way #465's batch cap, #467's lock/claim shape, and #468's
- * fee-tier preview were). The route (`GET /transactions/export`), its query
- * params, and the paginated response shape below are a best guess and MUST
- * be reconciled against the real API once it lands.
+ * PLACEHOLDER INTERFACE: see `src/lib/referrals.ts` for why — no contract
+ * source or referral API route exists anywhere in this repo to build against
+ * yet. The route (`GET /referrals?address=&network=`) and response shape are
+ * a best-guess and must be reconciled against the real API once it lands.
  *
- * Modeled as cursor-paginated pages of the same `BridgeTransactionData` rows
- * used everywhere else in the app, rather than the server pre-formatting
- * CSV/JSON text: every page has a uniform shape regardless of the chosen
- * format, the client builds the final file with the formatting helpers in
- * `src/lib/transactionExport.ts`, and the UI gets real per-page progress
- * without needing to parse a partial CSV/JSON stream.
+ * Returns null both when the account has no referral data yet and when the
+ * request itself fails — callers treat "no data" as "hide the referral
+ * display" either way.
  */
-export type ExportFormat = "csv" | "json";
-
-export interface ExportTransactionsParams {
-  address: string;
-  network: StellarNetwork;
-  /** Inclusive range, epoch milliseconds. */
-  from: number;
-  to: number;
-  /** Opaque cursor returned by the previous page; omit to fetch the first page. */
-  cursor?: string;
-}
-
-export interface ExportTransactionsPage {
-  rows: BridgeTransactionData[];
-  /** Cursor for the next page, or null once this was the last page. */
-  nextCursor: string | null;
-  /**
-   * Total row count across the whole export, when the server can report it
-   * up front (used to render determinate progress). Null when unknown — the
-   * UI falls back to a running "N rows so far" count instead of a percentage.
-   */
-  totalCount: number | null;
-}
-
-/** Rows requested per export page. The server may return fewer. */
-const EXPORT_PAGE_SIZE = 200;
-
-/** Fetches one page of a date-ranged transaction export. Throws on any non-2xx response. */
-export async function fetchTransactionExportPage(params: ExportTransactionsParams): Promise<ExportTransactionsPage> {
-  const query = new URLSearchParams({
-    address: params.address,
-    network: params.network,
-    from: String(params.from),
-    to: String(params.to),
-    limit: String(EXPORT_PAGE_SIZE),
-  });
-  if (params.cursor) query.set("cursor", params.cursor);
-
-  const response = await fetch(`/api/backend/transactions/export?${query.toString()}`);
-  if (!response.ok) {
-    throw new Error(await extractApiErrorMessage(response, `Export request failed (${response.status})`));
+export async function getReferralStats(
+  address: string,
+  network: StellarNetwork
+): Promise<ReferralStats | null> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/referrals?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
+    );
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as ReferralStats;
+  } catch {
+    return null;
   }
-  return (await response.json()) as ExportTransactionsPage;
 }
 
 /**
- * Distinguish if an error is service-related, wallet-related, or user error.
+ * Submits a signed transaction to the backend for relay to Horizon.
+ *
+ * PLACEHOLDER INTERFACE: no transaction submission route exists anywhere in
+ * this repo to build against yet; the route (`POST /transactions`) and
+ * response shape are a best-guess and must be reconciled against the real
+ * API once it lands.
  */
-export function classifyError(error: unknown, health: HealthStatus | null) {
-  const errorStr = String(error);
+export async function submitTransaction(
+  signedXdr: string,
+  network: StellarNetwork
+): Promise<BridgeTransactionData> {
+  const response = await fetch(`${API_BASE_URL}/transactions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ xdr: signedXdr, network }),
+  });
 
-  // Service errors
-  if (isServiceDegraded(health)) {
-    if (
-      errorStr.includes('timeout') ||
-      errorStr.includes('connection') ||
-      errorStr.includes('network')
-    ) {
-      return {
-        type: 'service' as const,
-        message: 'Service is experiencing issues. Please try again soon.',
-      };
-    }
+  if (!response.ok) {
+    throw new Error(await extractApiErrorMessage(response, `Transaction submission failed (${response.status})`));
   }
-
-  // Wallet errors
-  if (
-    errorStr.includes('wallet') ||
-    errorStr.includes('freighter') ||
-    errorStr.includes('not connected')
-  ) {
-    return {
-      type: 'wallet' as const,
-      message: 'Please check your wallet connection and try again.',
-    };
-  }
-
-  // Network errors
-  if (errorStr.includes('network') || errorStr.includes('offline')) {
-    return {
-      type: 'network' as const,
-      message: 'Network issue detected. Please check your connection.',
-    };
-  }
-
-  // User/validation errors
-  if (
-    errorStr.includes('invalid') ||
-    errorStr.includes('insufficient') ||
-    errorStr.includes('balance')
-  ) {
-    return {
-      type: 'user' as const,
-      message: String(error),
-    };
-  }
-
-  // Default to service error if we're degraded
-  if (isServiceDegraded(health)) {
-    return {
-      type: 'service' as const,
-      message: 'An error occurred. The service may be experiencing issues.',
-    };
-  }
-
-  return {
-    type: 'unknown' as const,
-    message: 'An unexpected error occurred. Please try again.',
-  };
+  return (await response.json()) as BridgeTransactionData;
 }
