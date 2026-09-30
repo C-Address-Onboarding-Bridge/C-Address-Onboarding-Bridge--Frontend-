@@ -12,6 +12,40 @@ const POLL_INTERVAL_MS = 3_000;
 /** Hard cap for a single SSE connection before it closes. */
 const MAX_DURATION_MS = 30_000;
 
+/** Per-IP rate limit for this public route (#697). */
+const RATE_LIMIT_MAX = 30;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+}
+
+const rateLimitStore = new Map<string, RateLimitEntry>();
+
+function getClientIp(request: Request): string {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const first = forwarded.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  return request.headers.get("x-real-ip") ?? "unknown";
+}
+
+function checkRateLimit(ip: string): { limited: boolean; retryAfter: number } {
+  const now = Date.now();
+  const entry = rateLimitStore.get(ip);
+  if (!entry || entry.resetAt <= now) {
+    rateLimitStore.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return { limited: false, retryAfter: 0 };
+  }
+  if (entry.count >= RATE_LIMIT_MAX) {
+    return { limited: true, retryAfter: Math.ceil((entry.resetAt - now) / 1000) };
+  }
+  entry.count += 1;
+  return { limited: false, retryAfter: 0 };
+}
+
 interface StatusResponse {
   hash: string;
   network: StellarNetwork;
@@ -52,6 +86,17 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ hash: string }> }
 ) {
+  const { limited, retryAfter } = checkRateLimit(getClientIp(request));
+  if (limited) {
+    return new Response(JSON.stringify({ error: "Too Many Requests" }), {
+      status: 429,
+      headers: {
+        "Content-Type": "application/json",
+        "Retry-After": String(retryAfter),
+      },
+    });
+  }
+
   const { hash } = await context.params;
   const url = new URL(request.url);
   const network: StellarNetwork =

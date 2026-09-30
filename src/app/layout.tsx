@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Geist, JetBrains_Mono } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
@@ -65,6 +66,11 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // Read the per-request CSP nonce set by the middleware (#698). The enforcing
+  // Content-Security-Policy uses `script-src 'self' 'nonce-…'`, so every inline
+  // script must carry the matching nonce or the browser blocks it.
+  const nonce = headers().get("x-nonce") ?? undefined;
+
   const structuredData = {
     "@context": "https://schema.org",
     "@type": "WebApplication",
