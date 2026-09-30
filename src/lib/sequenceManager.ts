@@ -37,7 +37,12 @@ function cacheKey(accountId: string, network: StellarNetwork): string {
 /**
  * Returns the next sequence number for the given account address on the given
  * network. Fetches from network if cache is missing or expired.
- * Increments the cached value for subsequent calls within TTL.
+ *
+ * The cached value is *not* advanced here. It is only advanced once the
+ * transaction that consumed this sequence has been successfully submitted
+ * (see `commitSequenceNumber`). This prevents a rejected/cancelled wallet
+ * prompt from burning a sequence number and leaving a gap that causes
+ * tx_bad_seq on the next transaction. (#688)
  *
  * @param accountId - Stellar public key (G... address)
  * @param server - Horizon or SorobanRpc server instance
@@ -53,8 +58,8 @@ export async function getNextSequenceNumber(
   const now = Date.now();
 
   if (entry && now - entry.fetchedAt < CACHE_TTL_MS) {
-    // Increment cached sequence for this transaction
-    entry.sequence += 1n;
+    // Return the cached sequence without advancing it. The caller must call
+    // commitSequenceNumber after a successful submission to advance it.
     return entry.sequence;
   }
 
@@ -63,6 +68,31 @@ export async function getNextSequenceNumber(
   const nextSequence = currentSequence + 1n;
   cache.set(key, { sequence: nextSequence, fetchedAt: now });
   return nextSequence;
+}
+
+/**
+ * Advances the cached sequence number for an account after a transaction that
+ * consumed `sequence` has been successfully submitted.
+ *
+ * If the cache entry is missing or has already moved past `sequence` (e.g. a
+ * concurrent submission advanced it), this is a no-op so we never move the
+ * cached value backwards.
+ *
+ * @param accountId - Stellar public key whose sequence was consumed
+ * @param network - The network the transaction was submitted to
+ * @param sequence - The sequence number that was successfully consumed
+ */
+export function commitSequenceNumber(
+  accountId: string,
+  network: StellarNetwork,
+  sequence: bigint
+): void {
+  const key = cacheKey(accountId, network);
+  const entry = cache.get(key);
+  if (!entry) return;
+  if (entry.sequence <= sequence) {
+    entry.sequence = sequence + 1n;
+  }
 }
 
 /**
@@ -135,6 +165,11 @@ export function isBadSequenceError(error: unknown): boolean {
  * Wraps a transaction submission function with automatic bad_seq recovery.
  * On bad_seq error: invalidates cache for the account and retries once.
  *
+ * The sequence number is only committed to the cache after `fn` resolves
+ * successfully. If `fn` throws (e.g. the user rejects the wallet prompt), the
+ * cached sequence is left untouched so the next attempt reuses it instead of
+ * leaving a gap. (#688)
+ *
  * @param accountId - The account whose sequence to manage
  * @param fn - Async function that builds and submits a transaction.
  *             Receives a getSequence function it should call to get the sequence.
@@ -153,8 +188,18 @@ export async function withSequenceRetry<T>(
 
   while (true) {
     try {
-      const getSequence = () => getNextSequenceNumber(accountId, server, network);
-      return await fn(getSequence);
+      let usedSequence: bigint | undefined;
+      const getSequence = async () => {
+        const sequence = await getNextSequenceNumber(accountId, server, network);
+        usedSequence = sequence;
+        return sequence;
+      };
+      const result = await fn(getSequence);
+      // Only advance the cached sequence after a successful submission.
+      if (usedSequence !== undefined) {
+        commitSequenceNumber(accountId, network, usedSequence);
+      }
+      return result;
     } catch (error) {
       if (isBadSequenceError(error) && attempts < maxRetries) {
         attempts++;

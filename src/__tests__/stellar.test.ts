@@ -136,6 +136,19 @@ describe("isValidStellarAmount", () => {
     expect(isValidStellarAmount("1.2.3")).toBe(false);
     expect(isValidStellarAmount("1.")).toBe(false);
   });
+
+  // Regression: amounts above the int64 stroop maximum (922337203685.4775807)
+  // previously passed the format/positivity checks and only blew up later
+  // inside the Stellar SDK. The upper bound must be enforced here.
+  it("accepts the exact int64 stroop maximum", () => {
+    expect(isValidStellarAmount("922337203685.4775807")).toBe(true);
+  });
+
+  it("rejects amounts above the int64 stroop maximum", () => {
+    expect(isValidStellarAmount("922337203685.4775808")).toBe(false);
+    expect(isValidStellarAmount("922337203686")).toBe(false);
+    expect(isValidStellarAmount("1000000000000")).toBe(false);
+  });
 });
 
 describe("isCAddress", () => {

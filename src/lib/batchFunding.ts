@@ -6,7 +6,7 @@
  * single-recipient bridge flow uses (`@/lib/stellar`) rather than
  * re-deriving checksum or amount-format logic here.
  */
-import { isCAddress, isValidStellarAddress, isValidStellarAmount } from "./stellar";
+import { isCAddress, isValidStellarAddress, isValidStellarAmount, toStroops, fromStroops } from "./stellar";
 import { MAX_BATCH_RECIPIENTS } from "./types";
 
 export { MAX_BATCH_RECIPIENTS };
@@ -192,9 +192,23 @@ export function getInvalidRows(parsed: ParsedBatch): BatchRow[] {
   return parsed.rows.filter((row) => !isRowValid(row));
 }
 
-/** Sum of amounts across valid rows only — invalid rows have no reliable amount. */
+/**
+ * Sum of amounts across valid rows only — invalid rows have no reliable amount.
+ *
+ * Summed in stroops (bigint) so 7-decimal amounts don't accumulate float
+ * rounding error (e.g. 0.1 + 0.2). Returns the total as a number for display;
+ * use `computeBatchTotalStroops` when an exact value is needed for comparison.
+ */
 export function computeBatchTotal(rows: BatchRow[]): number {
-  return rows.reduce((sum, row) => (isRowValid(row) ? sum + parseFloat(row.amount) : sum), 0);
+  return fromStroops(computeBatchTotalStroops(rows));
+}
+
+/** Exact sum of valid row amounts, in stroops (bigint). */
+export function computeBatchTotalStroops(rows: BatchRow[]): bigint {
+  return rows.reduce(
+    (sum, row) => (isRowValid(row) ? sum + toStroops(row.amount) : sum),
+    0n,
+  );
 }
 
 /** True once the batch (valid + invalid rows) exceeds the per-batch recipient cap. */
