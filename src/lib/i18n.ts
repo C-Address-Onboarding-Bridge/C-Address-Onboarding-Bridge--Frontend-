@@ -78,6 +78,32 @@ export interface TranslationSet {
     complete: string;
     skip: string;
   };
+  profile: {
+    title: string;
+    accountOverview: string;
+    walletAddress: string;
+    copyAddress: string;
+    addressCopied: string;
+    copyFailed: string;
+    network: string;
+    balance: string;
+    assets: string;
+    noAssets: string;
+    transactionHistory: string;
+    noTransactions: string;
+    settings: string;
+    language: string;
+    notifications: string;
+    security: string;
+    editProfile: string;
+    saveChanges: string;
+    profileSaved: string;
+    profileSaveFailed: string;
+    loadFailed: string;
+    retry: string;
+    connectedSince: string;
+    unknownNetwork: string;
+  };
   errors: {
     wallet_not_found: string;
     connection_failed: string;
@@ -157,6 +183,32 @@ const translations: Record<Locale, TranslationSet> = {
       complete: 'Get Started',
       skip: 'Skip',
     },
+    profile: {
+      title: 'Profile',
+      accountOverview: 'Account Overview',
+      walletAddress: 'Wallet Address',
+      copyAddress: 'Copy address',
+      addressCopied: 'Address copied to clipboard',
+      copyFailed: 'Could not copy address',
+      network: 'Network',
+      balance: 'Balance',
+      assets: 'Assets',
+      noAssets: 'No assets found',
+      transactionHistory: 'Transaction History',
+      noTransactions: 'No transactions yet',
+      settings: 'Settings',
+      language: 'Language',
+      notifications: 'Notifications',
+      security: 'Security',
+      editProfile: 'Edit Profile',
+      saveChanges: 'Save Changes',
+      profileSaved: 'Profile saved',
+      profileSaveFailed: 'Could not save profile',
+      loadFailed: 'Could not load profile',
+      retry: 'Retry',
+      connectedSince: 'Connected since',
+      unknownNetwork: 'Unknown network',
+    },
     errors: {
       wallet_not_found: 'Please install a Stellar wallet to continue.',
       connection_failed: 'Could not connect to your wallet.',
@@ -233,6 +285,32 @@ const translations: Record<Locale, TranslationSet> = {
       verify_step: 'Completa la verificación de identidad.',
       complete: 'Comenzar',
       skip: 'Omitir',
+    },
+    profile: {
+      title: 'Perfil',
+      accountOverview: 'Resumen de la Cuenta',
+      walletAddress: 'Dirección de la Billetera',
+      copyAddress: 'Copiar dirección',
+      addressCopied: 'Dirección copiada al portapapeles',
+      copyFailed: 'No se pudo copiar la dirección',
+      network: 'Red',
+      balance: 'Saldo',
+      assets: 'Activos',
+      noAssets: 'No se encontraron activos',
+      transactionHistory: 'Historial de Transacciones',
+      noTransactions: 'Aún no hay transacciones',
+      settings: 'Configuración',
+      language: 'Idioma',
+      notifications: 'Notificaciones',
+      security: 'Seguridad',
+      editProfile: 'Editar Perfil',
+      saveChanges: 'Guardar Cambios',
+      profileSaved: 'Perfil guardado',
+      profileSaveFailed: 'No se pudo guardar el perfil',
+      loadFailed: 'No se pudo cargar el perfil',
+      retry: 'Reintentar',
+      connectedSince: 'Conectado desde',
+      unknownNetwork: 'Red desconocida',
     },
     errors: {
       wallet_not_found: 'Instale una billetera Stellar para continuar.',
@@ -311,6 +389,32 @@ const translations: Record<Locale, TranslationSet> = {
       complete: 'Commencer',
       skip: 'Ignorer',
     },
+    profile: {
+      title: 'Profil',
+      accountOverview: 'Aperçu du Compte',
+      walletAddress: 'Adresse du Portefeuille',
+      copyAddress: 'Copier l\'adresse',
+      addressCopied: 'Adresse copiée dans le presse-papiers',
+      copyFailed: 'Impossible de copier l\'adresse',
+      network: 'Réseau',
+      balance: 'Solde',
+      assets: 'Actifs',
+      noAssets: 'Aucun actif trouvé',
+      transactionHistory: 'Historique des Transactions',
+      noTransactions: 'Aucune transaction pour le moment',
+      settings: 'Paramètres',
+      language: 'Langue',
+      notifications: 'Notifications',
+      security: 'Sécurité',
+      editProfile: 'Modifier le Profil',
+      saveChanges: 'Enregistrer les Modifications',
+      profileSaved: 'Profil enregistré',
+      profileSaveFailed: 'Impossible d\'enregistrer le profil',
+      loadFailed: 'Impossible de charger le profil',
+      retry: 'Réessayer',
+      connectedSince: 'Connecté depuis',
+      unknownNetwork: 'Réseau inconnu',
+    },
     errors: {
       wallet_not_found: 'Veuillez installer un portefeuille Stellar pour continuer.',
       connection_failed: 'Impossible de se connecter à votre portefeuille.',
@@ -341,7 +445,7 @@ const translations: Record<Locale, TranslationSet> = {
       title: 'Transferir Ativos',
       source_network: 'Rede de Origem',
       destination_network: 'Rede de Destino',
-      amount: 'Valor',
+      amount: 'Quantia',
       transfer: 'Transferir',
       insufficient_balance: 'Saldo insuficiente',
       subtitle: 'Mova fundos de uma G-address clássica da Stellar para uma C-address Soroban.',
@@ -387,6 +491,32 @@ const translations: Record<Locale, TranslationSet> = {
       verify_step: 'Complete a verificação de identidade.',
       complete: 'Começar',
       skip: 'Pular',
+    },
+    profile: {
+      title: 'Perfil',
+      accountOverview: 'Visão Geral da Conta',
+      walletAddress: 'Endereço da Carteira',
+      copyAddress: 'Copiar endereço',
+      addressCopied: 'Endereço copiado para a área de transferência',
+      copyFailed: 'Não foi possível copiar o endereço',
+      network: 'Rede',
+      balance: 'Saldo',
+      assets: 'Ativos',
+      noAssets: 'Nenhum ativo encontrado',
+      transactionHistory: 'Histórico de Transações',
+      noTransactions: 'Ainda não há transações',
+      settings: 'Configurações',
+      language: 'Idioma',
+      notifications: 'Notificações',
+      security: 'Segurança',
+      editProfile: 'Editar Perfil',
+      saveChanges: 'Salvar Alterações',
+      profileSaved: 'Perfil salvo',
+      profileSaveFailed: 'Não foi possível salvar o perfil',
+      loadFailed: 'Não foi possível carregar o perfil',
+      retry: 'Tentar novamente',
+      connectedSince: 'Conectado desde',
+      unknownNetwork: 'Rede desconhecida',
     },
     errors: {
       wallet_not_found: 'Instale uma carteira Stellar para continuar.',
