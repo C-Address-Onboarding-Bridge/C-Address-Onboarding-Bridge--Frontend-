@@ -10,6 +10,9 @@ export type TelemetryConsent = "pending" | "granted" | "denied";
 export const TELEMETRY_CONSENT_KEY = "telemetry:consent";
 export const TELEMETRY_FIRST_VISIT_KEY = "telemetry:firstVisit";
 export const TELEMETRY_STORAGE_KEY = "telemetry:enabled";
+export const TELEMETRY_EVENTS_KEY = "telemetry:events";
+
+const MAX_BUFFERED_EVENTS = 100;
 
 export interface TelemetryConfig {
   consent: TelemetryConsent;
@@ -22,6 +25,12 @@ export interface TelemetryCollectionInfo {
   purposes: string[];
   retention: string;
   optOut: string;
+}
+
+export interface TelemetryEvent {
+  name: string;
+  properties?: Record<string, unknown>;
+  timestamp: number;
 }
 
 export const TELEMETRY_INFO: TelemetryCollectionInfo = {
@@ -92,6 +101,7 @@ export function setConsentStatus(consent: TelemetryConsent, now: number = Date.n
       enableTelemetry();
     } else if (consent === "denied") {
       disableTelemetry();
+      clearBufferedEvents();
     }
   } catch {
     // Quota or privacy-mode failure
@@ -151,8 +161,67 @@ export function clearTelemetryConsent(): void {
     store.removeItem(TELEMETRY_CONSENT_KEY);
     store.removeItem(TELEMETRY_FIRST_VISIT_KEY);
     store.removeItem(TELEMETRY_STORAGE_KEY);
+    store.removeItem(TELEMETRY_EVENTS_KEY);
   } catch {
     // Ignore
+  }
+}
+
+/**
+ * Read the buffered telemetry events. Returns an empty array when storage is
+ * unavailable or the buffer is corrupt.
+ */
+export function getBufferedEvents(): TelemetryEvent[] {
+  const store = storage();
+  if (!store) return [];
+
+  try {
+    const raw = store.getItem(TELEMETRY_EVENTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as TelemetryEvent[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function clearBufferedEvents(): void {
+  const store = storage();
+  if (!store) return;
+
+  try {
+    store.removeItem(TELEMETRY_EVENTS_KEY);
+  } catch {
+    // Ignore
+  }
+}
+
+/**
+ * Forward an event to the configured sink. The sink is resolved from
+ * `window.__telemetry` when present, otherwise events are buffered locally so
+ * that consent-granted telemetry is actually collected.
+ */
+function forwardEvent(event: TelemetryEvent): void {
+  if (typeof window !== "undefined") {
+    const telemetry = (window as unknown as Record<string, unknown>).__telemetry as
+      | { captureEvent?: (name: string, props?: Record<string, unknown>) => void }
+      | undefined;
+    if (telemetry && typeof telemetry.captureEvent === "function") {
+      telemetry.captureEvent(event.name, event.properties);
+      return;
+    }
+  }
+
+  const store = storage();
+  if (!store) return;
+
+  try {
+    const events = getBufferedEvents();
+    events.push(event);
+    const trimmed = events.slice(-MAX_BUFFERED_EVENTS);
+    store.setItem(TELEMETRY_EVENTS_KEY, JSON.stringify(trimmed));
+  } catch {
+    // Quota or privacy-mode failure
   }
 }
 
@@ -160,19 +229,17 @@ export function captureEvent(
   eventName: string,
   properties?: Record<string, unknown>
 ): void {
-  if (!isTelemetryEnabled()) {
+  // Consent-gated: only collect when the user has explicitly granted consent.
+  if (getConsentStatus() !== "granted" || !isTelemetryEnabled()) {
     return;
   }
 
   try {
-    // In production, this would send to the telemetry endpoint
-    // defined in the API configuration
-    if (typeof window !== "undefined" && (window as unknown as Record<string, unknown>).__telemetry) {
-      const telemetry = (window as unknown as Record<string, unknown>).__telemetry as {
-        captureEvent?: (name: string, props?: Record<string, unknown>) => void;
-      };
-      telemetry.captureEvent?.(eventName, properties);
-    }
+    forwardEvent({
+      name: eventName,
+      properties,
+      timestamp: Date.now(),
+    });
   } catch (error) {
     console.debug("Failed to capture event:", error);
   }

@@ -14,6 +14,29 @@ vi.mock("@stellar/freighter-api", () => ({
   getNetwork: vi.fn(),
 }));
 
+// StellarWalletsKit mock — provides address lookup, network reporting, and
+// XDR passthrough signing so buildAndSubmitPayment can complete without a
+// real wallet extension.
+const kitGetAddress = vi.fn();
+const kitGetNetwork = vi.fn();
+const kitSignTransaction = vi.fn();
+
+vi.mock("@creit.tech/stellar-wallets-kit/sdk", () => ({
+  StellarWalletsKit: {
+    init: vi.fn(),
+    getAddress: kitGetAddress,
+    getNetwork: kitGetNetwork,
+    signTransaction: kitSignTransaction,
+    get selectedModule() { return {}; },
+  },
+}));
+
+vi.mock("@creit.tech/stellar-wallets-kit/modules/freighter", () => ({ FreighterModule: class {} }));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/xbull", () => ({ xBullModule: class {} }));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/lobstr", () => ({ LobstrModule: class {} }));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/albedo", () => ({ AlbedoModule: class {} }));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/rabet", () => ({ RabetModule: class {} }));
+
 /**
  * Sequence numbers keyed by the Horizon URL the server was constructed with —
  * i.e. by network. The same G-address holds completely unrelated sequences on
@@ -75,6 +98,15 @@ describe("Sequence number consumption end-to-end", () => {
     submitted.length = 0;
     vi.useFakeTimers();
 
+    // Kit: getAddress returns the source address (assertActiveAccountMatches).
+    kitGetAddress.mockResolvedValue({ address: G_SOURCE });
+    // Kit: getNetwork returns the network the transaction was built for, so
+    // the pre-sign network guard never trips in these integration tests.
+    kitGetNetwork.mockImplementation(async () => ({ network: "TESTNET" }));
+    // Kit: signTransaction echoes the XDR so TransactionBuilder.fromXDR can
+    // reconstruct the real transaction for submission.
+    kitSignTransaction.mockImplementation(async (xdr: string) => ({ signedTxXdr: xdr }));
+
     vi.mocked(freighter.signTransaction).mockImplementation(async (xdr: string) => ({
       signedTxXdr: xdr,
       signerAddress: G_SOURCE,
@@ -91,7 +123,7 @@ describe("Sequence number consumption end-to-end", () => {
 
   // A transaction's sequence is the account's *next* sequence, so an on-chain
   // sequence of 100 produces a transaction numbered 101.
-  it.skip("increments sequence number strictly by 1 across consecutive payment calls", async () => {
+  it("increments sequence number strictly by 1 across consecutive payment calls", async () => {
     const res1 = await buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "XLM", "TESTNET");
     expect(res1.successful).toBe(true);
     expect(submitted[0].sequence).toBe("101");
@@ -102,7 +134,7 @@ describe("Sequence number consumption end-to-end", () => {
     expect(submitted[1].sequence).toBe("102");
   });
 
-  it.skip("handles cache expiration and fetches fresh sequence without collision", async () => {
+  it("handles cache expiration and fetches fresh sequence without collision", async () => {
     await buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "XLM", "TESTNET");
     expect(submitted[0].sequence).toBe("101");
 
@@ -120,7 +152,7 @@ describe("Sequence number consumption end-to-end", () => {
   // #290: switching Freighter's network inside the 30s TTL used to build the
   // second transaction from the *other* chain's cached sequence — a
   // near-guaranteed tx_bad_seq that only reproduced intermittently.
-  it.skip("does not carry a testnet sequence into a mainnet transaction", async () => {
+  it("does not carry a testnet sequence into a mainnet transaction", async () => {
     await buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "XLM", "TESTNET");
     expect(submitted[0]).toEqual({ network: "TESTNET", sequence: "101" });
 

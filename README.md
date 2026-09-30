@@ -5,8 +5,8 @@ The onboarding layer for Soroban dApps. Fund any Soroban smart account (C-addres
 ## Features
 
 - **G → C Bridge** *(not yet live — see #284)* — Will send XLM or USDC from a Stellar G-address to a Soroban C-address; classic Stellar payments can't target contract addresses, so this requires a Soroban smart-contract transfer step that hasn't shipped. The UI currently blocks this flow with an explanatory message instead of submitting a doomed transaction.
-- **Fiat Onramp** — Buy USDC with a credit/debit card via Moonpay or Transak and send directly to a C-address.
-- **CEX Withdrawal Routing** — Withdraw from Binance, Coinbase, or Kraken to a bridge address that routes funds to your C-address.
+- **Fiat Onramp** *(not yet live — see #733)* — Buy USDC with a credit/debit card via Moonpay or Transak. Providers cannot pay contract addresses directly, so funds cannot be sent straight to a C-address today; the onramp must first deliver to a G-address and then be bridged to the C-address once the G → C bridge ships.
+- **CEX Withdrawal Routing** *(coming soon — see #734)* — Withdraw from Binance, Coinbase, or Kraken. The CEX deposit section is not yet implemented, so it does not currently withdraw to a bridge address that routes funds to your C-address.
 
 ## Tech Stack
 
@@ -43,6 +43,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, workflow, and tes
    | Variable | Required | Description |
    |---|---|---|
    | `NEXT_PUBLIC_STELLAR_NETWORK` | Yes | `TESTNET` or `PUBLIC` |
+   | `NEXT_PUBLIC_API_URL` | Yes in production | Base URL of the C-Address Bridge backend. Also the target the server-side proxy routes (below) forward to. A production build fails immediately with a clear error if this is unset (#675); falls back to a placeholder in dev/test |
+   | `BACKEND_API_KEY` | For backend calls beyond `/health` | The backend's `X-API-Key`, attached server-side only by the proxy routes under `src/app/api/backend/` (#674) — **never** put this in a `NEXT_PUBLIC_*` var, which would publish it to every visitor's browser. A request to a proxy route returns `500` if this is unset |
    | `NEXT_PUBLIC_BRIDGE_CONTRACT_ID` | No | Soroban bridge contract (omits direct payment) |
    | `NEXT_PUBLIC_SOROBAN_RPC_URL_TESTNET` | No | Soroban RPC endpoint for testnet. Defaults to the official SDF endpoint `https://soroban-testnet.stellar.org` |
    | `NEXT_PUBLIC_SOROBAN_RPC_URL_PUBLIC` | For mainnet Soroban calls | SDF does not operate a free public mainnet Soroban RPC — set this to your own provider's URL. Soroban RPC calls on `PUBLIC` fail with a clear configuration error until this is set |
@@ -51,6 +53,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, workflow, and tes
 
    > **Note — Horizon and Soroban RPC endpoints:**
    > Horizon URLs are **hardcoded constants** in `src/lib/types.ts` (`HORIZON_URL`) and are not configurable via environment variables. They always resolve to `https://horizon.stellar.org` (PUBLIC) or `https://horizon-testnet.stellar.org` (TESTNET). Soroban RPC URLs for TESTNET also default to the SDF endpoint (`https://soroban-testnet.stellar.org`) but can be overridden via the env vars above. Soroban RPC for PUBLIC is empty by default — you must provide your own provider URL. See [Sequence Number Caching](docs/sequence-numbers.md) for details on how network requests are managed.
+
+   > **Note — backend proxy (#674):**
+   > The browser never talks to the backend directly except for the unauthenticated `/health` check. Every other backend call (locks, batch funding, referrals, transaction export) goes through a same-origin route under `src/app/api/backend/`, which attaches `BACKEND_API_KEY` server-side and applies a per-IP rate limit (`src/lib/rateLimit.ts`, in-memory — resets per server instance, not shared across a multi-instance deployment). `src/lib/api.ts` calls these proxy routes by relative path; it never sends the key itself. Fee-tier data (below) is a separate case — it's read directly from the contract via Soroban RPC, not from this backend at all.
 
 3. Run:
 
@@ -147,5 +152,5 @@ MIT
 
 ## Handsoff notes
 
-<!-- handsoff-issue-681 -->
-- #681: feat: bridge to C-addresses by invoking the asset's Stellar Asset Contract
+<!-- handsoff-issue-735 -->
+- #735: i18n: translate the onramp page
