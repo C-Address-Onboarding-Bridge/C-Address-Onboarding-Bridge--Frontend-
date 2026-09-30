@@ -1,4 +1,4 @@
-import { Horizon, rpc } from "@stellar/stellar-sdk";
+import type { Horizon, rpc } from "@stellar/stellar-sdk";
 import type { StellarNetwork } from "./types";
 
 /**
@@ -103,11 +103,11 @@ async function fetchSequenceFromNetwork(
   accountId: string,
   server: Horizon.Server | rpc.Server
 ): Promise<bigint> {
-  if (server instanceof rpc.Server) {
+  if ("getAccount" in server && typeof server.getAccount === "function") {
     const account = await server.getAccount(accountId);
     return BigInt(account.sequenceNumber());
   } else {
-    const account = await server.loadAccount(accountId);
+    const account = await (server as Horizon.Server).loadAccount(accountId);
     return BigInt(account.sequenceNumber());
   }
 }

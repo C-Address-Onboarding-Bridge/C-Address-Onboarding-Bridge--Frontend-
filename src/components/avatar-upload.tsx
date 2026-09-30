@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Camera, Loader2, Trash2 } from "lucide-react";
 import {
   AVATAR_ACCEPT_ATTR,
@@ -11,6 +11,7 @@ import {
   saveAvatar,
   validateAvatarFile,
 } from "@/lib/avatar";
+import { useHydrated } from "@/hooks/useHydrated";
 
 interface AvatarUploadProps {
   /** Wallet address the avatar belongs to. Upload is disabled without one. */
@@ -29,19 +30,13 @@ interface AvatarUploadProps {
  */
 export default function AvatarUpload({ address, size = 56 }: AvatarUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [avatar, setAvatar] = useState<string | null>(null);
+  const [avatarRecord, setAvatarRecord] = useState<{ address: string | null; value: string | null }>({ address: null, value: null });
   const [error, setError] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
-
-  // Read from storage after mount only: touching localStorage during render
-  // would produce different server and client output and break hydration. The
-  // synchronous setState is the point — it is how the external store is pulled
-  // into React state, and it re-runs only when the address changes.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAvatar(loadAvatar(address));
-    setError(null);
-  }, [address]);
+  const hydrated = useHydrated();
+  const avatar = avatarRecord.address === address
+    ? avatarRecord.value
+    : hydrated ? loadAvatar(address) : null;
 
   const openPicker = () => {
     setError(null);
@@ -74,7 +69,7 @@ export default function AvatarUpload({ address, size = 56 }: AvatarUploadProps) 
         setError("Couldn't save the image — browser storage may be full.");
         return;
       }
-      setAvatar(result);
+      setAvatarRecord({ address, value: result });
     };
     reader.onerror = () => {
       setReading(false);
@@ -85,7 +80,7 @@ export default function AvatarUpload({ address, size = 56 }: AvatarUploadProps) 
 
   const handleRemove = () => {
     removeAvatar(address);
-    setAvatar(null);
+    setAvatarRecord({ address, value: null });
     setError(null);
   };
 

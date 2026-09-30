@@ -127,7 +127,7 @@ export default function BridgePage() {
   const fromAddress = address ?? "";
   const [flowMode, setFlowMode] = useState<FlowMode>("single");
   const [toAddress, setToAddress] = useState("");
-  const [amount, setAmount] = useState("");
+  const [rawAmount, setRawAmount] = useState("");
   const [asset, setAsset] = useState("XLM");
   // Locking is an optional add-on to the same form, not a separate flow: the
   // address/amount/asset fields above are shared, and only the submit path
@@ -144,12 +144,15 @@ export default function BridgePage() {
   const [balanceError, setBalanceError] = useState<string | null>(null);
   // null covers both "no tiers configured" and "not loaded yet" — FeeTierDisplay
   // hides itself either way, so no separate loading state is needed. (#468)
-  const [feeTierStatus, setFeeTierStatus] = useState<FeeTierStatus | null>(null);
+  const [feeTierResult, setFeeTierResult] = useState<{ key: string; status: FeeTierStatus | null } | null>(null);
+  const feeTierKey = `${address ?? ""}:${network}:${isNetworkSupported}`;
+  const feeTierStatus = feeTierResult?.key === feeTierKey ? feeTierResult.status : null;
   // Fee estimate fetched from Horizon when the user moves to the review step.
   // Falls back to the static placeholder if the fetch fails. (#257)
   const FALLBACK_FEE = "~0.00001 XLM";
   const [estimatedFee, setEstimatedFee] = useState<string>(FALLBACK_FEE);
   const assetDecimals = ASSET_DECIMALS[asset] ?? 7;
+  const amount = rawAmount ? normalizeAmountInput(rawAmount, assetDecimals) : rawAmount;
   // Simulation result fetched from /api/simulate before the signing step is
   // presented. `null` means no simulation has run for the current form values;
   // `simulating` covers the in-flight fetch. (#478)
@@ -262,17 +265,16 @@ export default function BridgePage() {
   // "hide the tier display" state as tiers genuinely not being configured. (#468)
   useEffect(() => {
     if (!address || !isNetworkSupported) {
-      setFeeTierStatus(null);
       return;
     }
     let cancelled = false;
     getFeeTierPreview(address, network).then((result) => {
-      if (!cancelled) setFeeTierStatus(result);
+      if (!cancelled) setFeeTierResult({ key: feeTierKey, status: result });
     });
     return () => {
       cancelled = true;
     };
-  }, [address, network, isNetworkSupported]);
+  }, [address, network, isNetworkSupported, feeTierKey]);
 
   const handleSubmit = async () => {
     if (!canProceed) return;
@@ -323,14 +325,6 @@ export default function BridgePage() {
       setStep("review");
     }
   };
-
-  useEffect(() => {
-    if (!amount) return;
-    const normalized = normalizeAmountInput(amount, assetDecimals);
-    if (normalized !== amount) {
-      setAmount(normalized);
-    }
-  }, [asset, assetDecimals, amount]);
 
   const performConfirm = async () => {
     if (!fromAddress || !toAddress || !amount) return;
@@ -705,7 +699,7 @@ export default function BridgePage() {
                         inputMode="decimal"
                         pattern="[0-9]*\.?[0-9]*"
                         value={amount}
-                        onChange={(e) => setAmount(normalizeAmountInput(e.target.value, assetDecimals))}
+                        onChange={(e) => setRawAmount(normalizeAmountInput(e.target.value, assetDecimals))}
                         placeholder="0.00"
                         aria-invalid={(!validAmount && !!amount) || insufficientBalance}
                         aria-describedby={
@@ -718,7 +712,7 @@ export default function BridgePage() {
                       {spendableBalance !== null && spendableBalance > 0 && txStatus === "idle" && (
                         <button
                           type="button"
-                          onClick={() => setAmount(Math.max(spendableBalance, 0).toFixed(7))}
+                          onClick={() => setRawAmount(Math.max(spendableBalance, 0).toFixed(7))}
                           className="absolute right-1.5 top-1/2 -translate-y-1/2 px-2.5 py-1.5 min-h-[36px] rounded text-xs font-semibold bg-[var(--primary)]/10 text-[var(--primary-light)] hover:bg-[var(--primary)]/20 transition-colors"
                           aria-label="Fill maximum available balance"
                         >

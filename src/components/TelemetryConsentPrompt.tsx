@@ -1,30 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import { useTelemetry } from "@/contexts/TelemetryContext";
 import { TELEMETRY_INFO } from "@/lib/telemetry";
 
 export function TelemetryConsentPrompt() {
   const { consent, setConsent, isFirstVisit } = useTelemetry();
-  const [isVisible, setIsVisible] = useState(isFirstVisit && consent === "pending");
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsVisible(isFirstVisit && consent === "pending");
-  }, [isFirstVisit, consent]);
-
-  const handleAccept = () => {
-    setConsent("granted");
-    setIsVisible(false);
-  };
-
-  const handleDecline = () => {
-    setConsent("denied");
-    setIsVisible(false);
-  };
-
-  if (!isVisible) {
+  if (!isFirstVisit || consent !== "pending") {
     return null;
   }
 
@@ -120,13 +102,13 @@ export function TelemetryConsentPrompt() {
         {/* Actions */}
         <div className="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 p-6 flex gap-3">
           <button
-            onClick={handleDecline}
+            onClick={() => setConsent("denied")}
             className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg font-medium transition-colors"
           >
             Decline
           </button>
           <button
-            onClick={handleAccept}
+            onClick={() => setConsent("granted")}
             className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
           >
             Accept

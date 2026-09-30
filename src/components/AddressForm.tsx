@@ -35,17 +35,9 @@ export function AddressForm({
   const [address, setAddress] = useState(initialValue);
   const [error, setError] = useState<string | undefined>();
   const [touched, setTouched] = useState(false);
-  const [recipients, setRecipients] = useState<SavedRecipient[]>([]);
+  const hydrated = useHydrated();
   const datalistId = useId();
-
-  // Read from storage after mount only (#466): touching localStorage during
-  // render would produce different server and client output and break
-  // hydration — same guard as AvatarUpload/ProfilePage use for their stores.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRecipients(loadAddressBook());
-  }, []);
-
+  const recipients = hydrated ? loadAddressBook() : [];
   const matchedRecipient = recipients.find((r) => r.address === address.trim());
 
   // Validation runs on blur, not on every keystroke (#488) — showing an error

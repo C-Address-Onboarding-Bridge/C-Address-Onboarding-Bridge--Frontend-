@@ -31,13 +31,16 @@ export default function ReferralsPage() {
   const { isConnected, address, network, isNetworkSupported, connect, isConnecting } = useWallet();
   const { status: copyStatus, copy: copyToClipboard } = useCopyToClipboard();
 
-  const [stats, setStats] = useState<ReferralStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  const [statsResult, setStatsResult] = useState<{ key: string; stats: ReferralStats | null; error: boolean } | null>(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
 
-  const [qrSvg, setQrSvg] = useState<string | null>(null);
-  const [qrError, setQrError] = useState(false);
+  const [qrResult, setQrResult] = useState<{ link: string; svg: string | null; error: boolean } | null>(null);
+  const requestKey = `${address ?? ""}:${network}:${refreshIndex}`;
+  const requestEnabled = Boolean(isConnected && address && isNetworkSupported);
+  const currentStats = statsResult?.key === requestKey ? statsResult : null;
+  const stats = currentStats?.stats ?? null;
+  const loading = requestEnabled && currentStats === null;
+  const loadError = currentStats?.error ?? false;
 
   useEffect(() => {
     if (!isConnected || !address) return;
@@ -46,23 +49,15 @@ export default function ReferralsPage() {
     if (!isNetworkSupported) return;
     let cancelled = false;
 
-    setLoading(true);
-    setLoadError(false);
-
     getReferralStats(address, network).then((result) => {
       if (cancelled) return;
-      if (result) {
-        setStats(result);
-      } else {
-        setLoadError(true);
-      }
-      setLoading(false);
+      setStatsResult({ key: requestKey, stats: result, error: !result });
     });
 
     return () => {
       cancelled = true;
     };
-  }, [isConnected, address, network, isNetworkSupported, refreshIndex]);
+  }, [isConnected, address, network, isNetworkSupported, refreshIndex, requestKey]);
 
   const referralLink = useMemo(() => {
     if (!stats) return null;
@@ -70,20 +65,23 @@ export default function ReferralsPage() {
     return buildReferralLink(stats.referralCode, origin);
   }, [stats]);
 
+  const currentQr = qrResult?.link === referralLink ? qrResult : null;
+  const qrSvg = currentQr?.svg ?? null;
+  const qrError = currentQr?.error ?? false;
+
   useEffect(() => {
     if (!referralLink) return;
     let cancelled = false;
-    setQrError(false);
 
     // `type: "svg"` renders a plain markup string with no canvas/DOM
     // dependency, unlike toDataURL/toCanvas — this keeps QR generation
     // working identically in the browser and in tests.
     QRCode.toString(referralLink, { type: "svg", margin: 1, width: 176 })
       .then((svg) => {
-        if (!cancelled) setQrSvg(svg);
+        if (!cancelled) setQrResult({ link: referralLink, svg, error: false });
       })
       .catch(() => {
-        if (!cancelled) setQrError(true);
+        if (!cancelled) setQrResult({ link: referralLink, svg: null, error: true });
       });
 
     return () => {

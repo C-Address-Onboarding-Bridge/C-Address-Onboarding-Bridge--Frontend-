@@ -95,25 +95,17 @@ function QuoteComparisonPanel({
   fiatCurrency: string;
   isValid: boolean;
 }) {
-  const [comparisons, setComparisons] = useState<OnrampQuoteComparison[]>([]);
+  const [loadedComparisons, setLoadedComparisons] = useState<{ query: string; items: OnrampQuoteComparison[] } | null>(null);
   const [quotedAt, setQuotedAt] = useState<number | null>(null);
   const [, forceTick] = useState(0);
   const requestIdRef = useRef(0);
 
   const amount = Number(fiatAmount) || 0;
+  const query = `${amount}:${fiatCurrency}`;
 
   const refresh = useCallback(async () => {
-    if (!isValid || amount <= 0) {
-      setComparisons([]);
-      setQuotedAt(null);
-      return;
-    }
+    if (!isValid || amount <= 0) return;
     const requestId = ++requestIdRef.current;
-    // Local estimate first, synchronously, so the panel never shows nothing
-    // while the (optional) live fetch is in flight.
-    setComparisons(compareOnrampQuotes(amount, fiatCurrency));
-    setQuotedAt(Date.now());
-
     try {
       const res = await fetch(`/api/onramp/quotes?amount=${encodeURIComponent(String(amount))}&currency=${encodeURIComponent(fiatCurrency)}`);
       if (!res.ok) return;
@@ -122,21 +114,23 @@ function QuoteComparisonPanel({
       // a newer one that already resolved.
       if (requestId !== requestIdRef.current) return;
       const live = (data as { live?: Partial<Record<OnrampProvider, { sourceAmount: string; destinationAmount: string; fee: string }>> }).live ?? {};
-      setComparisons(compareOnrampQuotes(amount, fiatCurrency, { liveQuotes: live }));
+      setLoadedComparisons({ query, items: compareOnrampQuotes(amount, fiatCurrency, { liveQuotes: live }) });
       setQuotedAt(Date.now());
     } catch {
       // Network failure: the local-estimate comparison set above stands.
     }
-  }, [amount, fiatCurrency, isValid]);
+  }, [amount, fiatCurrency, isValid, query]);
 
   useEffect(() => {
-    // Fetch-on-mount/-change, same justified pattern as AddressBookPage's
-    // load effect: synchronizing the panel with the external quote source
-    // (the local estimator + /api/onramp/quotes) whenever amount/currency
-    // change, not deriving state from a render.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    refresh();
-  }, [refresh]);
+    if (!isValid || amount <= 0) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refresh();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh, isValid, amount]);
 
   // Timed refresh while a valid amount is entered, plus a 1s tick so the
   // "quoted Xs ago" age display stays live between refreshes.
@@ -152,6 +146,9 @@ function QuoteComparisonPanel({
 
   if (!isValid || amount <= 0) return null;
 
+  const comparisons = loadedComparisons?.query === query
+    ? loadedComparisons.items
+    : compareOnrampQuotes(amount, fiatCurrency);
   const spread = quoteSpread(comparisons);
 
   return (
