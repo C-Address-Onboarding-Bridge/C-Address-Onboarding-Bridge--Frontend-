@@ -4,8 +4,12 @@ import type { BridgeTransactionData, BridgeTransactionStatus } from "@/lib/types
 import { getExplorerUrl } from "@/lib/stellar";
 import type { StellarNetwork } from "@/lib/types";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
+import { useDelayedLoading } from "@/hooks/useDelayedLoading";
 import LiveRegion from "@/components/live-region";
 import TransactionExportControl from "@/components/transaction-export";
+
+/** Placeholder rows shown while `useDelayedLoading` gates the skeleton's visibility. */
+const SKELETON_ROW_COUNT = 3;
 
 const typeConfig: Record<string, { icon: typeof ArrowLeftRight; label: string; color: string }> = {
   "g-to-c": { icon: ArrowLeftRight, label: "G → C Bridge", color: "text-[var(--primary-light)]" },
@@ -256,6 +260,7 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
 
   const debouncedSearchQuery = useDebounceValue(searchQuery, 300);
+  const showSkeleton = useDelayedLoading(loading, 200);
 
   const uniqueAssets = useMemo(() => {
     const assets = new Set<string>();
@@ -541,10 +546,29 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
         )}
       </div>
 
+      {loading && (
+        <div role="status" className="sr-only">
+          Loading recent transactions…
+        </div>
+      )}
+
       {loading ? (
-        <div role="status" className="p-12 flex items-center justify-center">
-          <Loader2 className="w-6 h-6 animate-spin motion-reduce:animate-none text-[var(--text-muted)]" />
-          <span className="sr-only">Loading recent transactions…</span>
+        // Reserved unconditionally so layout doesn't shift once it becomes
+        // visible; `invisible` (rather than not rendering at all) is what lets
+        // `useDelayedLoading` gate *visibility* without a flash. (#485)
+        <div
+          aria-hidden="true"
+          className={`divide-y divide-[var(--border)]${showSkeleton ? "" : " invisible"}`}
+        >
+          {Array.from({ length: SKELETON_ROW_COUNT }).map((_, i) => (
+            <div key={i} className="p-4 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-[var(--surface-2)] animate-pulse motion-reduce:animate-none flex-shrink-0" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="h-3 w-28 rounded bg-[var(--surface-2)] animate-pulse motion-reduce:animate-none" />
+                <div className="h-3 w-40 rounded bg-[var(--surface-2)] animate-pulse motion-reduce:animate-none" />
+              </div>
+            </div>
+          ))}
         </div>
       ) : showEmpty ? (
         <div className="p-12 text-center">
