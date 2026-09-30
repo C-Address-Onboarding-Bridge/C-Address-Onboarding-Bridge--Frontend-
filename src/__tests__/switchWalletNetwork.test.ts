@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { switchWalletNetwork } from "@/lib/stellar";
-import * as freighter from "@stellar/freighter-api";
 
-vi.mock("@stellar/freighter-api", () => ({
+// Wallet signing goes through @creit.tech/stellar-wallets-kit; these are
+// local stand-ins for the former @stellar/freighter-api mocks.
+const freighter = {
 
 /**
  * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
@@ -16,7 +17,7 @@ vi.mock("@stellar/freighter-api", () => ({
   getAddress: vi.fn(),
   signTransaction: vi.fn(),
   getNetwork: vi.fn(),
-}));
+};
 
 const getNetwork = vi.mocked(freighter.getNetwork);
 
@@ -40,7 +41,7 @@ describe("switchWalletNetwork (#480)", () => {
     await expect(switchWalletNetwork("TESTNET")).resolves.toBe("manual");
   });
 
-  it.skip("requests the change through the wallet and confirms once it lands on the target", async () => {
+  it("requests the change through the wallet and confirms once it lands on the target", async () => {
     const setNetwork = vi.fn().mockResolvedValue(undefined);
     injectFreighter(setNetwork);
     getNetwork.mockResolvedValue({ network: "TESTNET", networkPassphrase: "" } as never);
@@ -54,7 +55,7 @@ describe("switchWalletNetwork (#480)", () => {
     );
   });
 
-  it.skip("passes the mainnet passphrase, name, and URL for a PUBLIC switch", async () => {
+  it("passes the mainnet passphrase, name, and URL for a PUBLIC switch", async () => {
     const setNetwork = vi.fn().mockResolvedValue(undefined);
     injectFreighter(setNetwork);
     getNetwork.mockResolvedValue({ network: "PUBLIC", networkPassphrase: "" } as never);

@@ -69,8 +69,6 @@ export interface AnalyticsBucket {
   date: string;
   /** Short display label, e.g. "Aug 1". */
   label: string;
-  /** Total volume (sum of amounts) on this day. */
-  volume: number;
   /** Number of transactions on this day. */
   count: number;
   /** Volume per asset on this day. */
@@ -95,7 +93,8 @@ function toLabel(dateKey: string): string {
 /**
  * Buckets transactions into the last `days` days (including today), zero-filled
  * so the charts always show a continuous range. Only transactions within the
- * range contribute; amounts that are not finite numbers are skipped.
+ * range contribute; amounts that are not finite numbers are skipped. Volume is
+ * tracked per-asset to avoid summing incompatible currencies. (#715)
  */
 export function aggregateAnalytics(
   transactions: BridgeTransactionData[],
@@ -112,7 +111,6 @@ export function aggregateAnalytics(
     buckets.set(dateKey, {
       date: dateKey,
       label: toLabel(dateKey),
-      volume: 0,
       count: 0,
       byAsset: {},
     });
@@ -123,7 +121,6 @@ export function aggregateAnalytics(
     if (!bucket) continue; // outside the selected range
     const volume = Number(tx.amount);
     if (!Number.isFinite(volume)) continue;
-    bucket.volume += volume;
     bucket.count += 1;
     bucket.byAsset[tx.asset] = (bucket.byAsset[tx.asset] ?? 0) + volume;
   }
@@ -147,17 +144,15 @@ export function AnalyticsSection({ transactions }: { transactions: BridgeTransac
   const buckets = useMemo(() => aggregateAnalytics(transactions, range), [transactions, range]);
 
   const totals = useMemo(() => {
-    let volume = 0;
     let count = 0;
     const byAsset: Record<string, number> = {};
     for (const bucket of buckets) {
-      volume += bucket.volume;
       count += bucket.count;
       for (const [asset, value] of Object.entries(bucket.byAsset)) {
         byAsset[asset] = (byAsset[asset] ?? 0) + value;
       }
     }
-    return { volume, count, byAsset };
+    return { count, byAsset };
   }, [buckets]);
 
   const hasActivity = buckets.some((bucket) => bucket.count > 0);
@@ -199,38 +194,20 @@ export function AnalyticsSection({ transactions }: { transactions: BridgeTransac
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div className="p-4 rounded-lg bg-[var(--surface-2)]">
-              <p className="text-xs text-[var(--text-muted)] mb-1">Volume ({range}D)</p>
-              <p className="text-xl font-bold">{formatVolume(totals.volume)}</p>
-            </div>
-            <div className="p-4 rounded-lg bg-[var(--surface-2)]">
-              <p className="text-xs text-[var(--text-muted)] mb-1">Transactions ({range}D)</p>
-              <p className="text-xl font-bold">{totals.count}</p>
-            </div>
+          <div className="p-4 rounded-lg bg-[var(--surface-2)] mb-4">
+            <p className="text-xs text-[var(--text-muted)] mb-1">Transactions ({range}D)</p>
+            <p className="text-xl font-bold">{totals.count}</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <div>
-              <p className="text-xs text-[var(--text-muted)] mb-2">Volume over time</p>
-              <BarChart
-                buckets={buckets}
-                valueOf={(bucket) => bucket.volume}
-                formatValue={formatVolume}
-                ariaLabel={`Volume over the last ${range} days`}
-                color="var(--primary)"
-              />
-            </div>
-            <div>
-              <p className="text-xs text-[var(--text-muted)] mb-2">Transactions over time</p>
-              <BarChart
-                buckets={buckets}
-                valueOf={(bucket) => bucket.count}
-                formatValue={formatVolume}
-                ariaLabel={`Transaction count over the last ${range} days`}
-                color="var(--secondary)"
-              />
-            </div>
+          <div className="mb-4">
+            <p className="text-xs text-[var(--text-muted)] mb-2">Transaction count over time</p>
+            <BarChart
+              buckets={buckets}
+              valueOf={(bucket) => bucket.count}
+              formatValue={formatVolume}
+              ariaLabel={`Transaction count over the last ${range} days`}
+              color="var(--secondary)"
+            />
           </div>
 
           <div className="mb-4">
@@ -258,17 +235,17 @@ export function AnalyticsSection({ transactions }: { transactions: BridgeTransac
             className="w-full text-xs"
             aria-label={`Analytics data for the last ${range} days`}
           >
-            <caption className="sr-only">Daily volume and transaction count</caption>
+            <caption className="sr-only">Daily transaction count and volume by asset</caption>
             <thead>
               <tr className="text-left text-[var(--text-muted)] border-b border-[var(--border)]">
                 <th scope="col" className="py-2 pr-3 font-medium">
                   Date
                 </th>
                 <th scope="col" className="py-2 pr-3 font-medium">
-                  Volume
+                  Transactions
                 </th>
                 <th scope="col" className="py-2 font-medium">
-                  Transactions
+                  Volume (by asset)
                 </th>
               </tr>
             </thead>
@@ -276,8 +253,14 @@ export function AnalyticsSection({ transactions }: { transactions: BridgeTransac
               {buckets.map((bucket) => (
                 <tr key={bucket.date}>
                   <td className="py-1.5 pr-3">{bucket.label}</td>
-                  <td className="py-1.5 pr-3">{formatVolume(bucket.volume)}</td>
-                  <td className="py-1.5">{bucket.count}</td>
+                  <td className="py-1.5 pr-3">{bucket.count}</td>
+                  <td className="py-1.5 text-xs text-[var(--text-muted)]">
+                    {Object.entries(bucket.byAsset).map(([asset, vol]) => (
+                      <div key={asset}>
+                        {asset}: {formatVolume(vol)}
+                      </div>
+                    ))}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -318,21 +301,24 @@ export default function DashboardPage() {
     const fetchData = async (isInitial: boolean) => {
       if (isInitial) setLoading(true);
       setError(null);
+      // The fee tier loads on its own rather than inside the Promise.all
+      // below: a slow or unreachable tier endpoint used to hold the balance and
+      // transaction cards in their loading state, so an empty account looked
+      // stuck instead of showing 0 XLM / 0 transactions. getFeeTierPreview
+      // never throws (it resolves null on any failure). (#653)
+      getFeeTierPreview(address, network).then((tierResult) => {
+        if (!cancelled) setFeeTierStatus(tierResult);
+      });
       try {
-        // getFeeTierPreview never throws (resolves null on any failure), so it
-        // can share this Promise.all without a failed tier fetch aborting the
-        // balance/transaction load or being caught below as a page-level error.
-        const [balResult, txResult, tierResult] = await Promise.all([
+        const [balResult, txResult] = await Promise.all([
           getAccountBalances(address, network),
           fetchRecentTransactions(address, network, 10),
-          getFeeTierPreview(address, network),
         ]);
         if (cancelled) return;
         setBalance(balResult.total);
         // Reuse the previous reference when nothing changed so React bails out
         // of re-rendering the memoized transaction list.
         setTransactions((prev) => (areTransactionsEqual(prev, txResult) ? prev : txResult));
-        setFeeTierStatus(tierResult);
       } catch (e: unknown) {
         if (cancelled) return;
         setError(toSafeErrorMessage(e, "Failed to fetch data. Please try again."));
@@ -411,14 +397,14 @@ export default function DashboardPage() {
           </div>
           <h1 className="text-2xl font-bold mb-2">Connect Your Wallet</h1>
           <p className="text-[var(--text-muted)] mb-6">
-            Connect your Freighter wallet to view your dashboard.
+            Connect your wallet to view your dashboard.
           </p>
           <button
             onClick={connect}
             className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors"
           >
             <Wallet className="w-4 h-4" />
-            Connect Freighter
+            Connect Wallet
           </button>
         </div>
       </div>
@@ -535,7 +521,7 @@ export default function DashboardPage() {
                 {shownBalance !== null ? parseFloat(shownBalance).toFixed(2) : "—"}
               </div>
               <div className="text-xs text-[var(--text-muted)]">XLM</div>
-              {network === "TESTNET" && !showLoading && (
+              {network === "TESTNET" && !showLoading && (shownBalance === null || parseFloat(shownBalance) === 0) && (
                 <div className="mt-3">
                   <button
                     onClick={handleFaucet}
@@ -636,8 +622,8 @@ export default function DashboardPage() {
           className="mb-6 p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 text-sm text-[var(--error)]"
         >
           {networkStatus === "UNSUPPORTED"
-            ? `Freighter is on ${formatNetworkLabel(networkStatus, walletNetworkName)}, which this app doesn't support. Switch to Testnet or Mainnet to see balances and activity.`
-            : "Freighter's network couldn't be read, so no chain data is shown. Unlock the extension and reload."}
+            ? `Your wallet is on ${formatNetworkLabel(networkStatus, walletNetworkName)}, which this app doesn't support. Switch to Testnet or Mainnet to see balances and activity.`
+            : "Your wallet's network couldn't be read, so no chain data is shown. Unlock the extension and reload."}
         </div>
       )}
 

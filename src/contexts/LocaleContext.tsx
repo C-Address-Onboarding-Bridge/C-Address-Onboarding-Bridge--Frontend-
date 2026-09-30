@@ -20,7 +20,6 @@ import React, {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useState,
   type ReactNode,
 } from 'react';
@@ -33,6 +32,7 @@ import {
   type Locale,
   type TranslationSet,
 } from '@/lib/i18n';
+import { useHydrated } from '@/hooks/useHydrated';
 
 export const LOCALE_STORAGE_KEY = 'ui:locale';
 
@@ -87,21 +87,14 @@ function writeStoredLocale(locale: Locale): void {
 // ---------------------------------------------------------------------------
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
-
-  // Resolve on the client: stored choice → browser language → default.
-  // Done in an effect (not lazy state init) so SSR renders the default locale
-  // and the client immediately corrects it after hydration — no mismatch.
-  useEffect(() => {
-    const resolved = readStoredLocale() ?? detectLocale();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLocaleState(resolved);
-  }, []);
+  const [localeOverride, setLocaleOverride] = useState<Locale | null>(null);
+  const hydrated = useHydrated();
+  const locale = localeOverride ?? (hydrated ? readStoredLocale() ?? detectLocale() : DEFAULT_LOCALE);
 
   const setLocale = useCallback((next: Locale) => {
     if (!SUPPORTED_LOCALES.includes(next)) return;
     writeStoredLocale(next);
-    setLocaleState(next);
+    setLocaleOverride(next);
   }, []);
 
   const tBound = useCallback((key: string) => rawT(locale, key), [locale]);

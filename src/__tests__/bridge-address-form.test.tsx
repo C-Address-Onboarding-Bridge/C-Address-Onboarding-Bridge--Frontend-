@@ -6,6 +6,13 @@ import BridgePage from "@/app/bridge/page";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// The lock/claims feature is behind the locked_transfers flag (#672), off by
+// default; this file doesn't exercise it, so the mocked value doesn't matter
+// beyond satisfying the provider requirement.
+vi.mock("@/contexts/FeatureFlagContext", () => ({
+  useFeatureFlag: () => false,
+}));
+
 vi.mock("@/components/wallet-provider", () => ({
   useWallet: () => ({
     isConnected: false,
@@ -56,5 +63,37 @@ describe("Bridge page — Address Form", () => {
     const input = container.querySelector(`#${inputId}`);
     expect(input).not.toBeNull();
     expect(input?.tagName).toBe("INPUT");
+  });
+
+  it("preserves a 7-decimal USDC amount instead of truncating to 2 decimals", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<BridgePage />);
+    });
+
+    const assetSelect = container.querySelector("#bridge-asset") as HTMLSelectElement;
+    expect(assetSelect).not.toBeNull();
+
+    await act(async () => {
+      assetSelect.value = "USDC";
+      assetSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const amountInput = container.querySelector("#bridge-amount") as HTMLInputElement;
+    expect(amountInput).not.toBeNull();
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value"
+      )?.set;
+      setter?.call(amountInput, "0.0015");
+      amountInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(amountInput.value).toBe("0.0015");
   });
 });
