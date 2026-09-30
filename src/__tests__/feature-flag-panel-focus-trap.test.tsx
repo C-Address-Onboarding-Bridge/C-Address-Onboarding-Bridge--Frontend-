@@ -97,4 +97,32 @@ describe("FeatureFlagPanel Tab focus trap", () => {
 
     expect(document.activeElement).toBe(last);
   });
+
+  it("does not expose the panel based on a public NEXT_PUBLIC_* token", async () => {
+    // The panel must not be gated on a client-readable NEXT_PUBLIC_* token.
+    // Setting any public token in localStorage must not reveal the panel in production.
+    process.env = {
+      ...originalEnv,
+      NODE_ENV: "production",
+      NEXT_PUBLIC_FLAG_PANEL_TOKEN: "leaked-public-token",
+    };
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("ff_panel_token", "leaked-public-token");
+    }
+
+    await act(async () => {
+      root?.render(
+        <FeatureFlagProvider>
+          <FeatureFlagPanel />
+        </FeatureFlagProvider>
+      );
+    });
+
+    const toggleButton = container?.querySelector(
+      'button[aria-label="Toggle feature flags panel"]'
+    ) as HTMLButtonElement | null;
+
+    // In production the panel must not be reachable via a public token.
+    expect(toggleButton).toBeNull();
+  });
 });

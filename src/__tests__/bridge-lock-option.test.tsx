@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import BridgePage from "@/app/bridge/page";
 
@@ -20,6 +20,12 @@ const VALID_C_ADDRESS = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC
 // so the address they close over must be too (plain top-level consts would
 // hit the TDZ) — see vi.hoisted's own docs for why.
 const FROM_ADDRESS = vi.hoisted(() => "G" + "A".repeat(55));
+
+// This file specifically exercises the lock UI, which is hidden behind the
+// locked_transfers flag by default (#672) — force it on.
+vi.mock("@/contexts/FeatureFlagContext", () => ({
+  useFeatureFlag: () => true,
+}));
 
 vi.mock("@/components/wallet-provider", () => ({
   useWallet: () => ({
@@ -49,6 +55,8 @@ vi.mock("@/lib/stellar", () => ({
   getAccountMinimumBalance: () => "1",
   getEstimatedFeeXLM: vi.fn().mockResolvedValue("~0.00001 XLM"),
   toSafeErrorMessage: (_e: unknown, fallback: string) => fallback,
+  assertActiveAccountMatches: vi.fn().mockResolvedValue(undefined),
+  signPreparedTransaction: vi.fn().mockResolvedValue("stub-signed-xdr"),
 }));
 
 const createLockMock = vi.fn();
@@ -65,7 +73,8 @@ vi.mock("@/lib/api", () => ({
   // The bridge page also pulls these from @/lib/api; a partial factory makes
   // vitest throw on import before any assertion runs.
   getFeeTierPreview: () => Promise.resolve(null),
-  submitBatchFunding: () => Promise.resolve({ results: [] }),
+  prepareBatchFunding: () => Promise.resolve({ xdr: "stub-xdr" }),
+  submitSignedBatchFunding: () => Promise.resolve({ results: [] }),
 }));
 
 async function fillForm() {
@@ -81,8 +90,24 @@ function futureDatetimeLocal(msFromNow: number): string {
 }
 
 describe("Bridge form — lock option (#467)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        feeStroops: "100",
+        feeXlm: "0.00001",
+        netAmount: "10",
+        grossAmount: "10",
+        asset: "XLM",
+        recipient: VALID_C_ADDRESS,
+      }),
+    }));
+  });
+
   afterEach(() => {
     createLockMock.mockReset();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -150,6 +175,7 @@ describe("Bridge form — lock option (#467)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Review Locked Transfer/i }));
 
     expect(await screen.findByText("Unlocks")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Confirm & Lock/i })).toBeEnabled();
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Confirm & Lock/i }));

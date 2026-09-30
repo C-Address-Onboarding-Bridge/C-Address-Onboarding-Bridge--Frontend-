@@ -24,6 +24,8 @@ export interface FundingLinkParams {
   amount?: string;
   /** Optional pre-filled asset code. Defaults to "XLM" if absent. */
   asset?: FundingLinkAsset;
+  /** The network for this funding request (TESTNET or PUBLIC). */
+  network: "TESTNET" | "PUBLIC";
 }
 
 /** Error codes for malformed funding links. */
@@ -31,7 +33,9 @@ export type FundingLinkError =
   | "MISSING_TARGET"
   | "INVALID_TARGET"
   | "INVALID_AMOUNT"
-  | "INVALID_ASSET";
+  | "INVALID_ASSET"
+  | "MISSING_NETWORK"
+  | "INVALID_NETWORK";
 
 /** Result type for parseFundingLink. */
 export type FundingLinkResult =
@@ -48,6 +52,7 @@ export type FundingLinkResult =
 export function buildFundingLink(baseUrl: string, params: FundingLinkParams): string {
   const url = new URL(baseUrl);
   url.searchParams.set("target", params.target);
+  url.searchParams.set("network", params.network);
   if (params.amount) {
     url.searchParams.set("amount", params.amount);
   }
@@ -92,6 +97,24 @@ export function parseFundingLink(
     };
   }
 
+  const rawNetwork = searchParams.get("network");
+  if (!rawNetwork) {
+    return {
+      ok: false,
+      error: "MISSING_NETWORK",
+      message: "The link is missing a network specification.",
+    };
+  }
+
+  const network = rawNetwork as "TESTNET" | "PUBLIC";
+  if (network !== "TESTNET" && network !== "PUBLIC") {
+    return {
+      ok: false,
+      error: "INVALID_NETWORK",
+      message: `"${rawNetwork}" is not a valid network. Supported networks: TESTNET, PUBLIC.`,
+    };
+  }
+
   const amount = searchParams.get("amount") ?? undefined;
   if (amount !== undefined && !isValidStellarAmount(amount)) {
     return {
@@ -119,6 +142,7 @@ export function parseFundingLink(
     ok: true,
     params: {
       target,
+      network,
       ...(amount !== undefined ? { amount } : {}),
       ...(asset !== undefined ? { asset } : {}),
     },
@@ -127,7 +151,7 @@ export function parseFundingLink(
 
 /**
  * True when the query string contains any funding-link parameter (`target`,
- * `amount`, or `asset`). Used to decide whether to show the pre-fill banner
+ * `amount`, `asset`, or `network`). Used to decide whether to show the pre-fill banner
  * without doing full validation.
  */
 export function hasFundingLinkParams(searchParams: URLSearchParams | null): boolean {
@@ -135,6 +159,7 @@ export function hasFundingLinkParams(searchParams: URLSearchParams | null): bool
   return (
     searchParams.has("target") ||
     searchParams.has("amount") ||
-    searchParams.has("asset")
+    searchParams.has("asset") ||
+    searchParams.has("network")
   );
 }

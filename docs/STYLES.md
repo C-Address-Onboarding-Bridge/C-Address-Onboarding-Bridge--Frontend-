@@ -126,8 +126,7 @@ neutralises the `.card-hover` lift. Two rules follow from it:
 
 ## Testing Styles
 
-There is no visual-regression or Storybook setup (`src/stories/` holds story
-files but Storybook itself is not a dependency). Styles are covered by unit
+There is no visual-regression or Storybook setup. Styles are covered by unit
 tests that parse `globals.css` directly:
 
 ```bash

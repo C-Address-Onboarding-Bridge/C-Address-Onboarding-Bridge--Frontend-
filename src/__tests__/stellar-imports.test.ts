@@ -4,14 +4,18 @@ import fs from "fs";
 import path from "path";
 import { getHorizonServer, getSorobanRpcServer, getNetworkPassphrase } from "@/lib/stellar";
 
-describe("Stellar SDK Imports Unification", () => {
-  it("does not contain redundant dynamic import('@stellar/stellar-sdk') calls in source", () => {
+describe("Stellar SDK lazy loading", () => {
+  it("does not eagerly import the Stellar SDK into wallet-aware routes", () => {
     const stellarFilePath = path.resolve(__dirname, "../lib/stellar.ts");
     const sourceCode = fs.readFileSync(stellarFilePath, "utf-8");
 
-    // Verify no internal functions dynamically import @stellar/stellar-sdk
-    expect(sourceCode).not.toContain('await import("@stellar/stellar-sdk")');
-    expect(sourceCode).not.toContain("await import('@stellar/stellar-sdk')");
+    // Keep the SDK behind asynchronous transaction/network operations. A
+    // static import here would add its large client dependency graph to every
+    // route that imports wallet helpers.
+    expect(sourceCode).not.toMatch(
+      /^import\s+(?!type\b)[^;\r\n]*from\s+["']@stellar\/stellar-sdk["']/m
+    );
+    expect(sourceCode).toContain('await import("@stellar/stellar-sdk")');
   });
 
   it("returns Horizon server instance correctly", async () => {

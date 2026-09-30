@@ -1,13 +1,17 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useSyncExternalStore } from 'react';
 import { useWallet } from '@/components/wallet-provider';
 import Link from 'next/link';
 import { Check, X, ChevronRight } from 'lucide-react';
 
 const STORAGE_KEY = 'onboarding:checklist';
+const subscribeToHydration = () => () => {};
+const getHydratedSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
 
 export interface ChecklistStep {
+  id: string;
   title: string;
   description: string;
   href: string;
@@ -80,13 +84,12 @@ export interface OnboardingChecklistProps {
 
 export function OnboardingChecklist({ steps }: OnboardingChecklistProps) {
   const [stored, setStored] = useState<StoredChecklist>(() => loadStoredChecklist(steps.length));
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeToHydration,
+    getHydratedSnapshot,
+    getServerHydrationSnapshot,
+  );
   const { isConnected } = useWallet();
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMounted(true);
-  }, []);
 
   const completedSteps = steps.map((step, index) => {
     if (stored.completedSteps[index]) return true;
@@ -141,7 +144,7 @@ export function OnboardingChecklist({ steps }: OnboardingChecklistProps) {
           const done = completedSteps[index];
           return (
             <Link
-              key={index}
+              key={step.id}
               href={step.href}
               onClick={() => handleStepClick(index)}
               className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${

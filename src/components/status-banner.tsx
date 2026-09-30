@@ -1,7 +1,7 @@
 'use client';
 
 import { AlertCircle, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useHealthStatus } from '@/hooks/useHealthStatus';
 import { getStatusMessage } from '@/lib/api';
 
@@ -11,20 +11,29 @@ import { getStatusMessage } from '@/lib/api';
  * Displays a banner when the service is degraded or unhealthy.
  * Automatically dismisses after recovery and requires 5+ seconds of stable
  * health to clear (avoids flashing transient blips).
+ *
+ * Dismissal is scoped to the current severity/message: if the service gets
+ * worse (or the message changes), the banner reappears (#711).
  */
 
 export function StatusBanner() {
   const { health, isDegraded } = useHealthStatus();
   const [dismissed, setDismissed] = useState(false);
 
+  const message = getStatusMessage(health);
+  const severity = health?.status === 'unhealthy' ? 'error' : 'warning';
+
+  // Reset the dismissal whenever the severity or message changes so a later,
+  // worse state is shown again instead of staying hidden until reload (#711).
+  useEffect(() => {
+    setDismissed(false);
+  }, [severity, message]);
+
   const isVisible = isDegraded && !dismissed;
 
   if (!isVisible) {
     return null;
   }
-
-  const message = getStatusMessage(health);
-  const severity = health?.status === 'unhealthy' ? 'error' : 'warning';
 
   return (
     <div
@@ -34,7 +43,7 @@ export function StatusBanner() {
           : 'bg-amber-50 dark:bg-amber-950 border-amber-200 dark:border-amber-800'
       }`}
       role="alert"
-      aria-live="polite"
+      aria-live="assertive"
       aria-label="Service status"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">

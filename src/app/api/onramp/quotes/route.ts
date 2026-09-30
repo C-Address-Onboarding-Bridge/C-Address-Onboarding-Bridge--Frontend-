@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isCAddress } from "@/lib/stellar";
+import { providers } from "@/lib/onrampProviders";
 import { isOnrampProvider, type OnrampProvider } from "@/lib/types";
 import type { LiveQuoteInput } from "@/lib/onrampQuotes";
 
@@ -7,16 +7,16 @@ import type { LiveQuoteInput } from "@/lib/onrampQuotes";
  * Live on-ramp quote proxy for #556's provider comparison, backed by the
  * backend's aggregated quote endpoint (#678).
  *
- * This route used to fetch MOONPAY_QUOTE_API_URL/TRANSAK_QUOTE_API_URL
- * directly and expected a bespoke `{ sourceAmount, destinationAmount, fee }`
- * shape that neither provider's real API returns -- so every live fetch
- * failed (silently: the route degraded to `{ live: {} }` on any fetch
- * error) and every quote shown was the client's own "estimated" fallback.
- * The backend already exposes `GET /api/v1/offramp/quote`, which calls both
- * providers and returns a ranked comparison; this route proxies to it
- * through NEXT_PUBLIC_API_URL (the same backend base URL `lib/api.ts` uses
- * for health checks) and maps its response into the shape
- * `compareOnrampQuotes` expects.
+ * This repo vendors neither MoonPay's nor Transak's real quote API (their
+ * `providers[].baseUrl` in `onrampProviders.ts` is a checkout *widget* URL, not
+ * a quote endpoint) — the same "not vendored yet" situation `feeTiers.ts` and
+ * `locks.ts` document for their own placeholder integrations. Rather than
+ * guess at request/response shapes for APIs this repo has never called, each
+ * provider's live lookup is gated behind its own env var
+ * (`MOONPAY_QUOTE_API_URL` / `TRANSAK_QUOTE_API_URL`); unset (the default)
+ * means that provider is simply omitted from `live`, and the client falls
+ * back to its own fee-model estimate via `compareOnrampQuotes` — exactly how
+ * `/api/activity` degrades to `[]` when `INDEXER_EVENTS_URL` is unset.
  *
  * The backend's quote endpoint requires a destination `cAddress` (Zod
  * `STELLAR_ADDRESS_REGEX`-validated) alongside the amount/currency, which
