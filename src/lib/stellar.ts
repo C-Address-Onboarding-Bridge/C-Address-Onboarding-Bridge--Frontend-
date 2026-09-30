@@ -10,6 +10,7 @@ import {
   StrKey,
   Keypair,
 } from "@stellar/stellar-sdk";
+import { getNetwork as getFreighterNetwork } from "@stellar/freighter-api";
 import {
   BRIDGE_CONTRACT_ID,
   HORIZON_URL,
