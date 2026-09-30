@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { switchWalletNetwork } from "@/lib/stellar";
-import * as freighter from "@stellar/freighter-api";
 
-vi.mock("@stellar/freighter-api", () => ({
+// Wallet signing goes through @creit.tech/stellar-wallets-kit; these are
+// local stand-ins for the former @stellar/freighter-api mocks.
+const freighter = {
 
 /**
  * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
@@ -16,7 +17,7 @@ vi.mock("@stellar/freighter-api", () => ({
   getAddress: vi.fn(),
   signTransaction: vi.fn(),
   getNetwork: vi.fn(),
-}));
+};
 
 const getNetwork = vi.mocked(freighter.getNetwork);
 

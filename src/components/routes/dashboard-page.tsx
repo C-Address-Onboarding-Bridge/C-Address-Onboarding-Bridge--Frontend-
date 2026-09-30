@@ -414,14 +414,14 @@ export default function DashboardPage() {
           </div>
           <h1 className="text-2xl font-bold mb-2">Connect Your Wallet</h1>
           <p className="text-[var(--text-muted)] mb-6">
-            Connect your Freighter wallet to view your dashboard.
+            Connect your wallet to view your dashboard.
           </p>
           <button
             onClick={connect}
             className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors"
           >
             <Wallet className="w-4 h-4" />
-            Connect Freighter
+            Connect Wallet
           </button>
         </div>
       </div>
@@ -639,8 +639,8 @@ export default function DashboardPage() {
           className="mb-6 p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 text-sm text-[var(--error)]"
         >
           {networkStatus === "UNSUPPORTED"
-            ? `Freighter is on ${formatNetworkLabel(networkStatus, walletNetworkName)}, which this app doesn't support. Switch to Testnet or Mainnet to see balances and activity.`
-            : "Freighter's network couldn't be read, so no chain data is shown. Unlock the extension and reload."}
+            ? `Your wallet is on ${formatNetworkLabel(networkStatus, walletNetworkName)}, which this app doesn't support. Switch to Testnet or Mainnet to see balances and activity.`
+            : "Your wallet's network couldn't be read, so no chain data is shown. Unlock the extension and reload."}
         </div>
       )}
 

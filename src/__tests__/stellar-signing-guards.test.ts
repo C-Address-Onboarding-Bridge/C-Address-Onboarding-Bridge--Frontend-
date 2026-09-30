@@ -13,7 +13,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Keypair } from "@stellar/stellar-sdk";
 import { buildAndSubmitPayment } from "@/lib/stellar";
 import { clearAllSequenceCache } from "@/lib/sequenceManager";
-import * as freighter from "@stellar/freighter-api";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -22,12 +21,14 @@ const G_DEST = Keypair.random().publicKey();
 
 // ─── Module mocks ────────────────────────────────────────────────────────────
 
-vi.mock("@stellar/freighter-api", () => ({
+// Wallet signing goes through @creit.tech/stellar-wallets-kit; these are
+// local stand-ins for the former @stellar/freighter-api mocks.
+const freighter = {
   signTransaction: vi.fn(),
   isConnected: vi.fn(),
   getAddress: vi.fn(),
   getNetwork: vi.fn(),
-}));
+};
 
 // Since #459 stellar.ts reaches the wallet through the Stellar Wallets Kit.
 // Model the kit with Freighter selected: each call delegates to the mocked
@@ -154,7 +155,7 @@ describe("#241 — fresh network check before signing", () => {
 
     await expect(
       buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "XLM", "TESTNET")
-    ).rejects.toThrow(/Network changed in Freighter/);
+    ).rejects.toThrow(/Network changed in your wallet/);
 
     // signTransaction must NOT have been called — we aborted before signing.
     expect(signTransaction).not.toHaveBeenCalled();
@@ -166,7 +167,7 @@ describe("#241 — fresh network check before signing", () => {
 
     await expect(
       buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "XLM", "TESTNET")
-    ).rejects.toThrow(/Network changed in Freighter/);
+    ).rejects.toThrow(/Network changed in your wallet/);
 
     expect(signTransaction).not.toHaveBeenCalled();
   });
@@ -177,7 +178,7 @@ describe("#241 — fresh network check before signing", () => {
 
     await expect(
       buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "XLM", "TESTNET")
-    ).rejects.toThrow(/Network changed in Freighter/);
+    ).rejects.toThrow(/Network changed in your wallet/);
 
     expect(signTransaction).not.toHaveBeenCalled();
   });

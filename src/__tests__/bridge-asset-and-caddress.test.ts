@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Keypair, StrKey, Operation } from "@stellar/stellar-sdk";
 import { buildAndSubmitPayment, bridgeViaContract } from "@/lib/stellar";
-import * as freighter from "@stellar/freighter-api";
 
 const G_SOURCE = Keypair.random().publicKey();
 const G_DEST = Keypair.random().publicKey();
@@ -12,12 +11,14 @@ const SPAM_USDC_ISSUER = Keypair.random().publicKey();
 const loadAccountMock = vi.fn();
 const submitTransactionMock = vi.fn();
 
-vi.mock("@stellar/freighter-api", () => ({
+// Wallet signing goes through @creit.tech/stellar-wallets-kit; these are
+// local stand-ins for the former @stellar/freighter-api mocks.
+const freighter = {
   signTransaction: vi.fn(),
   isConnected: vi.fn(),
   getAddress: vi.fn(),
   getNetwork: vi.fn(),
-}));
+};
 
 // Replace only Horizon.Server's network calls; every other export (Asset,
 // Operation, TransactionBuilder, StrKey, Keypair, ...) stays the real SDK
