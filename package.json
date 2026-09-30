@@ -17,10 +17,9 @@
   },
   "dependencies": {
     "@creit.tech/stellar-wallets-kit": "2.6.0",
-    "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^15.1.0",
     "lucide-react": "^1.17.0",
-    "next": "16.2.7",
+    "next": "16.3.6",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4"
@@ -38,11 +37,17 @@
     "@vitejs/plugin-react": "^6.0.4",
     "cross-env": "^10.1.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.7",
+    "eslint-config-next": "16.3.6",
     "husky": "^9.1.7",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "axios": "^1.18.0",
+    "bs58@4": "4.0.1",
+    "base-x@3": "3.0.11",
+    "toml": "^4.2.0"
   }
 }

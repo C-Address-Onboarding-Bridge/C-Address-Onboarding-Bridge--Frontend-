@@ -19,13 +19,11 @@ jobs:
           cache: npm
       - run: npm ci
 
-      # TODO(next-bounty): non-blocking. Every remaining advisory is transitive
-      # through @creit.tech/stellar-wallets-kit (which pulls the Solana wallet
-      # adapters) and @stellar/stellar-sdk, and clearing them needs major
-      # version bumps of both. Triage them deliberately, then drop this flag.
-      - name: Audit dependencies (advisory)
+      # Blocking. Transitive advisories through @creit.tech/stellar-wallets-kit
+      # and @stellar/stellar-sdk are pinned to patched versions via `overrides`
+      # in package.json.
+      - name: Audit dependencies
         run: npm audit --audit-level=high
-        continue-on-error: true
 
       - run: npm run lint
       - run: npm run typecheck
@@ -36,6 +34,10 @@ jobs:
       - run: npm run build
         env:
           ENFORCE_BUDGET: "true"
+          # A production build now fails fast if this is unset (#675) — CI
+          # only verifies the build succeeds, not real backend connectivity,
+          # so a placeholder is enough. A real deployment must set its own.
+          NEXT_PUBLIC_API_URL: "https://api.ci-placeholder.example"
 
   # Blocking. The specs in e2e/ are currently skipped (see the TODO at the top
   # of e2e/funding-flow.spec.ts -- their selectors drifted while this job could

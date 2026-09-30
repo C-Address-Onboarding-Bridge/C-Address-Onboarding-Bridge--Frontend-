@@ -4,6 +4,13 @@ import React from "react";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 
 // Mock useWallet so the bridge page renders without a real wallet context.
+// The lock/claims feature is behind the locked_transfers flag (#672), off by
+// default; this file doesn't exercise it, so the mocked value doesn't matter
+// beyond satisfying the provider requirement.
+vi.mock("@/contexts/FeatureFlagContext", () => ({
+  useFeatureFlag: () => false,
+}));
+
 vi.mock("@/components/wallet-provider", () => ({
   useWallet: vi.fn(),
 }));

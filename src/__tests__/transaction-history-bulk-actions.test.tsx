@@ -22,7 +22,10 @@ import type { BridgeTransactionData } from "@/lib/types";
  * fiat/CEX withdrawals aren't claimable timelocks at all.
  */
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.history.replaceState({}, "", "/");
+});
 
 const CLAIMABLE: BridgeTransactionData = {
   id: "claimable-1",
@@ -79,11 +82,18 @@ const FAILED_FIAT: BridgeTransactionData = {
 const ALL_TX = [CLAIMABLE, CLAIMABLE_2, PENDING_BRIDGE, CEX_WITHDRAWAL, FAILED_FIAT];
 
 function rowCheckbox(tx: BridgeTransactionData): HTMLElement {
-  return screen.getByRole("checkbox", { name: new RegExp(`Select .*${tx.amount} ${tx.asset}`) });
+  const typeLabel = {
+    "g-to-c": "G → C Bridge",
+    fiat: "Fiat Onramp",
+    cex: "CEX Withdrawal",
+  }[tx.type];
+  return screen.getByRole("checkbox", {
+    name: `Select ${typeLabel} of ${tx.amount} ${tx.asset}`,
+  });
 }
 
 describe("bulk row selection", () => {
-  it.skip("selects individual rows and shows a running count", () => {
+  it("selects individual rows and shows a running count", () => {
     render(<TransactionHistory transactions={ALL_TX} loading={false} network="TESTNET" />);
 
     expect(screen.queryByTestId("selection-count")).toBeNull();
@@ -98,7 +108,7 @@ describe("bulk row selection", () => {
     expect(screen.queryByTestId("selection-count")).toBeNull();
   });
 
-  it.skip("select-all only affects the currently filtered rows", () => {
+  it("select-all only affects the currently filtered rows", () => {
     render(<TransactionHistory transactions={ALL_TX} loading={false} network="TESTNET" />);
 
     fireEvent.change(screen.getByLabelText("Filter by status"), { target: { value: "confirmed" } });
@@ -115,18 +125,18 @@ describe("bulk row selection", () => {
     expect(rowCheckbox(CLAIMABLE)).toBeChecked();
   });
 
-  it.skip("respects an active text search when selecting all", () => {
+  it("respects an active text search when selecting all", async () => {
     render(<TransactionHistory transactions={ALL_TX} loading={false} network="TESTNET" />);
 
     fireEvent.change(screen.getByLabelText("Search transactions"), { target: { value: "USDC" } });
     // USDC rows: CEX_WITHDRAWAL, FAILED_FIAT.
-    fireEvent.click(screen.getByLabelText(/Select all 2 filtered/i));
+    fireEvent.click(await screen.findByLabelText(/Select all 2 filtered/i));
     expect(screen.getByTestId("selection-count").textContent).toBe("2 selected");
   });
 });
 
 describe("bulk export (mixed eligibility)", () => {
-  it.skip("stays enabled for a mixed selection since export applies to every row", () => {
+  it("stays enabled for a mixed selection since export applies to every row", () => {
     render(<TransactionHistory transactions={ALL_TX} loading={false} network="TESTNET" />);
 
     fireEvent.click(rowCheckbox(CLAIMABLE));
@@ -151,7 +161,7 @@ describe("bulk export (mixed eligibility)", () => {
 });
 
 describe("bulk claim (mixed eligibility)", () => {
-  it.skip("disables claim and explains why when only some selected rows are eligible", () => {
+  it("disables claim and explains why when only some selected rows are eligible", () => {
     render(<TransactionHistory transactions={ALL_TX} loading={false} network="TESTNET" />);
 
     // One eligible (confirmed g-to-c) + one ineligible (pending g-to-c).
@@ -169,7 +179,7 @@ describe("bulk claim (mixed eligibility)", () => {
     expect(screen.queryByTestId("bulk-claim-dialog")).toBeNull();
   });
 
-  it.skip("enables claim once every selected row is eligible, and requires confirmation before it acts", () => {
+  it("enables claim once every selected row is eligible, and requires confirmation before it acts", () => {
     render(<TransactionHistory transactions={ALL_TX} loading={false} network="TESTNET" />);
 
     fireEvent.click(rowCheckbox(CLAIMABLE));
@@ -194,7 +204,7 @@ describe("bulk claim (mixed eligibility)", () => {
     expect(screen.queryByTestId("selection-count")).toBeNull();
   });
 
-  it.skip("cancelling the confirmation dialog performs no action", () => {
+  it("cancelling the confirmation dialog performs no action", () => {
     render(<TransactionHistory transactions={ALL_TX} loading={false} network="TESTNET" />);
 
     fireEvent.click(rowCheckbox(CLAIMABLE));
@@ -209,7 +219,7 @@ describe("bulk claim (mixed eligibility)", () => {
     expect(screen.getByTestId("selection-count").textContent).toBe("1 selected");
   });
 
-  it.skip("closes the confirmation dialog on Escape without acting", () => {
+  it("closes the confirmation dialog on Escape without acting", () => {
     render(<TransactionHistory transactions={ALL_TX} loading={false} network="TESTNET" />);
 
     fireEvent.click(rowCheckbox(CLAIMABLE));

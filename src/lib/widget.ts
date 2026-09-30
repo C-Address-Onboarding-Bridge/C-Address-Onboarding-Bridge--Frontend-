@@ -38,12 +38,105 @@ export interface WidgetConfig {
 export type WidgetConfigError = { ok: false; error: string };
 export type WidgetConfigResult = { ok: true; config: WidgetConfig } | WidgetConfigError;
 
+/**
+ * User-facing message shown when a payment cannot be started because the
+ * configured target is a C-address and C-address bridging is not yet
+ * implemented (#703). The widget must never call `bridgeViaContract` for a
+ * C-address, since that path always throws and would leave every payment in
+ * the error state without ever posting `success`.
+ */
+export const C_ADDRESS_BRIDGING_UNAVAILABLE_MESSAGE =
+  "Payments to C-addresses aren't available yet — C-address bridging is coming soon.";
+
+/**
+ * Whether the widget can currently complete a payment for the given config.
+ *
+ * `parseWidgetConfig` only accepts C-addresses, and the bridge step for
+ * C-address targets (`bridgeViaContract`) is not implemented, so no widget
+ * payment can succeed today. This gate lets the widget hide/disable the
+ * payment action and explain why, instead of driving the user into the
+ * always-failing bridge path (#703).
+ */
+export function isWidgetPaymentAvailable(config: Pick<WidgetConfig, "address">): boolean {
+  return !isCAddress(config.address);
+}
+
 function isWidgetAsset(value: string | null): value is WidgetAsset {
   return value !== null && (WIDGET_ASSETS as readonly string[]).includes(value);
 }
 
 function isStellarNetwork(value: string | null): value is StellarNetwork {
   return value !== null && value in STELLAR_NETWORK;
+}
+
+/**
+ * Registered embedder origins allowed to frame the widget. Read from the
+ * `NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS` env var (comma-separated absolute
+ * origins). When unset/empty the allowlist is empty, which means no origin
+ * is trusted — the widget refuses to run framed by an unregistered host.
+ */
+export function getAllowedEmbedderOrigins(
+  raw: string | undefined = typeof process !== "undefined"
+    ? process.env.NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS
+    : undefined
+): string[] {
+  if (!raw) return [];
+  const origins: string[] = [];
+  for (const entry of raw.split(",")) {
+    const value = entry.trim();
+    if (!value) continue;
+    try {
+      const parsed = new URL(value);
+      if (parsed.origin === value && !origins.includes(value)) origins.push(value);
+    } catch {
+      // Ignore malformed entries rather than trusting them.
+    }
+  }
+  return origins;
+}
+
+/**
+ * Builds the `frame-ancestors` CSP directive from the registered embedder
+ * allowlist. Falls back to `'none'` when nothing is registered so the widget
+ * can never be framed by an arbitrary site.
+ */
+export function buildFrameAncestorsCsp(allowedOrigins: string[]): string {
+  const sources = allowedOrigins.length > 0 ? allowedOrigins.join(" ") : "'none'";
+  return `frame-ancestors ${sources}`;
+}
+
+/**
+ * Cross-checks a self-declared `parentOrigin` against the browser's own
+ * view of who is framing us: `location.ancestorOrigins` (Chromium) and
+ * `document.referrer`. Returns true only when the declared origin is on the
+ * allowlist AND, when the browser exposes framing info, it agrees with the
+ * declaration. A page that merely sets `parentOrigin` in the URL can't pass
+ * this check unless it is genuinely the registered embedder.
+ */
+export function isTrustedParentOrigin(
+  parentOrigin: string,
+  allowedOrigins: string[],
+  evidence: { ancestorOrigins?: readonly string[] | null; referrer?: string | null } = {}
+): boolean {
+  if (!allowedOrigins.includes(parentOrigin)) return false;
+
+  const ancestors = evidence.ancestorOrigins;
+  if (ancestors && ancestors.length > 0) {
+    // The immediate parent is the last entry in ancestorOrigins.
+    const immediateParent = ancestors[ancestors.length - 1];
+    if (immediateParent && immediateParent !== parentOrigin) return false;
+  }
+
+  const referrer = evidence.referrer;
+  if (referrer) {
+    try {
+      if (new URL(referrer).origin !== parentOrigin) return false;
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -130,23 +223,4 @@ export function isMessageFromWidget(
   if (iframeWindow !== undefined && event.source !== iframeWindow) return false;
   const data = event.data as { source?: unknown } | null | undefined;
   return !!data && typeof data === "object" && data.source === WIDGET_MESSAGE_SOURCE;
-}
-
-/** Serializes a `WidgetConfig`-shaped set of embed options into a widget URL's query string. */
-export function buildWidgetSearchParams(options: {
-  address: string;
-  asset?: WidgetAsset;
-  amount?: string;
-  theme?: WidgetTheme;
-  network?: StellarNetwork;
-  parentOrigin: string;
-}): URLSearchParams {
-  const params = new URLSearchParams();
-  params.set("address", options.address);
-  if (options.asset) params.set("asset", options.asset);
-  if (options.amount) params.set("amount", options.amount);
-  if (options.theme) params.set("theme", options.theme);
-  if (options.network) params.set("network", options.network);
-  params.set("parentOrigin", options.parentOrigin);
-  return params;
 }

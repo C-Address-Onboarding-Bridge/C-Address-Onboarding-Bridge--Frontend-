@@ -9,6 +9,7 @@ import {
   type TelemetryConsent,
   captureEvent,
 } from "@/lib/telemetry";
+import { TelemetryConsentPrompt } from "@/components/TelemetryConsentPrompt";
 
 interface TelemetryContextType {
   consent: TelemetryConsent;
@@ -67,7 +68,12 @@ export function TelemetryProvider({ children }: TelemetryProviderProps) {
     return <>{children}</>;
   }
 
-  return <TelemetryContext.Provider value={value}>{children}</TelemetryContext.Provider>;
+  return (
+    <TelemetryContext.Provider value={value}>
+      {children}
+      {consent === "pending" && <TelemetryConsentPrompt />}
+    </TelemetryContext.Provider>
+  );
 }
 
 export function useTelemetry() {

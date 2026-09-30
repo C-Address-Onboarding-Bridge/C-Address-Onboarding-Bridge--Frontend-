@@ -80,14 +80,19 @@ describe("confirmations", () => {
 
   describe("getConfirmationUrl", () => {
     it("generates correct URL", () => {
-      const url = getConfirmationUrl(SAMPLE_HASH);
+      const url = getConfirmationUrl(SAMPLE_HASH, "TESTNET");
       expect(url).toContain(`/confirm/${SAMPLE_HASH}`);
+    });
+
+    it("includes the network so the confirmation route knows which Horizon to query (#676)", () => {
+      expect(getConfirmationUrl(SAMPLE_HASH, "TESTNET")).toContain("network=TESTNET");
+      expect(getConfirmationUrl(SAMPLE_HASH, "PUBLIC")).toContain("network=PUBLIC");
     });
 
     it("uses custom base URL", () => {
       const custom = "https://mybridge.com";
-      const url = getConfirmationUrl(SAMPLE_HASH, custom);
-      expect(url).toBe(`${custom}/confirm/${SAMPLE_HASH}`);
+      const url = getConfirmationUrl(SAMPLE_HASH, "TESTNET", custom);
+      expect(url).toBe(`${custom}/confirm/${SAMPLE_HASH}?network=TESTNET`);
     });
   });
 
