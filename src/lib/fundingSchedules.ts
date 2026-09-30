@@ -68,6 +68,13 @@ export interface FundingSchedule {
   frequency: FundingFrequency;
   /** Epoch ms the next funding is due. */
   nextRunAt: number;
+  /**
+   * Day-of-month (1-31) the monthly schedule is anchored to. Monthly runs are
+   * always computed from this anchor rather than from the previous (possibly
+   * clamped) run date, so a schedule on the 31st returns to the 31st after a
+   * short month instead of drifting to the 28th forever (#692).
+   */
+  anchorDay?: number;
   createdAt: number;
   updatedAt: number;
   paused: boolean;
@@ -176,6 +183,9 @@ export function isRenderableSchedule(value: unknown): value is FundingSchedule {
   if (!isFundingLinkAsset(v.asset)) return false;
   if (!isFundingFrequency(v.frequency)) return false;
   if (typeof v.nextRunAt !== "number" || !Number.isFinite(v.nextRunAt)) return false;
+  if (v.anchorDay !== undefined && (!Number.isInteger(v.anchorDay) || v.anchorDay < 1 || v.anchorDay > 31)) {
+    return false;
+  }
   if (typeof v.createdAt !== "number" || !Number.isFinite(v.createdAt)) return false;
   if (typeof v.updatedAt !== "number" || !Number.isFinite(v.updatedAt)) return false;
   if (typeof v.paused !== "boolean") return false;
@@ -288,10 +298,35 @@ function createScheduleId(): string {
  * Jan 31 + 1 month -> Feb 28/29, not Mar 3) — the same kind of calendar edge
  * case `computeNextRunAt`'s callers rely on being handled once, correctly,
  * rather than re-solved ad hoc.
+ *
+ * Monthly schedules must pass the original `anchorDay` (day-of-month, 1-31)
+ * so each run is computed from the anchor rather than from the previous,
+ * possibly-clamped run date. Without it a schedule on the 31st would clamp to
+ * the 28th in February and then stay on the 28th forever (#692). When
+ * `anchorDay` is omitted the day-of-month of `from` is used as the anchor.
  */
-export function computeNextRunAt(frequency: FundingFrequency, from: number): number {
+export function computeNextRunAt(frequency: FundingFrequency, from: number, anchorDay?: number): number {
   const DAY_MS = 24 * 60 * 60 * 1000;
   if (frequency === "weekly") return from + 7 * DAY_MS;
-  if (frequen
+  if (frequency === "biweekly") return from + 14 * DAY_MS;
 
-/* … truncated 7510 chars — edit only what you need near the top … */
+  const base = new Date(from);
+  const anchor = anchorDay ?? base.getDate();
+  const year = base.getFullYear();
+  const month = base.getMonth() + 1;
+  const lastDayOfTargetMonth = new Date(year, month + 1, 0).getDate();
+  const day = Math.min(anchor, lastDayOfTargetMonth);
+  return new Date(year, month, day, base.getHours(), base.getMinutes(), base.getSeconds(), base.getMilliseconds()).getTime();
+}
+
+/**
+ * The day-of-month a monthly schedule is anchored to. Prefers the stored
+ * `anchorDay` and falls back to the day-of-month of `nextRunAt` for schedules
+ * saved before the anchor was persisted (#692).
+ */
+export function scheduleAnchorDay(schedule: FundingSchedule): number {
+  if (typeof schedule.anchorDay === "number") return schedule.anchorDay;
+  return new Date(schedule.nextRunAt).getDate();
+}
+
+/* … rest of file unchanged … */
