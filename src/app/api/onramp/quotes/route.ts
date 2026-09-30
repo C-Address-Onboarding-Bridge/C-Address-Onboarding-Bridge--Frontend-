@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { providers } from "@/components/routes/onramp-page";
+import { providers } from "@/lib/onrampProviders";
 import { isOnrampProvider, type OnrampProvider } from "@/lib/types";
 import type { LiveQuoteInput } from "@/lib/onrampQuotes";
 
@@ -7,7 +7,7 @@ import type { LiveQuoteInput } from "@/lib/onrampQuotes";
  * Optional live on-ramp quote proxy for #556's provider comparison.
  *
  * This repo vendors neither MoonPay's nor Transak's real quote API (their
- * `providers[].baseUrl` in `onramp-page.tsx` is a checkout *widget* URL, not
+ * `providers[].baseUrl` in `onrampProviders.ts` is a checkout *widget* URL, not
  * a quote endpoint) — the same "not vendored yet" situation `feeTiers.ts` and
  * `locks.ts` document for their own placeholder integrations. Rather than
  * guess at request/response shapes for APIs this repo has never called, each

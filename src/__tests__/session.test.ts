@@ -58,7 +58,7 @@ describe("wallet session persistence (#343)", () => {
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
   });
 
-  it.skip("treats a future-stamped record as expired", () => {
+  it("treats a future-stamped record as expired", () => {
     markDisconnected(ADDRESS, NOW + 60_000);
     expect(loadSession(NOW).manuallyDisconnected).toBe(false);
   });
@@ -112,7 +112,7 @@ describe("wallet session persistence (#343)", () => {
     }
   });
 
-  it.skip("isSessionExpired brackets the TTL", () => {
+  it("isSessionExpired brackets the TTL", () => {
     const session = { address: ADDRESS, manuallyDisconnected: true, updatedAt: NOW, selectedWalletId: null };
     expect(isSessionExpired(session, NOW)).toBe(false);
     expect(isSessionExpired(session, NOW + SESSION_TTL_MS)).toBe(false);
