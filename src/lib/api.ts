@@ -4,7 +4,8 @@
  * Handles health checks, transaction submission, and status polling.
  */
 import type { BridgeTransactionData, StellarNetwork } from "./types";
-import type { FeeTierStatus } from "./feeTiers";
+import { buildFeeTierStatus, type FeeTierStatus } from "./feeTiers";
+import { getRebateVolume } from "./stellar";
 // NOTE(ci-cleanup): without this, `Lock` silently resolved to the DOM Web Locks
 // API type from lib.dom, so every lock field access failed to typecheck.
 import type { Lock } from "./locks";
@@ -31,7 +32,37 @@ export interface HealthStatus {
   circuitBreakers: Record<string, { state: CircuitState; failures: number; lastFailure?: string }>;
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.example.com';
+/**
+ * Resolves the backend API's base URL (#675).
+ *
+ * Every function below already swallows its own request failures (#498) —
+ * that's correct for a transient network blip, but it also meant a
+ * production deploy that forgot NEXT_PUBLIC_API_URL silently sent every
+ * request to a domain this project doesn't control, with nothing ever
+ * surfacing the misconfiguration (the health banner would just quietly show
+ * nothing). Throws immediately instead, but only when NODE_ENV is actually
+ * 'production' — local dev and test runs keep the harmless fallback so
+ * nobody needs this var set just to run `npm test`.
+ *
+ * Every page that transitively imports this module gets evaluated during
+ * `next build`'s static-generation step, so this throw fails the build
+ * itself for a production build, not just the first request at runtime.
+ */
+function resolveApiBaseUrl(): string {
+  const url = process.env.NEXT_PUBLIC_API_URL;
+  if (url) return url;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'NEXT_PUBLIC_API_URL is not set. Set it in your production environment before building/deploying — ' +
+        'without it, every API call silently targets a domain this project does not control.'
+    );
+  }
+  return 'https://api.example.com';
+}
+
+// Exported so the server-only proxy routes under src/app/api/backend/ (#674)
+// can forward to the same backend without re-resolving/re-validating this.
+export const API_BASE_URL = resolveApiBaseUrl();
 
 const SERVICE_STATES: ServiceState[] = ['up', 'down', 'degraded'];
 const CIRCUIT_STATES: CircuitState[] = ['closed', 'open', 'half-open'];
@@ -333,7 +364,7 @@ export interface CreateLockParams {
 
 /** Creates a new timelocked transfer. */
 export async function createLock(params: CreateLockParams): Promise<Lock> {
-  const response = await fetch(`${API_BASE_URL}/locks`, {
+  const response = await fetch(`/api/backend/locks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
@@ -348,7 +379,7 @@ export async function createLock(params: CreateLockParams): Promise<Lock> {
 /** Lists locks incoming to `recipient` — both pending and already-claimed. */
 export async function listIncomingLocks(recipient: string, network: StellarNetwork): Promise<Lock[]> {
   const response = await fetch(
-    `${API_BASE_URL}/locks?recipient=${encodeURIComponent(recipient)}&network=${encodeURIComponent(network)}`
+    `/api/backend/locks?recipient=${encodeURIComponent(recipient)}&network=${encodeURIComponent(network)}`
   );
 
   if (!response.ok) {
@@ -399,13 +430,15 @@ export async function claimLock(
 }
 
 /**
- * Fee tier preview (#468).
+ * Fee tier preview (#468, #673).
  *
- * PLACEHOLDER INTERFACE: see `src/lib/feeTiers.ts` for why — no contract
- * source or tier API route exists anywhere in this repo to build against
- * yet. The route (`GET /fee-tiers/preview?address=&network=`) and response
- * shape are a best-guess and must be reconciled against the real API once it
- * lands.
+ * Reads the account's cumulative volume on-chain via getRebateVolume (a
+ * Soroban RPC simulation of the bridge contract's rebate_for — see that
+ * function's own doc comment in src/lib/stellar.ts for what's confirmed vs.
+ * still a best guess) and maps it onto the tier ladder with
+ * buildFeeTierStatus. `/fee-tiers/preview` never existed as a backend route
+ * (#673) — this replaces that placeholder entirely rather than proxying to
+ * a route that isn't there.
  *
  * Returns null both when the account has no tier data yet and when the
  * request itself fails — callers treat "no data" as "hide the tier display"
@@ -417,7 +450,7 @@ export async function getFeeTierPreview(
 ): Promise<FeeTierStatus | null> {
   try {
     const response = await fetch(
-      `${API_BASE_URL}/fee-tiers/preview?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
+      `/api/backend/referrals/stats?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
     );
     if (!response.ok) {
       return null;
