@@ -1,13 +1,9 @@
-"use client";
-
-// This page calls useWallet() (a client hook) but was missing the directive.
-// CI never caught it because `npm ci` failed before the build step ever ran.
 import { ArrowRight, Shield, Zap, CreditCard, Building2, Globe, Code } from "lucide-react";
 import { PrefetchLink } from "@/components/prefetch-link";
 import { RecentActivityFeed } from "@/components/RecentActivityFeed";
 import { OnboardingChecklist } from "@/components/OnboardingChecklist";
 import OnboardingFlow from "@/components/onboarding-flow";
-import { useWallet } from "@/components/wallet-provider";
+import { LandingOnboardingChecklist } from "@/components/landing-onboarding-checklist";
 
 const features = [
   {
@@ -40,7 +36,7 @@ const steps = [
   {
     step: "01",
     title: "Connect Wallet",
-    description: "Connect your Freighter wallet — the connected account funds the transfer.",
+    description: "Connect your wallet — the connected account funds the transfer.",
   },
   {
     step: "02",
@@ -63,18 +59,21 @@ function useOnboardingSteps() {
   const { isConnected } = useWallet();
   return [
     {
+      id: "connect-wallet",
       title: "Connect Wallet",
-      description: "Connect your Freighter wallet to get started.",
+      description: "Connect your wallet to get started.",
       href: "/dashboard",
       check: () => isConnected,
     },
     {
+      id: "choose-funding-route",
       title: "Choose Funding Route",
       description: "Select G-to-C bridge, fiat onramp, or CEX withdrawal.",
       href: "/bridge",
       check: () => false,
     },
     {
+      id: "complete-first-transfer",
       title: "Complete First Transfer",
       description: "Fund your first C-address and confirm the transaction.",
       href: "/bridge",
@@ -84,8 +83,6 @@ function useOnboardingSteps() {
 }
 
 export default function LandingPage() {
-  const onboardingSteps = useOnboardingSteps();
-  
   return (
     <div>
       {/* First-visit guided onboarding. Persists progress and suppresses itself
@@ -128,7 +125,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <OnboardingChecklist steps={onboardingSteps} />
+      <LandingOnboardingChecklist />
 
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-24">
         <div className="text-center mb-16">
@@ -192,20 +189,20 @@ export default function LandingPage() {
 
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
         <div className="relative p-12 rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--primary)]/5 via-[var(--secondary)]/5 to-transparent overflow-hidden text-center">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-[var(--primary)]/5 rounded-full blur-3xl" />
-          <h2 className="text-3xl font-bold mb-4 relative">
-            Ready to Bridge?
-          </h2>
-          <p className="text-[var(--text-muted)] max-w-lg mx-auto mb-8 relative">
-            Start funding Soroban smart accounts directly. No G-address required for new users.
-          </p>
-          <PrefetchLink
-            href="/bridge"
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors glow relative"
-          >
-            Launch Bridge
-            <ArrowRight className="w-4 h-4" />
-          </PrefetchLink>
+          <div className="absolute top-0 right-0 w-64 h-64 bg-[var(--primary)]/10 rounded-full blur-3xl" />
+          <div className="relative">
+            <h2 className="text-3xl font-bold mb-4">Ready to onboard your users?</h2>
+            <p className="text-[var(--text-muted)] max-w-xl mx-auto mb-8">
+              Start funding Soroban smart accounts in minutes.
+            </p>
+            <PrefetchLink
+              href="/bridge"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors glow"
+            >
+              Get Started
+              <ArrowRight className="w-4 h-4" />
+            </PrefetchLink>
+          </div>
         </div>
       </section>
     </div>

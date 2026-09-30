@@ -4,6 +4,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, Root } from "react-dom/client";
 import DashboardPage from "@/components/routes/dashboard-page";
 
+// DashboardPage mounts ClaimsPanel, which is gated behind the
+// locked_transfers flag (#672) — mock it off since none of these tests
+// exercise the lock/claims feature.
+vi.mock("@/contexts/FeatureFlagContext", () => ({
+  useFeatureFlag: () => false,
+}));
+
 const ADDRESS = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5V3VQ";
 
 const mockUseWallet = vi.hoisted(() => vi.fn());
@@ -43,6 +50,10 @@ vi.mock("@/lib/avatar", () => ({
   validateAvatarFile: vi.fn(() => ({ ok: true })),
   isRenderableAvatar: vi.fn(() => true),
   AVATAR_ACCEPT_ATTR: "image/*",
+}));
+
+vi.mock("@/lib/api", () => ({
+  getFeeTierPreview: vi.fn(async () => null),
 }));
 
 vi.mock("@/hooks/useCopyToClipboard", () => ({
@@ -101,7 +112,7 @@ describe("Dashboard faucet", () => {
     });
   };
 
-  it.skip("renders faucet button on testnet when balance is zero", async () => {
+  it("renders faucet button on testnet when balance is zero", async () => {
     await renderDashboard();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import React from "react";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { FeatureFlagPanel } from "@/components/FeatureFlagPanel";
@@ -18,6 +18,7 @@ describe("FeatureFlagPanel Keyboard & Accessibility Flow", () => {
   afterEach(() => {
     cleanup();
     process.env = originalEnv;
+    vi.restoreAllMocks();
   });
 
   it("renders trigger button with aria-expanded false initially", () => {
@@ -68,5 +69,19 @@ describe("FeatureFlagPanel Keyboard & Accessibility Flow", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(toggleButton.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(toggleButton);
+  });
+
+  it("does not render the panel in production even when a public token is set in localStorage", () => {
+    process.env = { ...originalEnv, NODE_ENV: "production" };
+    localStorage.setItem("ff_panel_token", "any-public-value");
+
+    render(
+      <FeatureFlagProvider>
+        <FeatureFlagPanel />
+      </FeatureFlagProvider>
+    );
+
+    expect(screen.queryByRole("button", { name: /toggle feature flags panel/i })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

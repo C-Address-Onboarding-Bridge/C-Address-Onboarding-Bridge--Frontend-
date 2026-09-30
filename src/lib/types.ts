@@ -28,8 +28,19 @@ export interface WalletState {
  */
 export type BridgeTransactionStatus = "pending" | "confirmed" | "failed";
 
-/** How funds reached the destination C-address. */
-export type BridgeTransactionKind = "g-to-c" | "fiat" | "cex";
+/**
+ * How funds moved. `g-to-c`/`fiat`/`cex` are the bridge flows; the rest are
+ * the Horizon operation types a plain account history can contain. (#720)
+ */
+export type BridgeTransactionKind =
+  | "g-to-c"
+  | "fiat"
+  | "cex"
+  | "payment"
+  | "path-payment"
+  | "create-account"
+  | "account-merge"
+  | "contract-transfer";
 
 /** Fiat on-ramp providers the app can quote against. */
 export type OnrampProvider = "moonpay" | "transak";
@@ -131,10 +142,25 @@ export const SOROBAN_RPC_URL = {
   TESTNET: process.env.NEXT_PUBLIC_SOROBAN_RPC_URL_TESTNET ?? "https://soroban-testnet.stellar.org",
 } as const;
 
+// Horizon endpoints default to SDF's public hosts but can be overridden per
+// environment via NEXT_PUBLIC_HORIZON_URL_PUBLIC / NEXT_PUBLIC_HORIZON_URL_TESTNET
+// so operators can point the app at their own Horizon instance. (#689)
 export const HORIZON_URL = {
-  PUBLIC: "https://horizon.stellar.org",
-  TESTNET: "https://horizon-testnet.stellar.org",
+  PUBLIC: process.env.NEXT_PUBLIC_HORIZON_URL_PUBLIC ?? "https://horizon.stellar.org",
+  TESTNET: process.env.NEXT_PUBLIC_HORIZON_URL_TESTNET ?? "https://horizon-testnet.stellar.org",
 } as const;
+
+/**
+ * Returns a descriptive configuration error when a required URL is empty, or
+ * `null` when the value is usable. Callers surface the message instead of
+ * letting an empty string resolve to a non-existent hostname. (#689)
+ */
+export function getConfigError(name: string, url: string): string | null {
+  if (!url || url.trim() === "") {
+    return `Missing configuration: ${name} is not set. Provide it via the corresponding NEXT_PUBLIC_* environment variable.`;
+  }
+  return null;
+}
 
 export const BRIDGE_CONTRACT_ID = process.env.NEXT_PUBLIC_BRIDGE_CONTRACT_ID || "";
 

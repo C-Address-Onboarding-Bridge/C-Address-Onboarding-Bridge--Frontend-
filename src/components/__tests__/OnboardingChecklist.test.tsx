@@ -8,9 +8,9 @@ vi.mock('@/components/wallet-provider', () => ({
 }));
 
 const defaultSteps = [
-  { title: 'Connect Wallet', description: 'Connect your wallet.', href: '/dashboard', check: () => false },
-  { title: 'Fund Account', description: 'Add funds to your account.', href: '/bridge', check: () => false },
-  { title: 'Complete Transfer', description: 'Send your first transaction.', href: '/bridge', check: () => false },
+  { id: 'connect-wallet', title: 'Connect Wallet', description: 'Connect your wallet.', href: '/dashboard', check: () => false },
+  { id: 'fund-account', title: 'Fund Account', description: 'Add funds to your account.', href: '/bridge', check: () => false },
+  { id: 'complete-transfer', title: 'Complete Transfer', description: 'Send your first transaction.', href: '/bridge', check: () => false },
 ];
 
 describe('OnboardingChecklist', () => {
@@ -44,8 +44,8 @@ describe('OnboardingChecklist', () => {
 
   it('marks step complete when check returns true', () => {
     const steps = [
-      { title: 'Connect Wallet', description: 'Connect your wallet.', href: '/dashboard', check: () => true },
-      { title: 'Fund Account', description: 'Add funds.', href: '/bridge', check: () => false },
+      { id: 'connect-wallet', title: 'Connect Wallet', description: 'Connect your wallet.', href: '/dashboard', check: () => true },
+      { id: 'fund-account', title: 'Fund Account', description: 'Add funds.', href: '/bridge', check: () => false },
     ];
     render(<OnboardingChecklist steps={steps} />);
     expect(screen.getByText('Connect Wallet').closest('a')).toHaveClass('border-[var(--success)]/20');
