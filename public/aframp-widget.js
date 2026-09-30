@@ -12,10 +12,10 @@
  * that module so the two sides of the contract cannot silently drift apart.
  *
  * Usage:
- *   <div id="aframp-widget"></div>
- *   <script src="https://<this-app-origin>/aframp-widget.js"></script>
+ *   <div id="caddress-widget"></div>
+ *   <script src="https://<this-app-origin>/caddress-widget.js"></script>
  *   <script>
- *     AframpWidget.mount(document.getElementById("aframp-widget"), {
+ *     CAddressWidget.mount(document.getElementById("caddress-widget"), {
  *       widgetOrigin: "https://<this-app-origin>",
  *       address: "C...",        // required: destination C-address
  *       asset: "XLM",           // optional, default "XLM"
@@ -31,7 +31,10 @@
 (function (global) {
   "use strict";
 
-  var WIDGET_MESSAGE_SOURCE = "aframp-widget";
+  var WIDGET_MESSAGE_SOURCE = "caddress-widget";
+  // Deprecated alias kept for one release so existing integrators that still
+  // post the old source tag keep working.
+  var LEGACY_WIDGET_MESSAGE_SOURCE = "aframp-widget";
 
   /**
    * True when a `message` event genuinely came from this mount's iframe:
@@ -45,7 +48,8 @@
     if (event.origin !== widgetOrigin) return false;
     if (event.source !== iframeWindow) return false;
     var data = event.data;
-    return !!data && typeof data === "object" && data.source === WIDGET_MESSAGE_SOURCE;
+    if (!data || typeof data !== "object") return false;
+    return data.source === WIDGET_MESSAGE_SOURCE || data.source === LEGACY_WIDGET_MESSAGE_SOURCE;
   }
 
   /**
@@ -80,10 +84,10 @@
    */
   function mount(container, config) {
     if (!config || !config.widgetOrigin) {
-      throw new Error("AframpWidget.mount: config.widgetOrigin is required");
+      throw new Error("CAddressWidget.mount: config.widgetOrigin is required");
     }
     if (!config.address) {
-      throw new Error("AframpWidget.mount: config.address is required");
+      throw new Error("CAddressWidget.mount: config.address is required");
     }
 
     var widgetOrigin = new URL(config.widgetOrigin).origin;
@@ -92,7 +96,7 @@
     iframe.style.border = "0";
     iframe.style.width = "100%";
     iframe.style.minHeight = "200px";
-    iframe.setAttribute("title", "Fund with Aframp");
+    iframe.setAttribute("title", "Fund with C-Address Bridge");
 
     function handleMessage(event) {
       if (!isMessageFromWidget(event, widgetOrigin, iframe.contentWindow)) return;

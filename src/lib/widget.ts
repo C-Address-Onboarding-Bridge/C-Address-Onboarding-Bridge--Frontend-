@@ -4,14 +4,21 @@
  * Pure config-parsing and postMessage helpers used by both sides of the
  * embed: the widget page itself (`src/app/widget/page.tsx`, running inside
  * a third-party host's iframe) and the host-facing loader
- * (`public/aframp-widget.js`, running on the host page). Kept dependency-free
+ * (`public/caddress-widget.js`, running on the host page). Kept dependency-free
  * (no React, no wallet-provider, no routing) so the widget page that imports
  * it stays small and standalone, per the issue's own requirement.
  */
 import { isCAddress, isValidStellarAddress, isValidStellarAmount } from "./stellar";
 import { STELLAR_NETWORK, type StellarNetwork } from "./types";
 
-export const WIDGET_MESSAGE_SOURCE = "aframp-widget" as const;
+export const WIDGET_MESSAGE_SOURCE = "caddress-widget" as const;
+
+/**
+ * Deprecated message source kept for one release so hosts still listening
+ * for the old `"aframp-widget"` source keep working. Remove after the
+ * deprecation window.
+ */
+export const WIDGET_MESSAGE_SOURCE_DEPRECATED = "aframp-widget" as const;
 
 /** Assets the widget will accept a preset amount/asset param for. */
 export const WIDGET_ASSETS = ["XLM", "USDC"] as const;
@@ -213,6 +220,10 @@ export function postWidgetMessage(
  * Used on the host/loader side — the receiving end has to distrust every
  * `message` event by default, since any page can post to any window it has
  * a reference to.
+ *
+ * Accepts both the current message source and the deprecated
+ * `"aframp-widget"` source for one release, so hosts that haven't migrated
+ * yet keep receiving results.
  */
 export function isMessageFromWidget(
   event: Pick<MessageEvent, "origin" | "source" | "data">,
@@ -222,5 +233,6 @@ export function isMessageFromWidget(
   if (event.origin !== widgetOrigin) return false;
   if (iframeWindow !== undefined && event.source !== iframeWindow) return false;
   const data = event.data as { source?: unknown } | null | undefined;
-  return !!data && typeof data === "object" && data.source === WIDGET_MESSAGE_SOURCE;
+  if (!data || typeof data !== "object") return false;
+  return data.source === WIDGET_MESSAGE_SOURCE || data.source === WIDGET_MESSAGE_SOURCE_DEPRECATED;
 }
