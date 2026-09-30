@@ -52,6 +52,17 @@
     return data.source === WIDGET_MESSAGE_SOURCE || data.source === LEGACY_WIDGET_MESSAGE_SOURCE;
   }
 
+  /**
+   * The origin the widget should trust as its parent. We never trust the
+   * host page's self-declared value blindly: the widget page cross-checks
+   * `parentOrigin` against `document.referrer`/`location.ancestorOrigins`
+   * (see isAllowedParentOrigin in src/lib/widget.ts). Here we only forward
+   * the host's own origin, which the widget will independently verify.
+   */
+  function resolveParentOrigin() {
+    return global.location.origin;
+  }
+
   function buildWidgetUrl(config) {
     var url = new URL("/widget", config.widgetOrigin);
     url.searchParams.set("address", config.address);
@@ -61,8 +72,9 @@
     if (config.network) url.searchParams.set("network", config.network);
     // The widget only ever posts results back to this exact origin — see
     // isMessageFromWidget's counterpart, isAllowedParentOrigin, in
-    // src/lib/widget.ts.
-    url.searchParams.set("parentOrigin", global.location.origin);
+    // src/lib/widget.ts. The widget re-derives and cross-checks this value
+    // against the real embedding context before trusting it.
+    url.searchParams.set("parentOrigin", resolveParentOrigin());
     return url.toString();
   }
 
@@ -122,9 +134,10 @@
     };
   }
 
-  var api = { mount: mount, isMessageFromWidget: isMessageFromWidget, buildWidgetUrl: buildWidgetUrl };
-  global.CAddressWidget = api;
-  // Deprecated alias kept for one release so existing host pages that still
-  // reference the old global keep working.
-  global.AframpWidget = api;
+  global.AframpWidget = {
+    mount: mount,
+    isMessageFromWidget: isMessageFromWidget,
+    buildWidgetUrl: buildWidgetUrl,
+    resolveParentOrigin: resolveParentOrigin,
+  };
 })(typeof window !== "undefined" ? window : globalThis);

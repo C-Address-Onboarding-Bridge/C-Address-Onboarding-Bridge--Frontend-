@@ -28,18 +28,18 @@ The backend exposes a health check at:
 GET /health
 ```
 
-Response format:
+Real response format (note: `ok`, not `healthy`; `dependencies`/`circuits`, not `services`/`circuitBreakers`):
 
 ```json
 {
-  "status": "healthy" | "degraded" | "unhealthy",
+  "status": "ok" | "degraded" | "unhealthy",
   "timestamp": "2026-08-27T12:00:00Z",
-  "services": {
+  "dependencies": {
     "horizon": "up" | "down" | "degraded",
     "soroban_rpc": "up" | "down" | "degraded",
     "api": "up" | "down" | "degraded"
   },
-  "circuitBreakers": {
+  "circuits": {
     "transaction_submission": {
       "state": "closed" | "open" | "half-open",
       "failures": 5,
@@ -48,6 +48,14 @@ Response format:
   }
 }
 ```
+
+`getHealthStatus` (`src/lib/api.ts`) passes this through `parseHealthResponse`,
+which validates it at runtime and maps it into the UI's stable `HealthStatus`
+model — `ok`/`healthy` both normalize to `status: 'healthy'`, `dependencies`
+becomes `services`, and `circuits` becomes `circuitBreakers`. Dependency/
+circuit key names aren't assumed beyond having a recognized state value, and
+a response that doesn't parse degrades to empty maps rather than throwing, so
+a further backend shape change can't crash the banner the way this one did.
 
 ## User-Facing Behavior
 

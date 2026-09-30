@@ -40,7 +40,7 @@ const steps = [
   {
     step: "01",
     title: "Connect Wallet",
-    description: "Connect your Freighter wallet — the connected account funds the transfer.",
+    description: "Connect your wallet — the connected account funds the transfer.",
   },
   {
     step: "02",
@@ -63,18 +63,21 @@ function useOnboardingSteps() {
   const { isConnected } = useWallet();
   return [
     {
+      id: "connect-wallet",
       title: "Connect Wallet",
-      description: "Connect your Freighter wallet to get started.",
+      description: "Connect your wallet to get started.",
       href: "/dashboard",
       check: () => isConnected,
     },
     {
+      id: "choose-funding-route",
       title: "Choose Funding Route",
       description: "Select G-to-C bridge, fiat onramp, or CEX withdrawal.",
       href: "/bridge",
       check: () => false,
     },
     {
+      id: "complete-first-transfer",
       title: "Complete First Transfer",
       description: "Fund your first C-address and confirm the transaction.",
       href: "/bridge",

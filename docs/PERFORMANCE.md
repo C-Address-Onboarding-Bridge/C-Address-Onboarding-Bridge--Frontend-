@@ -4,9 +4,24 @@ This document defines the performance budgets for the C-Address Bridge applicati
 
 ## Bundle Size Budget
 
-**Initial JavaScript: 1100 KB**
+**Initial JavaScript: 700 KB**
 
-The initial JS budget is set as a ratchet just above the current maximum single-route size. The `/profile` route is the largest at ~1000 KB, primarily due to the `@stellar/stellar-sdk` (~700 KB) which is included in every wallet-aware route.
+The initial JS budget is a ratchet just above the current maximum single-route size. Route sizes below are the uncompressed JavaScript referenced by each route's production HTML after moving SDK and wallet-kit imports behind asynchronous operations. The Stellar SDK remains in a deferred ~957 KB chunk and is not part of first-render route JavaScript.
+
+| Route | Initial JS |
+|---|---:|
+| `/` | 643.62 KB |
+| `/address-book` | 638.79 KB |
+| `/bridge` | 672.75 KB |
+| `/cex` | 634.89 KB |
+| `/dashboard` | 675.17 KB |
+| `/onramp` | 644.83 KB |
+| `/profile` | 645.03 KB |
+| `/referrals` | 661.19 KB |
+| `/schedules` | 648.51 KB |
+| `/widget` | 629.20 KB |
+
+The values are from the production build's route HTML and include the shared Next.js runtime plus route-specific scripts. Dynamically rendered parameterized routes do not have standalone prerendered HTML files in this build.
 
 When bundle size increases, the build fails with `ERROR in asset size limit: The following asset(s) exceed the specified limit...` This prompts engineers to investigate and optimize before merge.
 
@@ -14,13 +29,13 @@ When bundle size increases, the build fails with `ERROR in asset size limit: The
 
 1. **Temporarily override for a specific build:**
    ```bash
-   NEXT_PUBLIC_INITIAL_JS_BUDGET_KB=1150 npm run build
+   NEXT_PUBLIC_INITIAL_JS_BUDGET_KB=700 npm run build
    ```
 
 2. **Permanently raise the budget** (in `next.config.ts`):
    ```typescript
    const initialJsBudgetBytes =
-     Number(process.env.NEXT_PUBLIC_INITIAL_JS_BUDGET_KB ?? "1150") * 1024;
+     Number(process.env.NEXT_PUBLIC_INITIAL_JS_BUDGET_KB ?? "700") * 1024;
    ```
    Only do this after optimizing the code and confirming the larger bundle is necessary.
 
@@ -53,7 +68,7 @@ npm run analyze -- --widget
 
 ## Enforcement
 
-- **CI:** Builds fail when initial JS exceeds 1100 KB
+- **CI:** Builds fail when initial JS exceeds 700 KB
 - **PR Reports:** Bundle analysis appears in pull request comments showing the delta from main
 - **Local:** Run `npm run analyze` to see a visual breakdown in `.next/analyze/__bundle_report.html`
 
@@ -66,7 +81,7 @@ Lighthouse scores and Core Web Vitals are tracked in:
 
 ## Recent optimization history
 
-- **Initial SDK:** Stellar SDK contributes ~700 KB; targeted optimization via [`optimizePackageImports`](../next.config.ts#L111-L116) in Webpack
+- **Initial SDK:** Stellar SDK is kept out of initial route JS and loaded from deferred chunks when wallet or network operations need it
 - **Bundle analyzer:** Enabled with `npm run analyze` to identify large modules before they land
 
 ## Rationale

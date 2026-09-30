@@ -14,8 +14,12 @@
  *      import feature accepts a file from disk, so every entry is
  *      re-validated on read; a corrupted, hand-edited, or malicious entry is
  *      dropped instead of breaking the whole list or being rendered as-is.
+ *
+ * Entries are scoped per network (#693): a testnet recipient must not appear
+ * (or be acted on) while the app is on mainnet, and vice versa. The legacy
+ * unscoped key is migrated once into the current network's bucket.
  */
-import { validateStellarAddress } from "@/components/AddressForm";
+import { validateStellarAddress } from "@/lib/addressValidation";
 import { hasControlChars } from "./profile";
 
 /** 32 characters — same budget as a profile display name (`DISPLAY_NAME_MAX_LENGTH`). */
@@ -23,11 +27,28 @@ export const RECIPIENT_LABEL_MAX_LENGTH = 32;
 
 const STORAGE_KEY = "addressBook:recipients";
 
+/**
+ * Networks the address book can be scoped to. Kept as a plain string union so
+ * this module stays free of any Stellar SDK import.
+ */
+export type AddressBookNetwork = "mainnet" | "testnet";
+
+/**
+ * Resolves the network the address book should be scoped to. Defaults to
+ * `mainnet` when nothing is configured, matching the app's default network.
+ */
+export function currentNetwork(): AddressBookNetwork {
+  const raw = process.env.NEXT_PUBLIC_STELLAR_NETWORK;
+  return raw === "testnet" ? "testnet" : "mainnet";
+}
+
 export interface SavedRecipient {
   id: string;
   label: string;
   address: string;
   createdAt: number;
+  /** Network this recipient was saved on (#693). */
+  network: AddressBookNetwork;
 }
 
 export type RecipientValidation =
@@ -41,7 +62,12 @@ export interface ImportResult {
 }
 
 /** Storage key for the address book. Exported so tests and docs can reference it. */
-export function addressBookStorageKey(): string {
+export function addressBookStorageKey(network: AddressBookNetwork = currentNetwork()): string {
+  return `${STORAGE_KEY}:${network}`;
+}
+
+/** Legacy unscoped key, kept only so existing data can be migrated once. */
+export function legacyAddressBookStorageKey(): string {
   return STORAGE_KEY;
 }
 
@@ -58,7 +84,7 @@ function storage(): Storage | null {
 /**
  * Validates and normalises a label + address pair before it is saved.
  * Address validation is delegated to `validateStellarAddress` from
- * AddressForm.tsx rather than re-implemented here, so the address book and
+ * `src/lib/addressValidation.ts` rather than re-implemented here, so the address book and
  * the funding form always agree on what counts as a valid address.
  */
 export function validateRecipient(rawLabel: string, rawAddress: string): RecipientValidation {
@@ -91,17 +117,18 @@ export function isRenderableRecipient(value: unknown): value is SavedRecipient {
   if (hasControlChars(v.label)) return false;
   if (typeof v.address !== "string" || !validateStellarAddress(v.address).valid) return false;
   if (typeof v.createdAt !== "number" || !Number.isFinite(v.createdAt)) return false;
+  if (v.network !== "mainnet" && v.network !== "testnet") return false;
 
   return true;
 }
 
-function readRaw(): unknown[] {
+function readRaw(network: AddressBookNetwork): unknown[] {
   const store = storage();
   if (!store) return [];
 
   let raw: string | null;
   try {
-    raw = store.getItem(STORAGE_KEY);
+    raw = store.getItem(addressBookStorageKey(network));
   } catch {
     return [];
   }
@@ -115,11 +142,11 @@ function readRaw(): unknown[] {
   }
 }
 
-function persist(recipients: SavedRecipient[]): boolean {
+function persist(recipients: SavedRecipient[], network: AddressBookNetwork): boolean {
   const store = storage();
   if (!store) return false;
   try {
-    store.setItem(STORAGE_KEY, JSON.stringify(recipients));
+    store.setItem(addressBookStorageKey(network), JSON.stringify(recipients));
     return true;
   } catch {
     return false;
@@ -134,11 +161,58 @@ function createRecipientId(): string {
 }
 
 /**
- * Reads the saved address book, dropping any entries that fail
- * re-validation (see module docs) instead of surfacing or throwing on them.
+ * One-time migration of the legacy unscoped address book into the current
+ * network's bucket (#693). Existing entries are preserved and tagged with the
+ * current network; the legacy key is removed so the migration runs once.
  */
-export function loadAddressBook(): SavedRecipient[] {
-  return readRaw().filter(isRenderableRecipient);
+export function migrateLegacyAddressBook(network: AddressBookNetwork = currentNetwork()): void {
+  const store = storage();
+  if (!store) return;
+
+  let raw: string | null;
+  try {
+    raw = store.getItem(STORAGE_KEY);
+  } catch {
+    return;
+  }
+  if (!raw) return;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+
+  if (Array.isArray(parsed)) {
+    const migrated = parsed
+      .filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null)
+      .map((entry) => ({ ...entry, network }))
+      .filter(isRenderableRecipient);
+
+    if (migrated.length > 0) {
+      const existing = readRaw(network).filter(isRenderableRecipient);
+      const existingIds = new Set(existing.map((r) => r.id));
+      const merged = [...existing, ...migrated.filter((r) => !existingIds.has(r.id))];
+      persist(merged, network);
+    }
+  }
+
+  try {
+    store.removeItem(STORAGE_KEY);
+  } catch {
+    // Ignore — the legacy key will simply be re-checked next load.
+  }
+}
+
+/**
+ * Reads the saved address book for the current network, dropping any entries
+ * that fail re-validation (see module docs) instead of surfacing or throwing
+ * on them.
+ */
+export function loadAddressBook(network: AddressBookNetwork = currentNetwork()): SavedRecipient[] {
+  migrateLegacyAddressBook(network);
+  return readRaw(network).filter(isRenderableRecipient).filter((r) => r.network === network);
 }
 
 /**
@@ -147,7 +221,11 @@ export function loadAddressBook(): SavedRecipient[] {
  * quota error), so callers can surface a message instead of silently losing
  * the entry.
  */
-export function saveRecipient(rawLabel: string, rawAddress: string): SavedRecipient | null {
+export function saveRecipient(
+  rawLabel: string,
+  rawAddress: string,
+  network: AddressBookNetwork = currentNetwork(),
+): SavedRecipient | null {
   const result = validateRecipient(rawLabel, rawAddress);
   if (!result.ok) return null;
 
@@ -156,10 +234,11 @@ export function saveRecipient(rawLabel: string, rawAddress: string): SavedRecipi
     label: result.label,
     address: result.address,
     createdAt: Date.now(),
+    network,
   };
 
-  const existing = loadAddressBook();
-  if (!persist([...existing, recipient])) return null;
+  const existing = loadAddressBook(network);
+  if (!persist([...existing, recipient], network)) return null;
   return recipient;
 }
 
@@ -167,30 +246,35 @@ export function saveRecipient(rawLabel: string, rawAddress: string): SavedRecipi
  * Updates an existing recipient's label/address by id. Returns false when
  * the input is invalid, the id doesn't exist, or the write failed.
  */
-export function updateRecipient(id: string, rawLabel: string, rawAddress: string): boolean {
+export function updateRecipient(
+  id: string,
+  rawLabel: string,
+  rawAddress: string,
+  network: AddressBookNetwork = currentNetwork(),
+): boolean {
   const result = validateRecipient(rawLabel, rawAddress);
   if (!result.ok) return false;
 
-  const existing = loadAddressBook();
+  const existing = loadAddressBook(network);
   const index = existing.findIndex((r) => r.id === id);
   if (index === -1) return false;
 
   const updated = [...existing];
   updated[index] = { ...existing[index], label: result.label, address: result.address };
-  return persist(updated);
+  return persist(updated, network);
 }
 
 /** Removes a recipient by id. Returns false if the id wasn't found or the write failed. */
-export function deleteRecipient(id: string): boolean {
-  const existing = loadAddressBook();
+export function deleteRecipient(id: string, network: AddressBookNetwork = currentNetwork()): boolean {
+  const existing = loadAddressBook(network);
   const next = existing.filter((r) => r.id !== id);
   if (next.length === existing.length) return false;
-  return persist(next);
+  return persist(next, network);
 }
 
 /** Serialises the address book to a JSON string for export/download. */
-export function exportAddressBook(): string {
-  return JSON.stringify(loadAddressBook(), null, 2);
+export function exportAddressBook(network: AddressBookNetwork = currentNetwork()): string {
+  return JSON.stringify(loadAddressBook(network), null, 2);
 }
 
 /**
@@ -199,7 +283,7 @@ export function exportAddressBook(): string {
  * skipped (reported in `errors`) rather than aborting the whole import, and
  * an address already in the book is skipped rather than duplicated.
  */
-export function importAddressBook(json: string): ImportResult {
+export function importAddressBook(json: string, network: AddressBookNetwork = currentNetwork()): ImportResult {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -211,7 +295,7 @@ export function importAddressBook(json: string): ImportResult {
     return { imported: 0, skipped: 0, errors: ["Expected a JSON array of recipients."] };
   }
 
-  const existing = loadAddressBook();
+  const existing = loadAddressBook(network);
   const existingAddresses = new Set(existing.map((r) => r.address));
   const toAdd: SavedRecipient[] = [];
   const errors: string[] = [];
@@ -242,15 +326,12 @@ export function importAddressBook(json: string): ImportResult {
       label: result.label,
       address: result.address,
       createdAt: Date.now(),
+      network,
     });
   });
 
-  if (toAdd.length > 0 && !persist([...existing, ...toAdd])) {
-    return {
-      imported: 0,
-      skipped: skipped + toAdd.length,
-      errors: [...errors, "Couldn't save — browser storage may be full."],
-    };
+  if (toAdd.length > 0 && !persist([...existing, ...toAdd], network)) {
+    return { imported: 0, skipped, errors: [...errors, "Could not save imported recipients."] };
   }
 
   return { imported: toAdd.length, skipped, errors };

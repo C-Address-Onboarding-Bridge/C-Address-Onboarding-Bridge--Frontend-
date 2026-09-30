@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   recordActivity,
   getInactivityState,
@@ -9,6 +9,7 @@ import {
   INACTIVITY_TIMEOUT_MS,
   type InactivityState,
 } from "@/lib/inactivityTimeout";
+import { useHydrated } from "@/hooks/useHydrated";
 
 interface UseInactivityTimeoutOptions {
   timeoutMs?: number;
@@ -18,7 +19,20 @@ interface UseInactivityTimeoutOptions {
 
 export function useInactivityTimeout(options: UseInactivityTimeoutOptions = {}) {
   const { timeoutMs = INACTIVITY_TIMEOUT_MS, onWarning, onTimeout } = options;
-  const [inactivityState, setInactivityState] = useState<InactivityState | null>(null);
+  const hydrated = useHydrated();
+  const [initialSnapshot] = useState<InactivityState | null>(() =>
+    typeof window === "undefined" ? null : getInactivityState(Date.now(), timeoutMs)
+  );
+  const [stateOverride, setStateOverride] = useState<InactivityState | null | undefined>(undefined);
+  const inactivityState = stateOverride !== undefined
+    ? stateOverride
+    : hydrated ? initialSnapshot : null;
+  const setInactivityState = useCallback<Dispatch<SetStateAction<InactivityState | null>>>(
+    (next) => setStateOverride((previous) =>
+      typeof next === "function" ? next(previous ?? null) : next
+    ),
+    [],
+  );
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const warningRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -79,8 +93,6 @@ export function useInactivityTimeout(options: UseInactivityTimeoutOptions = {}) 
     // Initialize inactivity state without calling setState in effect
     const now = Date.now();
     const initialState = getInactivityState(now, timeoutMs);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setInactivityState(initialState);
 
     // Reset timeout timers
     if (timeoutRef.current) clearTimeout(timeoutRef.current);

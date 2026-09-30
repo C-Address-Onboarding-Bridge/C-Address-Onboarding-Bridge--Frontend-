@@ -1,130 +1,82 @@
 import { Page } from '@playwright/test';
+import { Keypair } from '@stellar/stellar-sdk';
 
 /**
- * Mock Freighter wallet extension for E2E testing (#496).
+ * E2E wallet test hook (#669).
  *
- * Injects a mock wallet provider into the page that simulates the
- * @stellar/freighter-api interface without requiring actual wallet software.
+ * The app connects and signs through the Stellar Wallets Kit
+ * (`@creit.tech/stellar-wallets-kit`), which renders its own modal and, for
+ * Freighter, talks to a real browser-extension protocol — there is no
+ * supported way to drive either deterministically in a Playwright browser.
+ * `src/lib/stellar.ts` checks for `window.__E2E_WALLET__` (injected here via
+ * `page.addInitScript`, so it's present before the app's own scripts run) at
+ * every kit touchpoint — connect, address/network reads, and signing — and
+ * resolves with this configuration instead of calling the kit.
+ *
+ * Signing uses a real, disposable testnet keypair funded by Stellar's public
+ * Friendbot faucet, so the funding flow's actual Horizon calls (sequence
+ * number, fee stats, transaction submission) run for real against testnet
+ * rather than needing their response shapes guessed and mocked.
  */
 
 declare global {
   interface Window {
-    __MOCK_WALLET__?: {
-      publicKey: string;
-      isConnected: boolean;
-      shouldRejectSign: boolean;
-    };
-    __freighter__?: {
-      requestAccess: () => Promise<{ publicKey: string }>;
-      getPublicKey: () => Promise<string>;
-      isConnected: () => Promise<boolean>;
-      signTransaction: (xdr: string) => Promise<{ envelope_xdr: string; signature: string }>;
-      signAuthEntry: (entry: string) => Promise<string>;
-      disconnect: () => Promise<void>;
+    __E2E_WALLET__?: {
+      address: string;
+      secret: string;
+      network: 'TESTNET' | 'PUBLIC';
+      walletId: string;
+      shouldRejectSign?: boolean;
     };
   }
 }
 
-interface MockWalletConfig {
-  publicKey?: string;
-  isConnected?: boolean;
-  shouldRejectSign?: boolean;
+export interface E2EWallet {
+  address: string;
+  secret: string;
 }
 
-export async function setupMockWallet(
+const FRIENDBOT_URL = 'https://friendbot.stellar.org';
+
+/**
+ * Generates a fresh testnet keypair and funds it via Friendbot. Each e2e run
+ * gets its own account, so parallel/repeated runs never race over a shared
+ * account's sequence number or balance.
+ */
+export async function createFundedTestWallet(): Promise<E2EWallet> {
+  const keypair = Keypair.random();
+  const response = await fetch(`${FRIENDBOT_URL}?addr=${encodeURIComponent(keypair.publicKey())}`);
+  if (!response.ok) {
+    throw new Error(
+      `Friendbot funding failed for ${keypair.publicKey()}: ${response.status} ${await response.text()}`
+    );
+  }
+  return { address: keypair.publicKey(), secret: keypair.secret() };
+}
+
+/**
+ * Injects the e2e wallet hook into the page before any app script runs.
+ * Call once per test, before `page.goto(...)`.
+ */
+export async function setupE2EWallet(
   page: Page,
-  config: MockWalletConfig = {}
+  wallet: E2EWallet,
+  options: { network?: 'TESTNET' | 'PUBLIC'; walletId?: string; shouldRejectSign?: boolean } = {}
 ) {
-  const {
-    publicKey = 'GDZST3XVCDTUJ76ZAV2HA72KYXM4Y5LTTKCMDUHV4DZUMVAWPHFMEQZT',
-    isConnected = false,
-    shouldRejectSign = false,
-  } = config;
-
+  const { network = 'TESTNET', walletId = 'freighter', shouldRejectSign = false } = options;
   await page.addInitScript(
-    ({ publicKey, isConnected, shouldRejectSign }) => {
-      window.__MOCK_WALLET__ = {
-        publicKey,
-        isConnected,
-        shouldRejectSign,
-      };
-
-      // Mock the Freighter API
-      const mockFreighter = {
-        requestAccess: async () => {
-          if (window.__MOCK_WALLET__) {
-            window.__MOCK_WALLET__.isConnected = true;
-          }
-          return { publicKey };
-        },
-
-        getPublicKey: async () => {
-          if (!window.__MOCK_WALLET__?.isConnected) {
-            throw new Error('Wallet not connected');
-          }
-          return publicKey;
-        },
-
-        isConnected: async () => window.__MOCK_WALLET__?.isConnected ?? false,
-
-        signTransaction: async (xdr: string) => {
-          if (window.__MOCK_WALLET__?.shouldRejectSign) {
-            throw new Error('User rejected signature');
-          }
-          return {
-            envelope_xdr: xdr,
-            signature: 'MOCKED_SIGNATURE_' + publicKey.substring(0, 10),
-          };
-        },
-
-        signAuthEntry: async () => {
-          if (window.__MOCK_WALLET__?.shouldRejectSign) {
-            throw new Error('User rejected signature');
-          }
-          return 'MOCKED_AUTH_SIGNATURE_' + publicKey.substring(0, 10);
-        },
-
-        disconnect: async () => {
-          if (window.__MOCK_WALLET__) {
-            window.__MOCK_WALLET__.isConnected = false;
-          }
-        },
-      };
-
-      // Make the mock wallet globally available as if the extension injected it
-      if (typeof window !== 'undefined') {
-        Object.defineProperty(window, '__freighter__', {
-          value: mockFreighter,
-          writable: false,
-          configurable: false,
-        });
-      }
+    ({ address, secret, network, walletId, shouldRejectSign }) => {
+      window.__E2E_WALLET__ = { address, secret, network, walletId, shouldRejectSign };
     },
-    { publicKey, isConnected, shouldRejectSign }
+    { address: wallet.address, secret: wallet.secret, network, walletId, shouldRejectSign }
   );
 }
 
-export async function connectMockWallet(page: Page) {
-  // Simulate clicking connect wallet button and accepting the connection
-  await page.evaluate(() => {
-    if (window.__MOCK_WALLET__) {
-      window.__MOCK_WALLET__.isConnected = true;
-    }
-  });
-}
-
-export async function disconnectMockWallet(page: Page) {
-  await page.evaluate(() => {
-    if (window.__MOCK_WALLET__) {
-      window.__MOCK_WALLET__.isConnected = false;
-    }
-  });
-}
-
-export async function setMockWalletRejectSign(page: Page, shouldReject: boolean) {
+/** Toggle whether the next sign attempt should be rejected, as if the user declined in their wallet. */
+export async function setE2EWalletRejectSign(page: Page, shouldReject: boolean) {
   await page.evaluate((shouldReject) => {
-    if (window.__MOCK_WALLET__) {
-      window.__MOCK_WALLET__.shouldRejectSign = shouldReject;
+    if (window.__E2E_WALLET__) {
+      window.__E2E_WALLET__.shouldRejectSign = shouldReject;
     }
   }, shouldReject);
 }

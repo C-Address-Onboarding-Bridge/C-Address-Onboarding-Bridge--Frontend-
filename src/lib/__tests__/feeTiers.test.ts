@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildFeeTierStatus,
   computeTieredFee,
+  DEFAULT_FEE_TIERS,
   formatFeeRate,
   hasConfiguredTiers,
   isTopTier,
@@ -105,5 +107,39 @@ describe("computeTieredFee", () => {
     expect(computeTieredFee(0, intermediateStatus)).toBe(0);
     expect(computeTieredFee(-5, intermediateStatus)).toBe(0);
     expect(computeTieredFee(NaN, intermediateStatus)).toBe(0);
+  });
+});
+
+describe("buildFeeTierStatus (#673)", () => {
+  it("maps a volume onto the matching tier and the next one up", () => {
+    const status = buildFeeTierStatus(4000, [BASE, SILVER, GOLD]);
+    expect(status).toEqual({
+      currentVolume: 4000,
+      currentTier: SILVER,
+      nextTier: GOLD,
+      tiers: [BASE, SILVER, GOLD],
+    });
+  });
+
+  it("reports no next tier at the top", () => {
+    const status = buildFeeTierStatus(20000, [BASE, SILVER, GOLD]);
+    expect(status.currentTier).toEqual(GOLD);
+    expect(status.nextTier).toBeNull();
+  });
+
+  it("falls back to the lowest tier for a volume of 0", () => {
+    const status = buildFeeTierStatus(0, [BASE, SILVER, GOLD]);
+    expect(status.currentTier).toEqual(BASE);
+    expect(status.nextTier).toEqual(SILVER);
+  });
+
+  it("sorts an out-of-order tier list before mapping", () => {
+    const status = buildFeeTierStatus(4000, [GOLD, BASE, SILVER]);
+    expect(status.currentTier).toEqual(SILVER);
+    expect(status.tiers).toEqual([BASE, SILVER, GOLD]);
+  });
+
+  it("defaults to DEFAULT_FEE_TIERS when no ladder is given", () => {
+    expect(buildFeeTierStatus(0).tiers).toEqual(DEFAULT_FEE_TIERS);
   });
 });

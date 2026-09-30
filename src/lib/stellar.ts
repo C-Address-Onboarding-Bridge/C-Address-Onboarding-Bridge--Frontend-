@@ -8,17 +8,21 @@ import {
   rpc,
   Account,
   StrKey,
+  Keypair,
 } from "@stellar/stellar-sdk";
 import {
   BRIDGE_CONTRACT_ID,
   HORIZON_URL,
   SOROBAN_RPC_URL,
   type BridgeTransactionStatus,
+  type BridgeTransactionKind,
   type StellarNetwork,
   type WalletNetworkState,
   type BridgeTransactionData,
+  isSupportedNetwork,
 } from "./types";
 import { withSequenceRetry } from "./sequenceManager";
+import { getNetwork as getFreighterNetwork } from "@stellar/freighter-api";
 
 export type { AppNetwork, WalletNetworkState, BridgeTransactionData } from "./types";
 
@@ -34,6 +38,34 @@ export type WalletId = string | null;
 
 /** Lazy singleton kit reference. Populated by initWalletKit(). */
 let _kitReady = false;
+
+// ---------------------------------------------------------------------------
+// E2E test hook (#669)
+// ---------------------------------------------------------------------------
+// The Stellar Wallets Kit's connect modal and its Freighter module both need
+// a real browser extension to do anything — there is no supported way to
+// drive them deterministically in CI. e2e/fixtures/mock-wallet.ts injects
+// `window.__E2E_WALLET__` via page.addInitScript before the app loads; every
+// kit touchpoint below checks for it first and, when present, resolves with
+// the configured wallet instead of calling the kit. Signing uses the
+// Keypair already imported above against a disposable, friendbot-funded
+// testnet account the e2e fixture creates per run, so this path never
+// handles a real user's secret key.
+export interface E2EWalletConfig {
+  address: string;
+  secret: string;
+  network: StellarNetwork;
+  walletId: string;
+  shouldRejectSign?: boolean;
+}
+
+/** Whether openWalletSelectionModal has "connected" the e2e wallet this session. */
+let _e2eConnected = false;
+
+function e2eWalletConfig(): E2EWalletConfig | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (window as unknown as { __E2E_WALLET__?: E2EWalletConfig }).__E2E_WALLET__;
+}
 
 /**
  * Initialise the Stellar Wallets Kit with the standard set of modules.
@@ -84,6 +116,12 @@ export async function initWalletKit(selectedWalletId?: string | null): Promise<v
  */
 export async function openWalletSelectionModal(): Promise<{ address: string; walletId: string } | null> {
   if (typeof window === "undefined") return null;
+
+  const e2e = e2eWalletConfig();
+  if (e2e) {
+    _e2eConnected = true;
+    return { address: e2e.address, walletId: e2e.walletId };
+  }
 
   const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
 
@@ -138,12 +176,12 @@ interface FreighterInjectedApi {
 
 const NETWORK_PARAMS: Record<StellarNetwork, { passphrase: string; name: string; url: string }> = {
   PUBLIC: {
-    passphrase: Networks.PUBLIC,
+    passphrase: "Public Global Stellar Network ; September 2015",
     name: "Public Global Stellar Network ; September 2015",
     url: HORIZON_URL.PUBLIC,
   },
   TESTNET: {
-    passphrase: Networks.TESTNET,
+    passphrase: "Test SDF Network ; September 2015",
     name: "Test SDF Network ; September 2015",
     url: HORIZON_URL.TESTNET,
   },
@@ -154,15 +192,6 @@ const SWITCH_POLL_INTERVAL_MS = 500;
 /** How long the switcher waits for the wallet to land on the target network. */
 const SWITCH_POLL_TIMEOUT_MS = 8_000;
 
-/**
- * Asks the wallet to switch to `target` and waits for it to confirm.
- *
- * - `"switched"` — the wallet accepted and is now on `target`.
- * - `"cancelled"` — the wallet declined the prompt or never landed on the
- *   target within the timeout.
- * - `"manual"` — the injected wallet has no programmatic switch API, so the
- *   user must switch inside Freighter; the app's poller detects the change.
- */
 /**
  * Whether a mainnet action needs an explicit warning: the user is on mainnet
  * and the network changed recently, and they haven't acknowledged it yet.
@@ -176,6 +205,15 @@ export function shouldWarnOnMainnetAction(
   return network === "PUBLIC" && recentlyChangedNetwork && !acknowledged;
 }
 
+/**
+ * Asks the wallet to switch to `target` and waits for it to confirm.
+ *
+ * - `"switched"` — the wallet accepted and is now on `target`.
+ * - `"cancelled"` — the wallet declined the prompt or never landed on the
+ *   target within the timeout.
+ * - `"manual"` — the injected wallet has no programmatic switch API, so the
+ *   user must switch inside Freighter; the app's poller detects the change.
+ */
 export async function switchWalletNetwork(target: StellarNetwork): Promise<SwitchNetworkResult> {
   const injected = (window as unknown as { freighter?: FreighterInjectedApi }).freighter;
   if (!injected?.setNetwork) {
@@ -190,10 +228,15 @@ export async function switchWalletNetwork(target: StellarNetwork): Promise<Switc
     return "cancelled";
   }
 
+  // Confirm via freighter-api directly rather than the multi-wallet
+  // getWalletNetwork()/StellarWalletsKit abstraction: switchWalletNetwork is
+  // already Freighter-specific (it only runs when window.freighter.setNetwork
+  // exists), and the kit singleton has no bearing on whether *this* request
+  // landed.
   const deadline = Date.now() + SWITCH_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const { status } = await getWalletNetwork();
-    if (status === target) {
+    const result = await getFreighterNetwork();
+    if (!result.error && String(result.network ?? "").toUpperCase() === target) {
       return "switched";
     }
     await new Promise((resolve) => setTimeout(resolve, SWITCH_POLL_INTERVAL_MS));
@@ -202,6 +245,7 @@ export async function switchWalletNetwork(target: StellarNetwork): Promise<Switc
 }
 
 export async function getHorizonServer(network: StellarNetwork): Promise<Horizon.Server> {
+  const { Horizon } = await import("@stellar/stellar-sdk");
   return new Horizon.Server(HORIZON_URL[network]);
 }
 
@@ -218,12 +262,15 @@ export async function getSorobanRpcServer(network: StellarNetwork): Promise<rpc.
       `No Soroban RPC URL configured for ${network}. Set NEXT_PUBLIC_SOROBAN_RPC_URL_${network} in your environment.`
     );
   }
+  const { rpc } = await import("@stellar/stellar-sdk");
   return new rpc.Server(url);
 }
 
 /** The network passphrase Horizon/Soroban RPC requests for `network` must sign with. */
 export async function getNetworkPassphrase(network: StellarNetwork): Promise<string> {
-  return network === "PUBLIC" ? Networks.PUBLIC : Networks.TESTNET;
+  return network === "PUBLIC"
+    ? "Public Global Stellar Network ; September 2015"
+    : "Test SDF Network ; September 2015";
 }
 
 /**
@@ -252,6 +299,7 @@ export async function connectWallet(): Promise<string | null> {
  * provider, which is both faster and avoids permission-prompt loops. (#459)
  */
 export async function checkConnection(): Promise<boolean> {
+  if (e2eWalletConfig()) return _e2eConnected;
   if (!_kitReady || typeof window === "undefined") return false;
   try {
     const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
@@ -267,6 +315,8 @@ export async function checkConnection(): Promise<boolean> {
  * Return the public key for the currently connected wallet, or null.
  */
 export async function getWalletAddress(): Promise<string | null> {
+  const e2e = e2eWalletConfig();
+  if (e2e) return _e2eConnected ? e2e.address : null;
   if (typeof window === "undefined") return null;
   try {
     if (!_kitReady) {
@@ -304,6 +354,8 @@ export interface WalletNetworkInfo {
  * Now delegates to whichever wallet the user selected via the kit. (#459)
  */
 export async function getWalletNetwork(): Promise<WalletNetworkInfo> {
+  const e2e = e2eWalletConfig();
+  if (e2e) return { status: e2e.network, name: e2e.network };
   try {
     if (!_kitReady) {
       await initWalletKit();
@@ -315,8 +367,9 @@ export async function getWalletNetwork(): Promise<WalletNetworkInfo> {
       return { status: "UNKNOWN", name: null };
     }
     const name = String(result.network ?? "").toUpperCase();
-    if (name === "PUBLIC" || name === "TESTNET") {
-      return { status: name, name };
+    const reported = name as WalletNetworkState;
+    if (isSupportedNetwork(reported)) {
+      return { status: reported, name };
     }
     return { status: "UNSUPPORTED", name: name || null };
   } catch {
@@ -358,7 +411,7 @@ export function formatNetworkLabel(
 // hand-rolled regex cannot verify the checksum and, as [G|C] showed, is easy
 // to get subtly wrong (that character class also accepted a leading '|').
 export function isValidStellarAddress(address: string): boolean {
-  return StrKey.isValidEd25519PublicKey(address) || StrKey.isValidContract(address);
+  return isValidEd25519PublicKey(address) || isValidContract(address);
 }
 
 export function isValidStellarAmount(amount: string): boolean {
@@ -370,12 +423,12 @@ export function isValidStellarAmount(amount: string): boolean {
 
 /** Whether `address` is a valid Soroban contract address (a `C...` StrKey). */
 export function isCAddress(address: string): boolean {
-  return StrKey.isValidContract(address);
+  return isValidContract(address);
 }
 
 /** Whether `address` is a valid Stellar account address (a `G...` ed25519 StrKey). */
 export function isGAddress(address: string): boolean {
-  return StrKey.isValidEd25519PublicKey(address);
+  return isValidEd25519PublicKey(address);
 }
 
 export interface PaymentResult {
@@ -395,6 +448,23 @@ interface HorizonBalance {
   asset_code?: string;
   asset_issuer?: string;
   balance: string;
+}
+
+interface HorizonCollection<T> {
+  _embedded?: { records?: T[] };
+}
+
+/** Make lightweight Horizon reads without loading the Stellar SDK client. */
+async function fetchHorizonJson<T>(network: StellarNetwork, path: string): Promise<T> {
+  const response = await fetch(`${HORIZON_URL[network].replace(/\/+$/, "")}${path}`);
+  if (!response.ok) {
+    const error = new Error(`Horizon request failed (${response.status})`) as Error & {
+      response: { status: number };
+    };
+    error.response = { status: response.status };
+    throw error;
+  }
+  return (await response.json()) as T;
 }
 
 interface HorizonPayment {
@@ -417,6 +487,90 @@ interface HorizonPayment {
   transaction_hash?: string;
   funder?: string;
   account?: string;
+  /** Destination of an account_merge operation. (#720) */
+  into?: string;
+  /** Token movements of an invoke_host_function (e.g. SAC transfer). (#720) */
+  asset_balance_changes?: Array<{
+    asset_type?: string;
+    asset_code?: string;
+    type?: string;
+    from?: string;
+    to?: string;
+    amount?: string;
+  }>;
+}
+
+/**
+ * Maps a Horizon payments-endpoint record to a transaction row, classifying
+ * it by operation type. Returns null for records that move no funds (e.g. an
+ * invoke_host_function with no token transfer). (#720)
+ */
+function mapHorizonPayment(p: HorizonPayment): BridgeTransactionData | null {
+  let type: BridgeTransactionKind;
+  let fromAddress = p.from || "";
+  let toAddress = p.to || "";
+  let amount = p.amount || "0";
+  let asset = p.asset_type === "native" ? "XLM" : (p.asset_code || "XLM");
+
+  switch (p.type) {
+    case "payment":
+      type = "payment";
+      break;
+    case "path_payment_strict_send":
+    case "path_payment_strict_receive":
+      type = "path-payment";
+      break;
+    // create_account operations use `funder`/`account` and `starting_balance`
+    // instead of the `from`/`to`/`amount` fields present on payment ops. (#294)
+    case "create_account":
+      type = "create-account";
+      fromAddress = p.funder || "";
+      toAddress = p.account || "";
+      amount = p.starting_balance || "0";
+      asset = "XLM";
+      break;
+    case "account_merge":
+      type = "account-merge";
+      fromAddress = p.account || "";
+      toAddress = p.into || "";
+      asset = "XLM";
+      break;
+    case "invoke_host_function": {
+      const transfer = p.asset_balance_changes?.find((c) => c.type === "transfer");
+      if (!transfer) return null;
+      fromAddress = transfer.from || "";
+      toAddress = transfer.to || "";
+      amount = transfer.amount || "0";
+      asset = transfer.asset_type === "native" ? "XLM" : (transfer.asset_code || "XLM");
+      // A SAC transfer from a classic account into a contract account is the
+      // G → C bridge this app performs.
+      type = isGAddress(fromAddress) && isCAddress(toAddress) ? "g-to-c" : "contract-transfer";
+      break;
+    }
+    default:
+      return null;
+  }
+
+  // When `transaction_successful` is absent (older Horizon versions) we
+  // treat the record as pending rather than assuming it failed. (#294)
+  let status: BridgeTransactionStatus;
+  if (p.transaction_successful === undefined || p.transaction_successful === null) {
+    status = "pending";
+  } else {
+    status = p.transaction_successful ? "confirmed" : "failed";
+  }
+
+  return {
+    id: p.id,
+    fromAddress,
+    toAddress,
+    amount,
+    asset,
+    status,
+    timestamp: new Date(p.created_at || Date.now()).getTime(),
+    type,
+    hash: p.transaction_hash,
+  };
 }
 
 /**
@@ -446,9 +600,11 @@ async function loadAccountBalances(
   address: string,
   network: StellarNetwork
 ): Promise<AccountBalances> {
-  const server = await getHorizonServer(network);
-  const account = await server.loadAccount(address);
-  const balances = (account.balances as HorizonBalance[]).map((b) => ({
+  const account = await fetchHorizonJson<{ balances?: HorizonBalance[] }>(
+    network,
+    `/accounts/${encodeURIComponent(address)}`
+  );
+  const balances = (account.balances ?? []).map((b) => ({
     asset: b.asset_type === "native" ? "XLM" : (b.asset_code || "unknown"),
     amount: b.balance,
   }));
@@ -480,7 +636,9 @@ async function withBalanceFallback(
     if (isUnfundedAccountError(err)) {
       return { total: "0", balances: [], unfunded: true };
     }
-    return { total: "0", balances: [] };
+    // Any other failure (5xx, network error) is surfaced to the caller rather
+    // than masked as a 0 balance, so an outage is never shown as "0 XLM". (#719)
+    throw err;
   }
 }
 
@@ -537,48 +695,17 @@ export async function fetchRecentTransactions(
   }
   const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 200);
   const server = await getHorizonServer(network);
-  try {
-    const payments = await server
-      .payments()
-      .forAccount(address)
-      .limit(safeLimit)
-      .order("desc")
-      .call();
+  // Errors propagate so an outage is shown as an error, not an empty history. (#720)
+  const payments = await server
+    .payments()
+    .forAccount(address)
+    .limit(safeLimit)
+    .order("desc")
+    .call();
 
-    return (payments.records as HorizonPayment[]).map((p) => {
-      // create_account operations use `funder`/`account` and `starting_balance`
-      // instead of the `from`/`to`/`amount` fields present on payment ops. (#294)
-      const isCreateAccount = p.type === "create_account";
-      const fromAddress = isCreateAccount ? (p.funder || "") : (p.from || "");
-      const toAddress = isCreateAccount ? (p.account || "") : (p.to || "");
-      const amount = isCreateAccount
-        ? (p.starting_balance || "0")
-        : (p.amount || "0");
-
-      // When `transaction_successful` is absent (older Horizon versions) we
-      // treat the record as pending rather than assuming it failed. (#294)
-      let status: BridgeTransactionStatus;
-      if (p.transaction_successful === undefined || p.transaction_successful === null) {
-        status = "pending";
-      } else {
-        status = p.transaction_successful ? "confirmed" : "failed";
-      }
-
-      return {
-        id: p.id,
-        fromAddress,
-        toAddress,
-        amount,
-        asset: p.asset_type === "native" || isCreateAccount ? "XLM" : (p.asset_code || "XLM"),
-        status,
-        timestamp: new Date(p.created_at || Date.now()).getTime(),
-        type: "g-to-c" as const,
-        hash: p.transaction_hash,
-      };
-    });
-  } catch {
-    return [];
-  }
+  return (payments.records as HorizonPayment[])
+    .map(mapHorizonPayment)
+    .filter((tx): tx is BridgeTransactionData => tx !== null);
 }
 
 /**
@@ -610,6 +737,7 @@ async function buildSignAndSubmit(
   passphrase: string,
   onPhase?: (phase: "signing" | "submitting") => void
 ): Promise<PaymentResult> {
+  const { TransactionBuilder, Operation, Account } = await import("@stellar/stellar-sdk");
   // Fetch a dynamic fee bid (2× base fee, capped at 10 000 stroops) so the
   // transaction is not rejected during surge-pricing windows. (#301)
   const fee = await getRecommendedFee(network);
@@ -636,6 +764,8 @@ async function buildSignAndSubmit(
 
       onPhase?.("signing");
 
+      const e2eWallet = e2eWalletConfig();
+
       // #241 — Re-fetch the wallet's current network immediately before
       // signing.  The user may have switched networks in Freighter during the
       // time between the app loading and the "Confirm" click.  If the wallet
@@ -650,52 +780,76 @@ async function buildSignAndSubmit(
       //      returned no data) → treat as "can't verify, proceed"
       //   b) getNetwork returns a different known network → abort
       //   c) getNetwork rejects (Freighter locked, etc.) → abort with UNKNOWN
-      try {
-        const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
-        const netResult = await StellarWalletsKit.getNetwork();
-        if (netResult !== undefined && netResult !== null && typeof netResult === "object") {
-          // Check for in-band error (e.g. user declined access)
-          if ("error" in netResult && (netResult as { error?: unknown }).error) {
-            throw new Error(
-              `Network changed in Freighter — please retry. ` +
-              `Transaction was built for ${network} but Freighter is now on UNKNOWN.`
-            );
+      //
+      // Under the e2e test hook (#669) there is no real extension to have
+      // changed networks underneath us — the fixture's configured network is
+      // authoritative, so this check is skipped entirely.
+      if (!e2eWallet) {
+        try {
+          const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+          const netResult = await StellarWalletsKit.getNetwork();
+          if (netResult !== undefined && netResult !== null && typeof netResult === "object") {
+            // Check for in-band error (e.g. user declined access)
+            if ("error" in netResult && (netResult as { error?: unknown }).error) {
+              throw new Error(
+                `Network changed in Freighter — please retry. ` +
+                `Transaction was built for ${network} but Freighter is now on UNKNOWN.`
+              );
+            }
+            // Compare the actual reported network
+            const reportedRaw = (netResult as { network?: string }).network;
+            const reported = (reportedRaw ?? "").toUpperCase() as WalletNetworkState;
+            if (reported && reported !== network) {
+              throw new Error(
+                `Network changed in Freighter — please retry. ` +
+                `Transaction was built for ${network} but Freighter is now on ${reported}.`
+              );
+            }
           }
-          // Compare the actual reported network
-          const reportedRaw = (netResult as { network?: string }).network;
-          const reported = (reportedRaw ?? "").toUpperCase() as WalletNetworkState;
-          if (reported && reported !== network) {
-            throw new Error(
-              `Network changed in Freighter — please retry. ` +
-              `Transaction was built for ${network} but Freighter is now on ${reported}.`
-            );
+          // If netResult is undefined/null, we can't verify the network — proceed
+        } catch (networkErr) {
+          // Re-throw errors we raised ourselves
+          if (networkErr instanceof Error && networkErr.message.includes("Network changed in Freighter")) {
+            throw networkErr;
           }
+          // getNetwork() itself rejected (Freighter locked, locked extension, etc.)
+          throw new Error(
+            "Network changed in wallet — please retry. " +
+            `Transaction was built for ${network} but wallet is now on UNKNOWN.`
+          );
         }
-        // If netResult is undefined/null, we can't verify the network — proceed
-      } catch (networkErr) {
-        // Re-throw errors we raised ourselves
-        if (networkErr instanceof Error && networkErr.message.includes("Network changed in Freighter")) {
-          throw networkErr;
-        }
-        // getNetwork() itself rejected (Freighter locked, locked extension, etc.)
-        throw new Error(
-          "Network changed in wallet — please retry. " +
-          `Transaction was built for ${network} but wallet is now on UNKNOWN.`
-        );
       }
 
       // Use the Stellar Wallets Kit to sign — this works regardless of which
       // wallet (Freighter, xBull, Lobstr, etc.) the user selected. (#459)
-      const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
-      const signedResult = await StellarWalletsKit.signTransaction(tx.toXDR(), {
-        networkPassphrase: passphrase,
-      });
+      // Under the e2e test hook (#669), sign directly with the disposable
+      // testnet keypair the fixture configured instead of going through the
+      // kit, which has no real extension to delegate to in CI.
+      let signedResult: { signedTxXdr: string };
+      if (e2eWallet) {
+        if (e2eWallet.shouldRejectSign) {
+          throw new Error("User declined access");
+        }
+        tx.sign(Keypair.fromSecret(e2eWallet.secret));
+        signedResult = { signedTxXdr: tx.toXDR() };
+      } else {
+        const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+        signedResult = await StellarWalletsKit.signTransaction(tx.toXDR(), {
+          networkPassphrase: passphrase,
+        });
+      }
 
       // #242 — Runtime shape guard on the wallet's response.  A version
       // mismatch, API change, or compromised extension could return a missing
-      // or non-string `signedTxXdr`.  The kit throws on signing errors, so we
-      // only need to guard against a missing/empty XDR here.
-      const signedXDR = signedResult.signedTxXdr;
+      // or non-string `signedTxXdr`.  The response is untrusted input, so the
+      // object itself is checked before anything is read from it: a missing
+      // response, or one carrying an `error` field, is rejected even if it
+      // also holds something that looks like a signed transaction. (#652)
+      const response: unknown = signedResult;
+      const signedXDR =
+        typeof response === "object" && response !== null && !("error" in response && response.error)
+          ? (response as { signedTxXdr?: unknown }).signedTxXdr
+          : undefined;
       if (typeof signedXDR !== "string" || !signedXDR) {
         // Deliberately avoids wallet-API jargon (XDR) so the message stays
         // readable for a user who just saw a malformed wallet response.
@@ -715,6 +869,14 @@ async function buildSignAndSubmit(
     },
     server,
     network
+  );
+}
+
+/** The abort raised when the wallet isn't on the network a transaction was built for. */
+function networkChangedError(expected: StellarNetwork, actual: string): Error {
+  return new Error(
+    `Network changed in Freighter — please retry. ` +
+      `Transaction was built for ${expected} but Freighter is now on ${actual}.`
   );
 }
 
@@ -751,16 +913,20 @@ export function toSafeErrorMessage(error: unknown, fallback: string): string {
 export async function assertActiveAccountMatches(sourceAddress: string): Promise<void> {
   const active = await getWalletAddress();
 
+  // An empty/null address covers no wallet selected, a locked extension, and
+  // a kit error alike: none of them leaves an account that could sign. (#654)
   if (!active) {
     throw new Error(
-      "Couldn't read Freighter's active account. Connect (or unlock) Freighter and try again."
+      "No wallet is connected. Connect (or unlock) your wallet and try again."
     );
   }
 
+  // Refuse rather than substitute the active account: the payment must come
+  // from the address the user reviewed, or not be signed at all. (#654)
   if (active !== sourceAddress) {
     throw new Error(
-      `Freighter's active account (${truncateAddress(active)}) doesn't match the From address (${truncateAddress(sourceAddress)}). ` +
-        "Switch accounts in Freighter or use the connected address."
+      `Your wallet's active account (${truncateAddress(active)}) does not match the source address (${truncateAddress(sourceAddress)}). ` +
+        "Switch accounts in your wallet or use the connected address."
     );
   }
 }
@@ -776,6 +942,7 @@ async function resolveAsset(
   sourceAddress: string,
   assetCode: string
 ): Promise<Asset> {
+  const { Asset } = await import("@stellar/stellar-sdk");
   if (assetCode === "XLM") {
     return Asset.native();
   }
@@ -868,6 +1035,87 @@ export async function bridgeViaContract(
 }
 
 /**
+ * Signs an already-built, unsigned transaction XDR — e.g. one a backend
+ * "prepare" endpoint returned — through the same e2e-aware, kit-abstracted
+ * path buildAndSubmitPayment's own signing step uses (#671). Unlike that
+ * path, this never builds the transaction itself, so it has no source
+ * account or operations of its own to validate; callers that need the
+ * active wallet to match a specific address (as batch funding does) must
+ * call assertActiveAccountMatches themselves first.
+ */
+export async function signPreparedTransaction(unsignedXdr: string, network: StellarNetwork): Promise<string> {
+  const passphrase = await getNetworkPassphrase(network);
+  const e2eWallet = e2eWalletConfig();
+
+  let signedResult: { signedTxXdr: string };
+  if (e2eWallet) {
+    if (e2eWallet.shouldRejectSign) {
+      throw new Error("User declined access");
+    }
+    const tx = TransactionBuilder.fromXDR(unsignedXdr, passphrase);
+    tx.sign(Keypair.fromSecret(e2eWallet.secret));
+    signedResult = { signedTxXdr: tx.toXDR() };
+  } else {
+    const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+    signedResult = await StellarWalletsKit.signTransaction(unsignedXdr, {
+      networkPassphrase: passphrase,
+    });
+  }
+
+  const signedXDR = signedResult.signedTxXdr;
+  if (typeof signedXDR !== "string" || !signedXDR) {
+    throw new Error(
+      "Wallet returned an unexpected response while signing — the signed transaction is missing or empty."
+    );
+  }
+  return signedXDR;
+}
+
+export interface ClaimProof {
+  message: string;
+  signature: string;
+  signerAddress?: string;
+}
+
+/**
+ * Signs a one-time challenge proving the connected wallet controls
+ * `claimant`, for attaching to a lock-claim request (#672).
+ *
+ * PLACEHOLDER SCHEME: the real /locks API this pairs with doesn't exist yet
+ * (see src/lib/api.ts's claimLock), so there's no confirmed message format
+ * or verification method to match. This signs a plain, human-readable
+ * challenge via the wallet kit's SEP-53-style signMessage — a real signature
+ * over a real message, so a false claim can't be forged, but the exact
+ * message format and signature encoding must be reconciled against
+ * whatever the backend actually verifies once that's designed. Under the
+ * e2e test hook (#669), signs directly with the disposable keypair via
+ * Keypair.sign rather than going through the kit's signMessage.
+ */
+export async function signClaimProof(claimant: string, lockId: string, network: StellarNetwork): Promise<ClaimProof> {
+  const message = `Claim lock ${lockId} as ${claimant} on ${network} at ${Date.now()}`;
+  const e2eWallet = e2eWalletConfig();
+
+  if (e2eWallet) {
+    if (e2eWallet.shouldRejectSign) {
+      throw new Error("User declined access");
+    }
+    const signature = Keypair.fromSecret(e2eWallet.secret)
+      .sign(Buffer.from(message, "utf-8"))
+      .toString("base64");
+    return { message, signature, signerAddress: e2eWallet.address };
+  }
+
+  const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+  const result = await StellarWalletsKit.signMessage(message, { address: claimant });
+  if (typeof result.signedMessage !== "string" || !result.signedMessage) {
+    throw new Error(
+      "Wallet returned an unexpected response while signing — the signed message is missing or empty."
+    );
+  }
+  return { message, signature: result.signedMessage, signerAddress: result.signerAddress };
+}
+
+/**
  * Builds a URL to view a transaction, account, or contract on stellar.expert.
  *
  * **Security audit (#338):**
@@ -912,15 +1160,17 @@ export function getAccountMinimumBalance(): string {
 export async function getRecommendedFee(network: StellarNetwork): Promise<string> {
   const MAX_FEE_STROOPS = 10_000;
   try {
-    const server = await getHorizonServer(network);
-    // fetchBaseFee() returns a number representing the current minimum fee in stroops.
-    const baseFee = await server.fetchBaseFee();
+    const feeStats = await fetchHorizonJson<{ last_ledger_base_fee?: string }>(
+      network,
+      "/fee_stats"
+    );
+    const baseFee = Number.parseInt(feeStats.last_ledger_base_fee ?? "", 10) || 100;
     const bid = Math.min(baseFee * 2, MAX_FEE_STROOPS);
     return String(bid);
   } catch {
     // Fall back to the hardcoded BASE_FEE constant if the fee-stats call fails
     // so the transaction is still submitted rather than silently blocked.
-    return BASE_FEE;
+    return "100";
   }
 }
 
@@ -946,7 +1196,7 @@ export interface FaucetRequest {
  *   `network === "TESTNET"` before invoking.
  */
 export async function requestTestXLM(address: string): Promise<FaucetRequest> {
-  if (!StrKey.isValidEd25519PublicKey(address)) {
+  if (!isValidEd25519PublicKey(address)) {
     return { success: false, message: "Invalid Stellar address." };
   }
 
@@ -1413,10 +1663,19 @@ export async function getTransactionByHash(
 ): Promise<TransactionDetails | null> {
   if (!TRANSACTION_HASH_PATTERN.test(hash)) return null;
 
-  const server = new Horizon.Server(HORIZON_URL[network]);
-  let record: Horizon.ServerApi.TransactionRecord;
+  const basePath = `/transactions/${encodeURIComponent(hash)}`;
+  let record: {
+    hash?: string;
+    successful?: boolean;
+    created_at?: string;
+    ledger_attr?: number;
+    fee_charged?: number | string;
+    max_fee?: number | string;
+    memo?: string;
+    source_account_sequence?: string;
+  };
   try {
-    record = await server.transactions().transaction(hash).call();
+    record = await fetchHorizonJson(network, basePath);
   } catch {
     // Not ingested yet → still in flight, not unknown.
     return {
@@ -1445,8 +1704,11 @@ export async function getTransactionByHash(
   // Payment-like operations carry the two ends of the transfer. Best-effort:
   // a failed fetch of the operations page still renders the record above.
   try {
-    const operations = await server.operations().forTransaction(hash).call();
-    const payment = operations.records.find((op) => op.type === "payment");
+    const operations = await fetchHorizonJson<HorizonCollection<HorizonPayment & {
+      type?: string;
+      transaction_successful?: boolean;
+    }>>(network, `${basePath}/operations?limit=200`);
+    const payment = operations._embedded?.records?.find((op) => op.type === "payment");
     if (payment && payment.type === "payment") {
       fromAddress = payment.from ?? null;
       toAddress = payment.to ?? null;
@@ -1469,10 +1731,10 @@ export async function getTransactionByHash(
   let ledgerClosedAt: string | null = null;
   if (record.ledger_attr != null) {
     try {
-      const ledgerRecord = (await server
-        .ledgers()
-        .ledger(record.ledger_attr)
-        .call()) as unknown as { closed_at?: string | null };
+      const ledgerRecord = await fetchHorizonJson<{ closed_at?: string | null }>(
+        network,
+        `/ledgers/${record.ledger_attr}`
+      );
       ledgerClosedAt = ledgerRecord.closed_at ?? null;
     } catch {
       // Best-effort — the record alone is enough to render the detail page.
@@ -1496,4 +1758,63 @@ export async function getTransactionByHash(
     memo: record.memo ?? null,
     sequence: Number.isFinite(sequenceNumber) ? sequenceNumber : null,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* #673 — Fee-tier rebate lookup (Soroban RPC)                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Reads an account's cumulative tier-qualifying volume from the bridge
+ * contract's `rebate_for(user)` view function via a Soroban RPC simulation
+ * (#673). A simulation is read-only and needs no signature or submission,
+ * so this can run for any address, connected or not.
+ *
+ * PLACEHOLDER SHAPE: no contract ABI/bindings for `rebate_for` exist in this
+ * repo — only its name, from the backend's own contract (per issue #673).
+ * The single-Address argument is unambiguous (Soroban's standard Address
+ * ScVal encoding, the same ScVal shape every wallet/SDK produces), but the
+ * RETURN value's meaning is a best guess: assumed to be the account's
+ * cumulative volume (a plain count, not stroops) rather than an
+ * already-computed rate, because feeTiers.ts's tier logic
+ * (progressToNextTier, computeTieredFee) is built entirely around comparing
+ * a volume against tier thresholds — a returned rate would leave nothing to
+ * compute a progress bar from. Must be reconciled against the real contract
+ * once its interface is documented; until then this is the same kind of
+ * best-guess this codebase already carries for #467/#468/#469's routes.
+ *
+ * Returns null on any failure — invalid address, no contract configured,
+ * RPC error, a simulation that errored, or a result whose retval doesn't
+ * decode to a number — rather than throwing, matching this area's existing
+ * never-throws contract (see getFeeTierPreview in src/lib/api.ts).
+ */
+export async function getRebateVolume(address: string, network: StellarNetwork): Promise<number | null> {
+  if (!BRIDGE_CONTRACT_ID) return null;
+  if (!isValidStellarAddress(address)) return null;
+
+  try {
+    const server = await getSorobanRpcServer(network);
+    const passphrase = await getNetworkPassphrase(network);
+    const contract = new Contract(BRIDGE_CONTRACT_ID);
+    // The source account only needs to be a syntactically valid keypair for
+    // the envelope — this transaction is simulated, never submitted, so its
+    // sequence number is never checked against a real account.
+    const account = new Account(address, "0");
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: passphrase,
+    })
+      .addOperation(contract.call("rebate_for", Address.fromString(address).toScVal()))
+      .setTimeout(30)
+      .build();
+
+    const simulation = await server.simulateTransaction(tx);
+    if (!rpc.Api.isSimulationSuccess(simulation) || !simulation.result) return null;
+
+    const native = scValToNative(simulation.result.retval);
+    const volume = Number(native);
+    return Number.isFinite(volume) ? volume : null;
+  } catch {
+    return null;
+  }
 }
