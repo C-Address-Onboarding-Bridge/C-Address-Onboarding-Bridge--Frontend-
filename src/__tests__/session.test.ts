@@ -58,7 +58,7 @@ describe("wallet session persistence (#343)", () => {
     expect(localStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
   });
 
-  it.skip("treats a future-stamped record as expired", () => {
+  it("treats a future-stamped record as expired", () => {
     markDisconnected(ADDRESS, NOW + 60_000);
     expect(loadSession(NOW).manuallyDisconnected).toBe(false);
   });
