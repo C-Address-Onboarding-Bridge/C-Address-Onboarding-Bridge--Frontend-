@@ -4,6 +4,11 @@ import {
   type SimulatePaymentInput,
 } from "@/lib/stellar";
 import type { StellarNetwork } from "@/lib/types";
+import {
+  checkRateLimit,
+  getClientIp,
+  rateLimitResponse,
+} from "@/lib/rate-limit";
 
 /**
  * Transaction simulation endpoint (#478).
@@ -18,8 +23,23 @@ import type { StellarNetwork } from "@/lib/types";
  * Always resolves with a {@link SimulationResult}; the pure prediction logic
  * (`simulatePayment`) never throws and the async wrapper reports
  * `simulation_unavailable` instead of failing the request.
+ *
+ * Rate limited per client IP (#697) so anonymous callers cannot use the
+ * server to hammer Horizon.
  */
+const RATE_LIMIT = 30;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
 export async function POST(request: Request) {
+  const limit = checkRateLimit(
+    getClientIp(request),
+    RATE_LIMIT,
+    RATE_LIMIT_WINDOW_MS
+  );
+  if (!limit.allowed) {
+    return rateLimitResponse(limit.retryAfter);
+  }
+
   let body: unknown;
   try {
     body = await request.json();

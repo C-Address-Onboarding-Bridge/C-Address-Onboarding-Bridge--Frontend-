@@ -28,8 +28,8 @@ export function OfflineBanner() {
         <div className="flex items-start gap-2">
           <WifiOff className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
           <p className="text-sm text-[var(--foreground)]">
-            You&apos;re offline. Actions that need the network are queued and will
-            replay automatically when you reconnect.
+            You&apos;re offline. Actions that need the network will fail until you
+            reconnect — nothing is queued automatically.
           </p>
         </div>
       )}

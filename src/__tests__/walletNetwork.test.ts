@@ -175,7 +175,7 @@ describe("assertActiveAccountMatches", () => {
     await expect(assertActiveAccountMatches(ACTIVE)).resolves.toBeUndefined();
   });
 
-  it.skip("throws before signing when the source is a different account", async () => {
+  it("throws before signing when the source is a different account", async () => {
     mockGetAddress.mockResolvedValue({ address: ACTIVE });
     await expect(assertActiveAccountMatches(OTHER)).rejects.toThrow(
       /does not match the source address/
@@ -194,7 +194,7 @@ describe("assertActiveAccountMatches", () => {
     expect((error as Error).message).not.toContain(OTHER);
   });
 
-  it.skip("throws when no wallet is connected", async () => {
+  it("throws when no wallet is connected", async () => {
     mockGetAddress.mockResolvedValue({ address: "" });
     await expect(assertActiveAccountMatches(ACTIVE)).rejects.toThrow(
       /No wallet is connected/

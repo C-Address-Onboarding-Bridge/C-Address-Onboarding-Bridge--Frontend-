@@ -8,6 +8,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import DashboardPage from "@/components/routes/dashboard-page";
 
+// DashboardPage mounts ClaimsPanel, which is gated behind the
+// locked_transfers flag (#672) — mock it off since none of these tests
+// exercise the lock/claims feature.
+vi.mock("@/contexts/FeatureFlagContext", () => ({
+  useFeatureFlag: () => false,
+}));
+
 const ADDRESS = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5V3VQ";
 
 const getAccountBalances = vi.fn();
@@ -121,7 +128,7 @@ describe("Dashboard stat cards — loading, empty, populated (#485)", () => {
     });
   });
 
-  it.skip("shows an explicit empty state (0 XLM, 0 transactions) instead of looking stuck", async () => {
+  it("shows an explicit empty state (0 XLM, 0 transactions) instead of looking stuck", async () => {
     getAccountBalances.mockResolvedValue({ total: "0.0000000" });
     fetchRecentTransactions.mockResolvedValue([]);
 
@@ -136,7 +143,7 @@ describe("Dashboard stat cards — loading, empty, populated (#485)", () => {
     expect(screen.getByText("No transactions found for this account.")).not.toBeNull();
   });
 
-  it.skip("shows populated balance and transaction counts once data arrives", async () => {
+  it("shows populated balance and transaction counts once data arrives", async () => {
     getAccountBalances.mockResolvedValue({ total: "123.4500000" });
     fetchRecentTransactions.mockResolvedValue([
       {

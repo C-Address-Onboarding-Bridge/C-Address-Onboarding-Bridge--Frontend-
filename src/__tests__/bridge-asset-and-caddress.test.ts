@@ -7,6 +7,7 @@ const G_SOURCE = Keypair.random().publicKey();
 const G_DEST = Keypair.random().publicKey();
 const C_ADDRESS = StrKey.encodeContract(Keypair.random().rawPublicKey());
 const USDC_ISSUER = Keypair.random().publicKey();
+const SPAM_USDC_ISSUER = Keypair.random().publicKey();
 
 const loadAccountMock = vi.fn();
 const submitTransactionMock = vi.fn();
@@ -110,6 +111,65 @@ describe("asset resolution honors the requested assetCode (#285)", () => {
     await expect(
       buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "SHITCOIN", "TESTNET")
     ).rejects.toThrow(/trustline/i);
+  });
+});
+
+// Regression coverage for #682: resolveAsset must select a token by
+// code:issuer, not by code alone. When an account holds two assets sharing the
+// code USDC (e.g. a spam token), the allowlisted issuer must win -- otherwise
+// the user could send a worthless token while the UI says USDC.
+describe("asset resolution honors the issuer, not just the code (#682)", () => {
+  let capturedOperation: { asset: { isNative(): boolean; code?: string; issuer?: string } } | null;
+
+  beforeEach(() => {
+    capturedOperation = null;
+
+    vi.mocked(freighter.signTransaction).mockImplementation(async (xdr: string) => ({
+      signedTxXdr: xdr,
+      signerAddress: G_SOURCE,
+    }));
+    vi.mocked(freighter.getAddress).mockResolvedValue({ address: G_SOURCE } as never);
+
+    // The spam token is listed first so a code-only lookup would pick it.
+    loadAccountMock.mockResolvedValue({
+      sequenceNumber: () => "100",
+      balances: [
+        { asset_type: "native", balance: "1000" },
+        {
+          asset_type: "credit_alphanum4",
+          asset_code: "USDC",
+          asset_issuer: SPAM_USDC_ISSUER,
+          balance: "999999",
+        },
+        {
+          asset_type: "credit_alphanum4",
+          asset_code: "USDC",
+          asset_issuer: USDC_ISSUER,
+          balance: "500",
+        },
+      ],
+    });
+
+    submitTransactionMock.mockImplementation(async (tx: { operations: unknown[] }) => {
+      capturedOperation = tx.operations[0] as typeof capturedOperation extends infer T ? NonNullable<T> : never;
+      return { hash: "mock-hash", successful: true };
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    loadAccountMock.mockReset();
+    submitTransactionMock.mockReset();
+  });
+
+  it("selects the allowlisted USDC issuer, not the first same-code balance", async () => {
+    await buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "USDC", "TESTNET");
+
+    expect(capturedOperation).not.toBeNull();
+    expect(capturedOperation?.asset.isNative()).toBe(false);
+    expect(capturedOperation?.asset.code).toBe("USDC");
+    expect(capturedOperation?.asset.issuer).toBe(USDC_ISSUER);
+    expect(capturedOperation?.asset.issuer).not.toBe(SPAM_USDC_ISSUER);
   });
 });
 
