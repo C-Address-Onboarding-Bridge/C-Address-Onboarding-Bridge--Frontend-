@@ -5,6 +5,7 @@ import { connectWallet, checkConnection, getWalletAddress, getWalletNetwork, swi
 import { APP_NETWORK, isSupportedNetwork, type StellarNetwork, type WalletNetworkState } from "@/lib/types";
 import { loadSession, markConnected, markDisconnected } from "@/lib/session";
 import { handleError } from "@/lib/errors";
+import { useHydrated } from "@/hooks/useHydrated";
 import {
   cancelOperation as removeOperation,
   createOperationId,
@@ -105,7 +106,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
    * Hydrated from the stored session on mount so the kit can restore the same
    * wallet module across page reloads. (#459)
    */
-  const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
+  const [selectedWalletIdState, setSelectedWalletId] = useState<string | null>(null);
+  const hydrated = useHydrated();
+  const selectedWalletId = selectedWalletIdState ?? (hydrated ? loadSession().selectedWalletId : null);
   /**
    * `networkMismatch` is true when the network changed after the initial
    * connection was established. It's reset to false on:
@@ -220,15 +223,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [setPending]);
 
-  // Initialise the Stellar Wallets Kit on mount, restoring the previously
-  // selected wallet so the user does not have to re-choose after a reload. (#459)
+  // Only restore the wallet kit for a session that previously connected a
+  // wallet. First-time visitors should not download wallet adapters up front.
   useEffect(() => {
     const session = loadSession();
-    if (session.selectedWalletId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSelectedWalletId(session.selectedWalletId);
+    if (session.selectedWalletId && !session.manuallyDisconnected) {
+      void initWalletKit(session.selectedWalletId);
     }
-    void initWalletKit(session.selectedWalletId);
   }, []);
 
   // Connectivity awareness: keep `isOnline` in sync and replay safe operations
@@ -424,6 +425,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   // Polling with backoff + visibility awareness
   useEffect(() => {
+    let cancelled = false;
     let fastTimer: ReturnType<typeof setTimeout> | null = null;
     let slowTimer: ReturnType<typeof setTimeout> | null = null;
     let backoffTimer: ReturnType<typeof setTimeout> | null = null;
@@ -466,6 +468,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         // then start the backoff timer fresh.
         isFast = true;
         updateConnection().finally(() => {
+          if (cancelled) return;
           startBackoff();
           scheduleNext();
         });
@@ -473,15 +476,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
 
     // Initial check + start fast polling
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    updateConnection().finally(() => {
-      startBackoff();
-      scheduleNext();
+    queueMicrotask(() => {
+      if (cancelled) return;
+      updateConnection().finally(() => {
+        if (cancelled) return;
+        startBackoff();
+        scheduleNext();
+      });
     });
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
+      cancelled = true;
       clearAllTimers();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };

@@ -318,21 +318,24 @@ export default function DashboardPage() {
     const fetchData = async (isInitial: boolean) => {
       if (isInitial) setLoading(true);
       setError(null);
+      // The fee tier loads on its own rather than inside the Promise.all
+      // below: a slow or unreachable tier endpoint used to hold the balance and
+      // transaction cards in their loading state, so an empty account looked
+      // stuck instead of showing 0 XLM / 0 transactions. getFeeTierPreview
+      // never throws (it resolves null on any failure). (#653)
+      getFeeTierPreview(address, network).then((tierResult) => {
+        if (!cancelled) setFeeTierStatus(tierResult);
+      });
       try {
-        // getFeeTierPreview never throws (resolves null on any failure), so it
-        // can share this Promise.all without a failed tier fetch aborting the
-        // balance/transaction load or being caught below as a page-level error.
-        const [balResult, txResult, tierResult] = await Promise.all([
+        const [balResult, txResult] = await Promise.all([
           getAccountBalances(address, network),
           fetchRecentTransactions(address, network, 10),
-          getFeeTierPreview(address, network),
         ]);
         if (cancelled) return;
         setBalance(balResult.total);
         // Reuse the previous reference when nothing changed so React bails out
         // of re-rendering the memoized transaction list.
         setTransactions((prev) => (areTransactionsEqual(prev, txResult) ? prev : txResult));
-        setFeeTierStatus(tierResult);
       } catch (e: unknown) {
         if (cancelled) return;
         setError(toSafeErrorMessage(e, "Failed to fetch data. Please try again."));
@@ -411,14 +414,14 @@ export default function DashboardPage() {
           </div>
           <h1 className="text-2xl font-bold mb-2">Connect Your Wallet</h1>
           <p className="text-[var(--text-muted)] mb-6">
-            Connect your Freighter wallet to view your dashboard.
+            Connect your wallet to view your dashboard.
           </p>
           <button
             onClick={connect}
             className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors"
           >
             <Wallet className="w-4 h-4" />
-            Connect Freighter
+            Connect Wallet
           </button>
         </div>
       </div>
@@ -535,7 +538,7 @@ export default function DashboardPage() {
                 {shownBalance !== null ? parseFloat(shownBalance).toFixed(2) : "—"}
               </div>
               <div className="text-xs text-[var(--text-muted)]">XLM</div>
-              {network === "TESTNET" && !showLoading && (
+              {network === "TESTNET" && !showLoading && (shownBalance === null || parseFloat(shownBalance) === 0) && (
                 <div className="mt-3">
                   <button
                     onClick={handleFaucet}
@@ -636,8 +639,8 @@ export default function DashboardPage() {
           className="mb-6 p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 text-sm text-[var(--error)]"
         >
           {networkStatus === "UNSUPPORTED"
-            ? `Freighter is on ${formatNetworkLabel(networkStatus, walletNetworkName)}, which this app doesn't support. Switch to Testnet or Mainnet to see balances and activity.`
-            : "Freighter's network couldn't be read, so no chain data is shown. Unlock the extension and reload."}
+            ? `Your wallet is on ${formatNetworkLabel(networkStatus, walletNetworkName)}, which this app doesn't support. Switch to Testnet or Mainnet to see balances and activity.`
+            : "Your wallet's network couldn't be read, so no chain data is shown. Unlock the extension and reload."}
         </div>
       )}
 

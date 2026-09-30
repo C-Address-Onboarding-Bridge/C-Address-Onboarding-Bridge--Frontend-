@@ -13,6 +13,13 @@ import { StrKey } from "@stellar/stellar-sdk";
 import LiveRegion from "@/components/live-region";
 import TransactionHistory from "@/components/transaction-history";
 import DashboardPage from "@/components/routes/dashboard-page";
+
+// DashboardPage mounts ClaimsPanel, which is gated behind the
+// locked_transfers flag (#672) — mock it off since none of these tests
+// exercise the lock/claims feature.
+vi.mock("@/contexts/FeatureFlagContext", () => ({
+  useFeatureFlag: () => false,
+}));
 import CexPage from "@/components/routes/cex-page";
 
 const ADDRESS = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5V3VQ";
@@ -50,10 +57,6 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getFeeTierPreview: vi.fn().mockResolvedValue(null),
   };
 });
-
-vi.mock("@/hooks/useCopyToClipboard", () => ({
-  useCopyToClipboard: () => ({ status: "idle", copy: vi.fn(), reset: vi.fn() }),
-}));
 
 const wallet = {
   isConnected: true,
@@ -175,7 +178,7 @@ describe("Dashboard notifications", () => {
     expect(button.getAttribute("title")).toBe("Copy address");
   });
 
-  it.skip("announces a successful address copy", async () => {
+  it("announces a successful address copy", async () => {
     const writeText = stubClipboard("success");
     const { container } = await renderDashboard();
 
@@ -187,7 +190,7 @@ describe("Dashboard notifications", () => {
     expect(politeText(container)).toBe("Wallet address copied to clipboard.");
   });
 
-  it.skip("announces a failed address copy instead of reporting success", async () => {
+  it("announces a failed address copy instead of reporting success", async () => {
     stubClipboard("failure");
     const { container } = await renderDashboard();
 
@@ -207,16 +210,28 @@ describe("Dashboard notifications", () => {
 });
 
 describe("CEX page notifications", () => {
+  // The C-address input is validated against a 200ms-debounced value
+  // (useDebounce), so entering an address doesn't take effect until that
+  // delay elapses. Fake timers make that deterministic instead of racing a
+  // real 200ms setTimeout against the test's synchronous assertions.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
   const enterAddress = (value: string) => {
     fireEvent.change(screen.getByLabelText("Soroban C-address"), { target: { value } });
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
   };
 
-  it.skip("announces validation success, not only failure", () => {
+  it("announces validation success, not only failure", () => {
     render(<CexPage />);
 
     enterAddress("not-a-c-address");
@@ -227,7 +242,7 @@ describe("CEX page notifications", () => {
     expect(screen.getByRole("status").textContent).toContain("Valid C-address");
   });
 
-  it.skip("announces a successful C-address copy", async () => {
+  it("announces a successful C-address copy", async () => {
     const writeText = stubClipboard("success");
     const { container } = render(<CexPage />);
 
@@ -241,7 +256,7 @@ describe("CEX page notifications", () => {
     expect(politeText(container)).toBe("C-address copied to clipboard.");
   });
 
-  it.skip("announces a failed C-address copy", async () => {
+  it("announces a failed C-address copy", async () => {
     stubClipboard("failure");
     const { container } = render(<CexPage />);
 
@@ -255,9 +270,14 @@ describe("CEX page notifications", () => {
 describe("Onramp page notifications", () => {
   const originalOpen = window.open;
 
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
   afterEach(() => {
     cleanup();
     window.open = originalOpen;
+    vi.useRealTimers();
     vi.unstubAllEnvs();
     vi.resetModules();
     vi.clearAllMocks();
@@ -278,9 +298,14 @@ describe("Onramp page notifications", () => {
     const [addressInput, amountInput] = screen.getAllByRole("textbox");
     fireEvent.change(addressInput, { target: { value: VALID_C_ADDRESS } });
     fireEvent.change(amountInput, { target: { value: "100.00" } });
+    // Both fields are validated against a 300ms-debounced value (useDebounce);
+    // canProceed (and so the Continue button) stays false until that elapses.
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
   };
 
-  it.skip("announces a redirect failure via an alert", async () => {
+  it("announces a redirect failure via an alert", async () => {
     // No API key configured — the Continue click fails before opening a tab.
     const OnrampPage = await loadOnramp("");
     render(<OnrampPage />);
@@ -292,7 +317,7 @@ describe("Onramp page notifications", () => {
     expect(alert.textContent).toContain("API key is not configured");
   });
 
-  it.skip("announces that a new tab was opened for checkout", async () => {
+  it("announces that a new tab was opened for checkout", async () => {
     const open = vi.fn();
     window.open = open as unknown as typeof window.open;
 

@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useState, useEffect } from "react";
+import React, { memo, useMemo, useState, useEffect, useRef } from "react";
 import { ArrowLeftRight, CreditCard, Building2, ExternalLink, Loader2, Copy, Check, X, Search } from "lucide-react";
 import type { BridgeTransactionData, BridgeTransactionStatus } from "@/lib/types";
 import { getExplorerUrl } from "@/lib/stellar";
@@ -11,6 +11,11 @@ const typeConfig: Record<string, { icon: typeof ArrowLeftRight; label: string; c
   "g-to-c": { icon: ArrowLeftRight, label: "G → C Bridge", color: "text-[var(--primary-light)]" },
   fiat: { icon: CreditCard, label: "Fiat Onramp", color: "text-[var(--secondary)]" },
   cex: { icon: Building2, label: "CEX Withdrawal", color: "text-[var(--accent)]" },
+  payment: { icon: ArrowLeftRight, label: "Payment", color: "text-[var(--text-muted)]" },
+  "path-payment": { icon: ArrowLeftRight, label: "Path Payment", color: "text-[var(--text-muted)]" },
+  "create-account": { icon: ArrowLeftRight, label: "Account Created", color: "text-[var(--text-muted)]" },
+  "account-merge": { icon: ArrowLeftRight, label: "Account Merge", color: "text-[var(--text-muted)]" },
+  "contract-transfer": { icon: ArrowLeftRight, label: "Contract Transfer", color: "text-[var(--text-muted)]" },
 };
 
 const statusConfig: Record<string, { label: string; color: string }> = {
@@ -98,13 +103,15 @@ interface Props {
 const TransactionItem = memo(function TransactionItem({
   tx,
   network,
+  selected,
+  onToggleSelected,
 }: {
   tx: BridgeTransactionData;
   network: Props["network"];
-  // selected: boolean;
-  // onToggleSelected: (id: string) => void;
+  selected: boolean;
+  onToggleSelected: (id: string) => void;
 }) {
-  const type = typeConfig[tx.type] || typeConfig["g-to-c"];
+  const type = typeConfig[tx.type] || typeConfig.payment;
   const status = statusConfig[tx.status];
   const Icon = type.icon;
 
@@ -126,13 +133,13 @@ const TransactionItem = memo(function TransactionItem({
               every row regardless of claim eligibility — mixed selections
               (some rows eligible, some not) are the normal case the bulk
               toolbar below has to explain, not something to prevent. (#486) */}
-          {/* <input
+          <input
             type="checkbox"
             checked={selected}
             onChange={() => onToggleSelected(tx.id)}
             aria-label={`Select ${type.label} of ${tx.amount} ${tx.asset}`}
             className="w-4 h-4 flex-shrink-0 accent-[var(--primary)]"
-          /> */}
+          />
           <div className="w-9 h-9 rounded-lg bg-[var(--surface-2)] flex items-center justify-center flex-shrink-0">
             <Icon className={`w-4 h-4 ${type.color}`} />
           </div>
@@ -246,6 +253,7 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
   const [directionFilter, setDirectionFilter] = useState(initial.direction);
   const [dateFrom, setDateFrom] = useState(initial.from);
   const [dateTo, setDateTo] = useState(initial.to);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
 
   const debouncedSearchQuery = useDebounceValue(searchQuery, 300);
 
@@ -296,7 +304,8 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
         const matchFrom = tx.fromAddress.toLowerCase().includes(q);
         const matchTo = tx.toAddress.toLowerCase().includes(q);
         const matchMemo = tx.memo?.toLowerCase().includes(q);
-        if (!matchHash && !matchFrom && !matchTo && !matchMemo) return false;
+        const matchAsset = tx.asset.toLowerCase().includes(q);
+        if (!matchHash && !matchFrom && !matchTo && !matchMemo && !matchAsset) return false;
       }
 
       if (statusFilter !== "all" && tx.status !== statusFilter) return false;
@@ -317,9 +326,84 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
     });
   }, [transactions, debouncedSearchQuery, statusFilter, assetFilter, directionFilter, dateFrom, dateTo, address]);
 
+  const selectedCount = useMemo(
+    () => transactions.reduce((count, tx) => count + (selectedIds.has(tx.id) ? 1 : 0), 0),
+    [transactions, selectedIds]
+  );
+  const selectedTransactions = useMemo(
+    () => transactions.filter((tx) => selectedIds.has(tx.id)),
+    [transactions, selectedIds]
+  );
+  const claimIneligibleCount = selectedTransactions.filter((tx) => !isClaimEligible(tx)).length;
+  const canClaim = selectedCount > 0 && claimIneligibleCount === 0;
+  const claimDisabledReason =
+    selectedCount > 0 && claimIneligibleCount > 0
+      ? `${claimIneligibleCount} of ${selectedCount} selected transaction${selectedCount === 1 ? "" : "s"} can't be claimed — only confirmed G → C bridge transactions are eligible. Adjust your selection to claim the rest.`
+      : "";
+  const [confirmingClaim, setConfirmingClaim] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
+  const filteredIds = useMemo(() => filteredTransactions.map((tx) => tx.id), [filteredTransactions]);
+  const selectedFilteredCount = useMemo(
+    () => filteredIds.reduce((count, id) => count + (selectedIds.has(id) ? 1 : 0), 0),
+    [filteredIds, selectedIds]
+  );
+  const allFilteredSelected =
+    filteredIds.length > 0 && selectedFilteredCount === filteredIds.length;
+  const someFilteredSelected = selectedFilteredCount > 0 && !allFilteredSelected;
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someFilteredSelected;
+  }, [someFilteredSelected]);
+
+  const toggleRow = (id: string) => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectAllFiltered = () => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      filteredIds.forEach((id) => {
+        if (allFilteredSelected) next.delete(id);
+        else next.add(id);
+      });
+      return next;
+    });
+  };
+  const handleClaimClick = () => {
+    if (canClaim) setConfirmingClaim(true);
+  };
+  const handleExportClick = () => {
+    if (selectedCount === 0) return;
+    const csv = buildTransactionsCsv(selectedTransactions);
+    downloadCsv(csv, `transactions-${new Date().toISOString().slice(0, 10)}.csv`);
+    setStatusMessage(`Exported ${selectedCount} transaction${selectedCount === 1 ? "" : "s"}.`);
+  };
+  const handleConfirmClaim = () => {
+    setStatusMessage(`Claimed ${selectedCount} transaction${selectedCount === 1 ? "" : "s"}.`);
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      selectedTransactions.forEach((tx) => next.delete(tx.id));
+      return next;
+    });
+    setConfirmingClaim(false);
+  };
+
   const items = useMemo(
-    () => filteredTransactions.map((tx) => <TransactionItem key={tx.id} tx={tx} network={network} />),
-    [filteredTransactions, network]
+    () =>
+      filteredTransactions.map((tx) => (
+        <TransactionItem
+          key={tx.id}
+          tx={tx}
+          network={network}
+          selected={selectedIds.has(tx.id)}
+          onToggleSelected={toggleRow}
+        />
+      )),
+    [filteredTransactions, network, selectedIds]
   );
 
   const showFilteredEmpty = !loading && hasActiveFilters && filteredTransactions.length === 0;
@@ -404,6 +488,57 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
             </button>
           )}
         </div>
+        {!loading && transactions.length > 0 && (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              ref={selectAllRef}
+              type="checkbox"
+              checked={allFilteredSelected}
+              onChange={toggleSelectAllFiltered}
+              disabled={filteredIds.length === 0}
+              aria-label={`Select all ${filteredIds.length} filtered transactions`}
+              className="w-4 h-4 accent-[var(--primary)]"
+            />
+            <span className="text-[var(--text-muted)]">
+              Select all {filteredIds.length} filtered
+            </span>
+          </label>
+        )}
+        {selectedCount > 0 && (
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium" data-testid="selection-count">
+              {selectedCount} selected
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedIds(new Set())}
+              className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)] transition-colors"
+            >
+              Clear selection
+            </button>
+            <button
+              type="button"
+              onClick={handleExportClick}
+              className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-sm hover:bg-[var(--surface-2)] transition-colors"
+            >
+              Export
+            </button>
+            <button
+              type="button"
+              onClick={handleClaimClick}
+              disabled={!canClaim}
+              title={canClaim ? `Claim ${selectedCount} selected transactions` : claimDisabledReason}
+              className="px-3 py-1.5 rounded-lg bg-[var(--primary)] text-white text-sm hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Claim
+            </button>
+          </div>
+        )}
+        {claimDisabledReason && (
+          <p className="text-xs text-[var(--text-muted)]" role="note">
+            {claimDisabledReason}
+          </p>
+        )}
       </div>
 
       {loading ? (
@@ -413,7 +548,7 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
         </div>
       ) : showEmpty ? (
         <div className="p-12 text-center">
-          <p className="text-sm text-[var(--text-muted)]">No transactions found</p>
+          <p className="text-sm text-[var(--text-muted)]">No transactions found for this account.</p>
         </div>
       ) : showFilteredEmpty ? (
         <div className="p-12 text-center">
@@ -453,12 +588,8 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
         </a>
       </div>
 
-      {/* TODO(next-bounty): `statusMessage` came with the bulk-actions state. */}
-      {/* <LiveRegion message={statusMessage} /> */}
+      <LiveRegion message={statusMessage} />
 
-      {/* TODO(next-bounty): bulk-claim confirmation dialog, orphaned by the same
-          half-merge. Restore alongside the selection state from commit 4237d8e. */}
-{/*
       {confirmingClaim && (
         <div
           role="dialog"
@@ -467,7 +598,9 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
           aria-describedby="bulk-claim-description"
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(0, 0, 0, 0.5)" }}
-          onKeyDown={handleDialogKeyDown}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setConfirmingClaim(false);
+          }}
           data-testid="bulk-claim-dialog"
         >
           <div className="card w-full max-w-sm p-6" style={{ boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)" }}>
@@ -481,7 +614,7 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
             <div className="flex justify-end gap-3">
               <button
                 type="button"
-                onClick={handleCancelClaim}
+                onClick={() => setConfirmingClaim(false)}
                 autoFocus
                 className="px-4 py-2 rounded-lg border border-[var(--border)] text-sm hover:bg-[var(--surface-2)] transition-colors"
               >
@@ -498,7 +631,6 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
           </div>
         </div>
       )}
-*/}
     </div>
   );
 }

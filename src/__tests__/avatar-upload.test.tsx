@@ -146,7 +146,7 @@ describe("AvatarUpload", () => {
     expect(window.localStorage.getItem(avatarStorageKey(ADDRESS))).toBe(src);
   });
 
-  it.skip("rejects an unsupported file type without storing it", async () => {
+  it("rejects an unsupported file type without storing it", async () => {
     await render(ADDRESS);
 
     await selectFile(new File(["x"], "avatar.bmp", { type: "image/bmp" }));
@@ -155,7 +155,7 @@ describe("AvatarUpload", () => {
     expect(window.localStorage.getItem(avatarStorageKey(ADDRESS))).toBeNull();
   });
 
-  it.skip("rejects a file over the size limit without storing it", async () => {
+  it("rejects a file over the size limit without storing it", async () => {
     await render(ADDRESS);
 
     await selectFile(pngFile(512 * 1024 + 1));

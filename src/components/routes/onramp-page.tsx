@@ -13,50 +13,13 @@ import {
 } from "@/lib/onrampQuotes";
 import type { OnrampProvider } from "@/lib/types";
 import { useDebounce } from "@/hooks/useDebounce";
+import { providers, getProviderFeeRate, calculateOnrampFeeAndReceive } from "@/lib/onrampProviders";
 import { useHelp } from "@/contexts/HelpContext";
 
-const MOONPAY_API_KEY = process.env.NEXT_PUBLIC_MOONPAY_API_KEY || "";
-const TRANSAK_API_KEY = process.env.NEXT_PUBLIC_TRANSAK_API_KEY || "";
-
-// Exported (in addition to the pure helpers below) so `src/lib/onrampQuotes.ts`
-// (#556) can compare providers without re-declaring this list — one source of
-// truth for id/name/fee/limits/currencies, same reasoning as exporting
-// getProviderFeeRate/calculateOnrampFeeAndReceive themselves.
-export const providers = [
-  {
-    id: "moonpay",
-    name: "Moonpay",
-    description: "Buy with credit/debit card",
-    fee: "4.5%",
-    limits: "$20 - $10,000",
-    currencies: ["USD", "EUR", "GBP"],
-    supported: true,
-    apiKey: MOONPAY_API_KEY,
-    baseUrl: "https://buy.moonpay.com",
-  },
-  {
-    id: "transak",
-    name: "Transak",
-    description: "Buy with card, Apple Pay, Google Pay",
-    fee: "5%",
-    limits: "$15 - $25,000",
-    currencies: ["USD", "EUR", "GBP", "INR"],
-    supported: true,
-    apiKey: TRANSAK_API_KEY,
-    baseUrl: "https://global.transak.com",
-  },
-];
-
-export function getProviderFeeRate(providerId: string): number {
-  return providerId === "moonpay" ? 0.045 : 0.05;
-}
-
-export function calculateOnrampFeeAndReceive(amount: number, providerId: string) {
-  const feeRate = getProviderFeeRate(providerId);
-  const fee = amount * feeRate;
-  const receive = amount - fee;
-  return { feeRate, fee, receive };
-}
+// Provider config lives in `src/lib/onrampProviders.ts` (#721) so lib code and
+// server routes don't import this client page module. Re-exported for callers
+// that already import from here.
+export { providers, getProviderFeeRate, calculateOnrampFeeAndReceive };
 
 export function buildProviderUrl(p: typeof providers[number], cAddress: string, fiatAmount: string, fiatCurrency: string = "USD"): string {
   // Defence-in-depth: re-validate inputs independently of the button's
@@ -84,7 +47,7 @@ export function buildProviderUrl(p: typeof providers[number], cAddress: string, 
   //      baseCurrencyAmount, baseCurrencyCode, network,
   //      defaultCryptoCurrency, defaultFiatAmount, fiatCurrency) are string
   //      literals in this file — user input is never used as a param key.
-  //   3. Fixed base URL: p.baseUrl comes from the `providers` array above —
+  //   3. Fixed base URL: p.baseUrl comes from the `providers` array (src/lib/onrampProviders.ts) —
   //      hardcoded per-provider host literals — so the scheme + host are not
   //      attacker-controlled.
   // Combined with the isCAddress check above (which enforces a base32 alphabet
@@ -132,25 +95,17 @@ function QuoteComparisonPanel({
   fiatCurrency: string;
   isValid: boolean;
 }) {
-  const [comparisons, setComparisons] = useState<OnrampQuoteComparison[]>([]);
+  const [loadedComparisons, setLoadedComparisons] = useState<{ query: string; items: OnrampQuoteComparison[] } | null>(null);
   const [quotedAt, setQuotedAt] = useState<number | null>(null);
   const [, forceTick] = useState(0);
   const requestIdRef = useRef(0);
 
   const amount = Number(fiatAmount) || 0;
+  const query = `${amount}:${fiatCurrency}`;
 
   const refresh = useCallback(async () => {
-    if (!isValid || amount <= 0) {
-      setComparisons([]);
-      setQuotedAt(null);
-      return;
-    }
+    if (!isValid || amount <= 0) return;
     const requestId = ++requestIdRef.current;
-    // Local estimate first, synchronously, so the panel never shows nothing
-    // while the (optional) live fetch is in flight.
-    setComparisons(compareOnrampQuotes(amount, fiatCurrency));
-    setQuotedAt(Date.now());
-
     try {
       const res = await fetch(`/api/onramp/quotes?amount=${encodeURIComponent(String(amount))}&currency=${encodeURIComponent(fiatCurrency)}`);
       if (!res.ok) return;
@@ -159,21 +114,23 @@ function QuoteComparisonPanel({
       // a newer one that already resolved.
       if (requestId !== requestIdRef.current) return;
       const live = (data as { live?: Partial<Record<OnrampProvider, { sourceAmount: string; destinationAmount: string; fee: string }>> }).live ?? {};
-      setComparisons(compareOnrampQuotes(amount, fiatCurrency, { liveQuotes: live }));
+      setLoadedComparisons({ query, items: compareOnrampQuotes(amount, fiatCurrency, { liveQuotes: live }) });
       setQuotedAt(Date.now());
     } catch {
       // Network failure: the local-estimate comparison set above stands.
     }
-  }, [amount, fiatCurrency, isValid]);
+  }, [amount, fiatCurrency, isValid, query]);
 
   useEffect(() => {
-    // Fetch-on-mount/-change, same justified pattern as AddressBookPage's
-    // load effect: synchronizing the panel with the external quote source
-    // (the local estimator + /api/onramp/quotes) whenever amount/currency
-    // change, not deriving state from a render.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    refresh();
-  }, [refresh]);
+    if (!isValid || amount <= 0) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refresh();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh, isValid, amount]);
 
   // Timed refresh while a valid amount is entered, plus a 1s tick so the
   // "quoted Xs ago" age display stays live between refreshes.
@@ -189,6 +146,9 @@ function QuoteComparisonPanel({
 
   if (!isValid || amount <= 0) return null;
 
+  const comparisons = loadedComparisons?.query === query
+    ? loadedComparisons.items
+    : compareOnrampQuotes(amount, fiatCurrency);
   const spread = quoteSpread(comparisons);
 
   return (
@@ -353,7 +313,7 @@ export default function OnrampPage() {
               }
             />
             {step === "form" && (
-              <div className="space-y-6">
+              <div className="space-y-6" data-testid="onramp-form">
                 <div>
                   <label className="block text-sm font-medium mb-3">Select Provider</label>
                   {/* Single column on phones: at ~320px two provider cards left the
@@ -364,6 +324,7 @@ export default function OnrampPage() {
                       <button
                         key={p.id}
                         type="button"
+                        data-testid={`onramp-provider-${p.id}`}
                         onClick={() => handleProviderSelect(p.id)}
                         aria-pressed={selectedProvider === p.id}
                         className={`p-4 rounded-lg border text-left transition-all ${

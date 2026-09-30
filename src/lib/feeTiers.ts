@@ -1,13 +1,15 @@
 /**
  * Volume-based fee tiers (#468).
  *
- * PLACEHOLDER INTERFACE: this repo vendors neither the fee-tier contract
- * bindings nor a real API client for the preview endpoint yet (no contract
- * source, no tier-related route, nothing in docs — checked before writing
- * this, the same way #465's batch cap and #467's lock/claim shape were).
- * Field names, thresholds, and the API route in `src/lib/api.ts` are a
- * best-guess shape and MUST be reconciled against the real contract/API once
- * available.
+ * `getFeeTierPreview` in `src/lib/api.ts` now reads an account's real
+ * cumulative volume on-chain via `getRebateVolume` (#673, Soroban RPC
+ * simulation of the bridge contract's `rebate_for`), rather than a
+ * `/fee-tiers/preview` route that never existed. `DEFAULT_FEE_TIERS` below —
+ * the tier names, thresholds, and rates themselves — is still a best guess:
+ * no contract ABI documents the actual tier ladder, only that `rebate_for`
+ * exists. Must be reconciled against the real contract's configuration once
+ * that's available; everything else in this file (the pure display logic) is
+ * unaffected by that uncertainty.
  *
  * `nextTier` is `null` exactly at the top tier — there's nothing further to
  * progress toward, which the display logic below treats as its own case
@@ -29,6 +31,39 @@ export interface FeeTierStatus {
   nextTier: FeeTier | null;
   /** All configured tiers, ascending by volumeThreshold. Empty when no tiers are configured. */
   tiers: FeeTier[];
+}
+
+/**
+ * The tier ladder itself — see the PLACEHOLDER note at the top of this file.
+ * Ascending by volumeThreshold; the lowest tier's threshold must be 0 so
+ * every account falls into some tier.
+ */
+export const DEFAULT_FEE_TIERS: FeeTier[] = [
+  { name: "Base", volumeThreshold: 0, feeRate: 0.005 },
+  { name: "Silver", volumeThreshold: 1000, feeRate: 0.003 },
+  { name: "Gold", volumeThreshold: 10000, feeRate: 0.001 },
+];
+
+/**
+ * Maps a raw cumulative-volume number (e.g. from `getRebateVolume`, #673)
+ * onto a tier ladder, producing the `FeeTierStatus` the display logic below
+ * expects. `tiers` need not be pre-sorted. A volume below every threshold
+ * (shouldn't happen if the lowest tier's threshold is 0, but the input is
+ * external data) falls back to the lowest tier rather than being left
+ * without a `currentTier`.
+ */
+export function buildFeeTierStatus(volume: number, tiers: FeeTier[] = DEFAULT_FEE_TIERS): FeeTierStatus {
+  const sorted = [...tiers].sort((a, b) => a.volumeThreshold - b.volumeThreshold);
+  let currentIndex = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    if (volume >= sorted[i].volumeThreshold) currentIndex = i;
+  }
+  return {
+    currentVolume: volume,
+    currentTier: sorted[currentIndex],
+    nextTier: sorted[currentIndex + 1] ?? null,
+    tiers: sorted,
+  };
 }
 
 /**
