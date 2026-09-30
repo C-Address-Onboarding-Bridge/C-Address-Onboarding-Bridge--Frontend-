@@ -5,6 +5,7 @@ import { BookUser, Download, Pencil, Trash2, Upload, X } from "lucide-react";
 import { truncateAddress } from "@/components/AddressForm";
 import LiveRegion from "@/components/live-region";
 import {
+  MAX_IMPORT_BYTES,
   RECIPIENT_LABEL_MAX_LENGTH,
   deleteRecipient,
   exportAddressBook,
@@ -131,6 +132,18 @@ export default function AddressBookPage() {
     // Always reset the input so re-picking the same file fires `change` again.
     event.target.value = "";
     if (!file) return;
+
+    // Reject oversized files before reading them into memory so a huge file
+    // can't freeze the page while it's parsed and validated (#731).
+    if (file.size > MAX_IMPORT_BYTES) {
+      setImportErrors([
+        `File is too large (${Math.ceil(file.size / 1024)} KB). The limit is ${Math.floor(
+          MAX_IMPORT_BYTES / 1024
+        )} KB.`,
+      ]);
+      setNotice("Import skipped — file exceeds the size limit.");
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -353,7 +366,4 @@ export default function AddressBookPage() {
         )}
       </section>
 
-      <LiveRegion message={notice} />
-    </div>
-  );
-}
+/* … truncated 5842 chars — edit only what you need near the top … */

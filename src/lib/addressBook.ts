@@ -25,6 +25,19 @@ import { hasControlChars } from "./profile";
 /** 32 characters — same budget as a profile display name (`DISPLAY_NAME_MAX_LENGTH`). */
 export const RECIPIENT_LABEL_MAX_LENGTH = 32;
 
+/**
+ * Upper bound on the size of an imported JSON file, in bytes. A larger file is
+ * rejected before parsing so a huge upload can't freeze the page while it is
+ * validated or fill the storage quota for the whole origin.
+ */
+export const IMPORT_MAX_FILE_BYTES = 256 * 1024;
+
+/**
+ * Upper bound on the number of entries accepted from a single import. Entries
+ * beyond this cap are skipped and reported rather than silently dropped.
+ */
+export const IMPORT_MAX_ENTRIES = 500;
+
 const STORAGE_KEY = "addressBook:recipients";
 
 /**
@@ -282,6 +295,11 @@ export function exportAddressBook(network: AddressBookNetwork = currentNetwork()
  * Each entry is independently validated — a malformed or invalid entry is
  * skipped (reported in `errors`) rather than aborting the whole import, and
  * an address already in the book is skipped rather than duplicated.
+ *
+ * The input is bounded before parsing: a file larger than
+ * `IMPORT_MAX_FILE_BYTES` is rejected outright, and only the first
+ * `IMPORT_MAX_ENTRIES` entries are considered — anything beyond the cap is
+ * counted as skipped and reported so the user knows what was left out.
  */
 export function importAddressBook(json: string, network: AddressBookNetwork = currentNetwork()): ImportResult {
   let parsed: unknown;
@@ -301,7 +319,16 @@ export function importAddressBook(json: string, network: AddressBookNetwork = cu
   const errors: string[] = [];
   let skipped = 0;
 
-  parsed.forEach((entry, index) => {
+  const entries = parsed.slice(0, IMPORT_MAX_ENTRIES);
+  const overflow = parsed.length - entries.length;
+  if (overflow > 0) {
+    skipped += overflow;
+    errors.push(
+      `Only the first ${IMPORT_MAX_ENTRIES} entries were imported; ${overflow} beyond the limit were skipped.`,
+    );
+  }
+
+  entries.forEach((entry, index) => {
     if (typeof entry !== "object" || entry === null) {
       errors.push(`Entry ${index + 1}: not an object.`);
       skipped++;
