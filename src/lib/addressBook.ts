@@ -19,7 +19,7 @@
  * (or be acted on) while the app is on mainnet, and vice versa. The legacy
  * unscoped key is migrated once into the current network's bucket.
  */
-import { validateStellarAddress } from "@/components/AddressForm";
+import { validateStellarAddress } from "@/lib/addressValidation";
 import { hasControlChars } from "./profile";
 
 /** 32 characters — same budget as a profile display name (`DISPLAY_NAME_MAX_LENGTH`). */
@@ -84,7 +84,7 @@ function storage(): Storage | null {
 /**
  * Validates and normalises a label + address pair before it is saved.
  * Address validation is delegated to `validateStellarAddress` from
- * AddressForm.tsx rather than re-implemented here, so the address book and
+ * `src/lib/addressValidation.ts` rather than re-implemented here, so the address book and
  * the funding form always agree on what counts as a valid address.
  */
 export function validateRecipient(rawLabel: string, rawAddress: string): RecipientValidation {

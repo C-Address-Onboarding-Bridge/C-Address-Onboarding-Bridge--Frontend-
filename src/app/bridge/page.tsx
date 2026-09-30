@@ -141,6 +141,7 @@ export default function BridgePage() {
   const [txHash, setTxHash] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
   const [sourceBalances, setSourceBalances] = useState<AccountBalances | null>(null);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
   // null covers both "no tiers configured" and "not loaded yet" — FeeTierDisplay
   // hides itself either way, so no separate loading state is needed. (#468)
   const [feeTierStatus, setFeeTierStatus] = useState<FeeTierStatus | null>(null);
@@ -240,9 +241,16 @@ export default function BridgePage() {
   useEffect(() => {
     if (!address || !isNetworkSupported) return;
     let cancelled = false;
-    getAccountBalances(address, network).then((result) => {
-      if (!cancelled) setSourceBalances(result);
-    });
+    setBalanceError(null);
+    getAccountBalances(address, network)
+      .then((result) => {
+        if (!cancelled) setSourceBalances(result);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setSourceBalances(null);
+        setBalanceError(toSafeErrorMessage(e, "Couldn't load your balance. Please try again."));
+      });
     return () => {
       cancelled = true;
     };
@@ -633,6 +641,11 @@ export default function BridgePage() {
                   {availableBalance !== null && (
                     <p className="text-xs text-[var(--text-muted)] mt-1">
                       Balance: {parseFloat(availableBalance).toFixed(2)} {asset}
+                    </p>
+                  )}
+                  {balanceError && isConnected && isNetworkSupported && (
+                    <p className="text-xs text-[var(--error)] mt-1" role="alert">
+                      {balanceError}
                     </p>
                   )}
                 </div>

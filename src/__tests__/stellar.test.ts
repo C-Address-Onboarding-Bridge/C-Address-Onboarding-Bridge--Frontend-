@@ -16,6 +16,8 @@ import { HORIZON_URL } from "@/lib/types";
 // (Keypair, StrKey, ...) stays real so the address fixtures below are genuine
 // checksum-valid StrKeys rather than hand-rolled look-alikes.
 const loadAccount = vi.fn();
+const paymentsCall = vi.fn();
+const transactionCall = vi.fn();
 
 vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@stellar/stellar-sdk")>();
@@ -25,8 +27,20 @@ vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
       ...actual.Horizon,
       Server: vi.fn().mockImplementation(function MockHorizonServer(this: {
         loadAccount: typeof loadAccount;
-      }) {
+        payments: () => unknown;
+        transactions: () => unknown;
+        operations: () => unknown;
+      }, url: string) {
         this.loadAccount = loadAccount;
+        const builder = {
+          forAccount: () => builder,
+          limit: () => builder,
+          order: () => builder,
+          call: paymentsCall,
+        };
+        this.payments = () => builder;
+        this.transactions = () => ({ transaction: (hash: string) => ({ call: () => transactionCall(url, hash) }) });
+        this.operations = () => ({ forTransaction: () => ({ call: async () => ({ records: [] }) }) });
       }),
     },
   };
@@ -371,5 +385,78 @@ describe("simulatePayment spendable balance", () => {
 
     expect(result.spendable).toBe("0");
     expect(result.sufficient).toBe(false);
+  });
+});
+
+describe("fetchRecentTransactions (#720)", () => {
+  const OTHER_G = Keypair.random().publicKey();
+  const base = { transaction_successful: true, created_at: "2026-01-01T00:00:00Z", transaction_hash: "h" };
+
+  beforeEach(() => {
+    paymentsCall.mockReset();
+  });
+
+  it("propagates Horizon errors instead of returning an empty history", async () => {
+    paymentsCall.mockRejectedValueOnce(new Error("horizon down"));
+    await expect(fetchRecentTransactions(G_ADDRESS, "TESTNET")).rejects.toThrow("horizon down");
+  });
+
+  it("classifies each operation type", async () => {
+    paymentsCall.mockResolvedValueOnce({
+      records: [
+        { ...base, id: "1", type: "payment", from: G_ADDRESS, to: OTHER_G, amount: "1", asset_type: "native" },
+        { ...base, id: "2", type: "path_payment_strict_send", from: G_ADDRESS, to: OTHER_G, amount: "2", asset_type: "credit_alphanum4", asset_code: "USDC" },
+        { ...base, id: "3", type: "create_account", funder: OTHER_G, account: G_ADDRESS, starting_balance: "3" },
+        { ...base, id: "4", type: "account_merge", account: OTHER_G, into: G_ADDRESS },
+        { ...base, id: "5", type: "invoke_host_function", asset_balance_changes: [{ type: "transfer", from: G_ADDRESS, to: C_ADDRESS, amount: "5", asset_type: "native" }] },
+        { ...base, id: "6", type: "invoke_host_function", asset_balance_changes: [{ type: "transfer", from: C_ADDRESS, to: OTHER_G, amount: "6", asset_type: "credit_alphanum4", asset_code: "USDC" }] },
+        { ...base, id: "7", type: "invoke_host_function" },
+      ],
+    });
+
+    const txs = await fetchRecentTransactions(G_ADDRESS, "TESTNET");
+
+    expect(txs.map((t) => t.type)).toEqual([
+      "payment",
+      "path-payment",
+      "create-account",
+      "account-merge",
+      "g-to-c",
+      "contract-transfer",
+    ]);
+    expect(txs[1].asset).toBe("USDC");
+    expect(txs[2]).toMatchObject({ fromAddress: OTHER_G, toAddress: G_ADDRESS, amount: "3", asset: "XLM" });
+    expect(txs[3]).toMatchObject({ fromAddress: OTHER_G, toAddress: G_ADDRESS });
+    expect(txs[4]).toMatchObject({ fromAddress: G_ADDRESS, toAddress: C_ADDRESS, amount: "5", asset: "XLM" });
+  });
+});
+
+describe("findTransactionByHash (#717)", () => {
+  const HASH = "a".repeat(64);
+  const record = { hash: HASH, successful: true, source_account_sequence: "1" };
+
+  beforeEach(() => {
+    transactionCall.mockReset();
+  });
+
+  it("falls back to the other network when the hash isn't on the wallet's", async () => {
+    transactionCall.mockImplementation(async (url: string) => {
+      if (url === HORIZON_URL.PUBLIC) return record;
+      throw { response: { status: 404 } };
+    });
+
+    const result = await findTransactionByHash(HASH, "TESTNET");
+
+    expect(result).toMatchObject({ network: "PUBLIC", status: "confirmed" });
+  });
+
+  it("uses the link's network without consulting the wallet's", async () => {
+    transactionCall.mockResolvedValue(record);
+
+    const result = await findTransactionByHash(HASH, "TESTNET", "PUBLIC");
+
+    expect(result?.network).toBe("PUBLIC");
+    expect(transactionCall).toHaveBeenCalledTimes(1);
+    expect(transactionCall).toHaveBeenCalledWith(HORIZON_URL.PUBLIC, HASH);
   });
 });

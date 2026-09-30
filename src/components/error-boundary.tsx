@@ -147,7 +147,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           </p>
           {inFlight && (
             <a
-              href={`/transactions/${encodeURIComponent(inFlight.hash)}`}
+              href={`/transactions/${encodeURIComponent(inFlight.hash)}${inFlight.network ? `?network=${encodeURIComponent(inFlight.network)}` : ""}`}
               data-testid="in-flight-transaction-link"
               className="block mb-4 p-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-left"
             >

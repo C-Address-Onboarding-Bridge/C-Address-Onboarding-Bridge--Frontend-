@@ -11,6 +11,11 @@ const typeConfig: Record<string, { icon: typeof ArrowLeftRight; label: string; c
   "g-to-c": { icon: ArrowLeftRight, label: "G → C Bridge", color: "text-[var(--primary-light)]" },
   fiat: { icon: CreditCard, label: "Fiat Onramp", color: "text-[var(--secondary)]" },
   cex: { icon: Building2, label: "CEX Withdrawal", color: "text-[var(--accent)]" },
+  payment: { icon: ArrowLeftRight, label: "Payment", color: "text-[var(--text-muted)]" },
+  "path-payment": { icon: ArrowLeftRight, label: "Path Payment", color: "text-[var(--text-muted)]" },
+  "create-account": { icon: ArrowLeftRight, label: "Account Created", color: "text-[var(--text-muted)]" },
+  "account-merge": { icon: ArrowLeftRight, label: "Account Merge", color: "text-[var(--text-muted)]" },
+  "contract-transfer": { icon: ArrowLeftRight, label: "Contract Transfer", color: "text-[var(--text-muted)]" },
 };
 
 const statusConfig: Record<string, { label: string; color: string }> = {
@@ -106,7 +111,7 @@ const TransactionItem = memo(function TransactionItem({
   selected: boolean;
   onToggleSelected: (id: string) => void;
 }) {
-  const type = typeConfig[tx.type] || typeConfig["g-to-c"];
+  const type = typeConfig[tx.type] || typeConfig.payment;
   const status = statusConfig[tx.status];
   const Icon = type.icon;
 
