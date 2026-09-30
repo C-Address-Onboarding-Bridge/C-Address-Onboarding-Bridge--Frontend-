@@ -116,11 +116,32 @@ export function parseHealthResponse(data: unknown): HealthStatus | null {
 }
 
 /**
+ * Synthesized health status used when the health endpoint is completely
+ * unreachable (network error or non-2xx response). Reporting `unhealthy`
+ * here — rather than `null` — is what makes the service-status banner
+ * appear during a total outage (#710).
+ */
+function unreachableHealthStatus(): HealthStatus {
+  return {
+    status: 'unhealthy',
+    timestamp: new Date().toISOString(),
+    services: {
+      horizon: 'down',
+      soroban_rpc: 'down',
+      api: 'down',
+    },
+  };
+}
+
+/**
  * Fetch the current health status from the API.
- * Returns null if the request fails.
+ *
+ * Retries once on failure. If the health endpoint is still unreachable after
+ * the retry, resolves with an `unhealthy` status (rather than `null`) so
+ * callers surface the outage banner instead of silently showing nothing.
  */
 export async function getHealthStatus(): Promise<HealthStatus | null> {
-  try {
+  const attempt = async (): Promise<HealthStatus> => {
     const response = await fetch(`${API_BASE_URL}/health`, {
       method: 'GET',
       headers: {
@@ -129,13 +150,19 @@ export async function getHealthStatus(): Promise<HealthStatus | null> {
     });
 
     if (!response.ok) {
-      return null;
+      throw new Error(`Health check failed (${response.status})`);
     }
 
     return parseHealthResponse(await response.json());
   } catch (error) {
-    console.error('Failed to fetch health status:', error);
-    return null;
+    console.error('Failed to fetch health status, retrying:', error);
+  }
+
+  try {
+    return await attempt();
+  } catch (error) {
+    console.error('Failed to fetch health status after retry:', error);
+    return unreachableHealthStatus();
   }
 }
 

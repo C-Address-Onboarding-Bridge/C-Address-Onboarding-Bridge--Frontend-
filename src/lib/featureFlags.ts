@@ -38,6 +38,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
 const FLAGS_ENDPOINT = '/api/feature-flags';
 const REMOTE_CACHE_KEY = 'ff_remote_cache';
 const REMOTE_FETCH_TIMEOUT_MS = 3000;
+const BUCKET_ID_KEY = 'ff_bucket_id';
 
 let remoteFlagsMemo: FeatureFlag[] | null = null;
 
@@ -136,7 +137,7 @@ export function isFeatureEnabled(
   if (flag.rolloutPercentage <= 0) return flag.defaultEnabled;
   if (flag.rolloutPercentage >= 100) return true;
 
-  const id = sessionId ?? getSessionId();
+  const id = sessionId ?? getBucketId();
   const bucket = deterministicHash(`${normalizedKey}:${id}`) % 100;
   return bucket < flag.rolloutPercentage;
 }
@@ -154,18 +155,30 @@ function deterministicHash(str: string): number {
 }
 
 /**
- * Get or create a session ID for deterministic rollout.
+ * Get or create a stable bucketing id for deterministic rollout.
+ *
+ * Uses localStorage (not sessionStorage) so the same user lands in the same
+ * rollout bucket across tabs and across new sessions. Falls back to an
+ * in-memory id when storage is unavailable so evaluation stays deterministic
+ * within the page lifetime.
  */
-function getSessionId(): string {
+function getBucketId(): string {
   if (typeof window === 'undefined') return 'server';
 
-  let id = sessionStorage.getItem('ff_session_id');
-  if (!id) {
-    id = Math.random().toString(36).slice(2);
-    sessionStorage.setItem('ff_session_id', id);
+  try {
+    let id = window.localStorage.getItem(BUCKET_ID_KEY);
+    if (!id) {
+      id = Math.random().toString(36).slice(2);
+      window.localStorage.setItem(BUCKET_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    // Storage unavailable — fall back to a per-page id.
+    return memoryBucketId;
   }
-  return id;
 }
+
+let memoryBucketId = Math.random().toString(36).slice(2);
 
 const DEV_OVERRIDES_KEY = 'ff_dev_overrides';
 
@@ -252,17 +265,10 @@ function parseEnvFlags(): Record<string, boolean> {
   if (!raw) return {};
 
   return Object.fromEntries(
-    raw.split(',')
-      .map(pair => pair.trim())
-      .filter(pair => pair.length > 0)
-      .map(pair => {
-        const [k, v] = pair.split('=');
-        return [k?.trim() || '', v?.trim() === 'true'] as [string, boolean];
-      })
-      .filter(([k]) => k.length > 0)
+    raw
+      .split(',')
+      .map((pair) => pair.split('='))
+      .filter(([k, v]) => k && v !== undefined)
+      .map(([k, v]) => [k.trim(), v.trim() === 'true'])
   );
 }
-
-// NOTE(ci-cleanup): a bad merge re-appended a stale second copy of
-// `isFeatureEnabled` here. The surviving definition above is the newer one
-// (remote-flag aware). The removed copy is in git history if ever needed.
