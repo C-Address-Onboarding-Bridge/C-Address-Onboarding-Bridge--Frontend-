@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { ArrowRight } from 'lucide-react';
+import { useHydrated } from '@/hooks/useHydrated';
 
 export interface OnboardingOption {
   id: string;
@@ -60,42 +61,38 @@ export function OnboardingModal({
   onNavigate,
   onOption,
 }: OnboardingModalProps) {
-  const [currentStep, setCurrentStep] = useState(initialStep);
-
-  // Reset (or resume) step when modal opens. The synchronous setState is the
-  // point: the modal stays mounted between openings, so `isOpen` flipping true
-  // is the only signal that the walkthrough should start over from
-  // `initialStep`. When a storageKey is set the user's last position is
-  // resumed instead — a stored "completed" starts fresh. (#472)
-  useEffect(() => {
-    let resumed: number | null = null;
-    if (storageKey && typeof localStorage !== 'undefined') {
-      try {
-        const raw = localStorage.getItem(storageKey);
-        if (raw && raw !== 'completed') {
-          const parsed = Number(raw);
-          if (Number.isInteger(parsed) && parsed >= 0 && parsed < steps.length) {
-            resumed = parsed;
-          }
-        }
-      } catch {
-        // Storage unavailable — fall through to initialStep.
+  const hydrated = useHydrated();
+  const [stepOverride, setStepOverride] = useState<{ step: number; open: boolean } | null>(null);
+  let resumedStep: number | null = null;
+  if (hydrated && storageKey && typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw && raw !== 'completed') {
+        const parsed = Number(raw);
+        if (Number.isInteger(parsed) && parsed >= 0 && parsed < steps.length) resumedStep = parsed;
       }
+    } catch {
+      // Storage unavailable — fall through to initialStep.
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (isOpen) setCurrentStep(resumed ?? initialStep);
-  }, [isOpen, storageKey, initialStep, steps.length]);
+  }
+  const currentStep = stepOverride?.open === isOpen
+    ? stepOverride.step
+    : (isOpen ? resumedStep ?? initialStep : initialStep);
+  const setCurrentStep = (step: number | ((previous: number) => number)) => {
+    const next = typeof step === 'function' ? step(currentStep) : step;
+    setStepOverride({ step: next, open: isOpen });
+  };
 
   // Persist progress on every step change so a skip + reopen resumes here.
   // Writing "completed" on finish is what keeps the flow from auto-reopening.
   useEffect(() => {
-    if (!storageKey || !isOpen || typeof localStorage === 'undefined') return;
+    if (!hydrated || !storageKey || !isOpen || typeof localStorage === 'undefined') return;
     try {
       localStorage.setItem(storageKey, String(currentStep));
     } catch {
       // Storage unavailable (private mode, quota) — persistence is best-effort.
     }
-  }, [storageKey, currentStep, isOpen]);
+  }, [hydrated, storageKey, currentStep, isOpen]);
 
   const complete = useCallback(() => {
     if (storageKey && typeof localStorage !== 'undefined') {

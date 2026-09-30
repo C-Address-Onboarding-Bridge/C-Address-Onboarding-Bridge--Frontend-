@@ -23,6 +23,7 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
+import { useHydrated } from '@/hooks/useHydrated';
 
 export type Theme = 'light' | 'dark';
 
@@ -92,24 +93,15 @@ function applyTheme(theme: Theme): void {
 // ---------------------------------------------------------------------------
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  // Initialise from whatever the flash-prevention script already applied so
-  // there is no flicker on hydration. We read the class directly rather than
-  // calling resolveInitialTheme() again to stay in sync with the script.
-  const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof document !== 'undefined') {
-      return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-    }
-    // SSR: the flash-prevention script hasn't run yet; fall back to stored/OS.
-    return 'dark';
-  });
+  const hydrated = useHydrated();
+  const [themeOverride, setThemeState] = useState<Theme | null>(null);
+  const theme = themeOverride ?? (hydrated ? resolveInitialTheme() : 'dark');
 
   // Hydration guard: on the client, sync with the real DOM state once (in case
   // the server rendered 'dark' as the SSR default but the script set 'light').
   useEffect(() => {
     const resolved = resolveInitialTheme();
     applyTheme(resolved);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setThemeState(resolved);
   }, []);
 
   // Listen for OS preference changes so we follow them when the user has not

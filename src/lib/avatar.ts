@@ -53,13 +53,16 @@ export function formatBytes(bytes: number): string {
  */
 export function validateAvatarFile(file: Pick<File, "type" | "size">): AvatarValidation {
   if (!ACCEPTED_AVATAR_TYPES.includes(file.type as (typeof ACCEPTED_AVATAR_TYPES)[number])) {
-    return { ok: false, error: "Choose a PNG, JPEG, WebP or GIF image." };
+    return { ok: false, error: "Unsupported file type — choose a PNG, JPEG, WebP or GIF image." };
   }
   if (file.size <= 0) {
     return { ok: false, error: "The selected image is empty." };
   }
   if (file.size > AVATAR_MAX_BYTES) {
-    return { ok: false, error: `Choose an image up to ${formatBytes(AVATAR_MAX_BYTES)}.` };
+    return {
+      ok: false,
+      error: `Image is too large — the limit is ${formatBytes(AVATAR_MAX_BYTES)} (yours is ${formatBytes(file.size)}).`,
+    };
   }
   return { ok: true };
 }

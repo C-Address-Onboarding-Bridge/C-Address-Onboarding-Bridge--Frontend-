@@ -13,6 +13,7 @@ import {
   unreadNotificationCount,
   type AppNotification,
 } from "@/lib/notifications";
+import { useWallet } from "@/hooks/useWallet";
 
 /**
  * Notification centre for transaction and account events (#477).
@@ -23,8 +24,14 @@ import {
  * mark items read (individually or all) or clear the list entirely.
  *
  * Persistence lives in `@/lib/notifications` (localStorage, following the
- * session-store conventions), so the centre is self-contained: it does not
- * depend on wallet state and renders identically connected or not.
+ * session-store conventions). Notifications are scoped to the connected
+ * wallet address and network (#694) so activity from one account is never
+ * shown to the next account on a shared browser; on disconnect the panel is
+ * closed and the list is emptied.
+ *
+ * Hrefs are validated at parse time (#695); this component additionally
+ * re-checks before rendering so a tampered store can never produce a
+ * `javascript:`/`data:` link in the trusted UI.
  */
 
 export interface NotificationCentreProps {
@@ -32,20 +39,55 @@ export interface NotificationCentreProps {
   closeOnNavigate?: boolean;
 }
 
+/**
+ * Returns true only for hrefs that are safe to render as a link:
+ * same-origin relative paths (single leading `/`, no `//` or `\` tricks)
+ * or absolute `https://stellar.expert/...` explorer URLs.
+ */
+const isSafeNotificationHref = (href: string): boolean => {
+  if (typeof href !== "string" || href.length === 0) return false;
+  // Reject control characters and whitespace that could smuggle a scheme.
+  if (/[\u0000-\u001f\u007f\s]/.test(href)) return false;
+  // Same-origin relative path: exactly one leading slash, not protocol-relative.
+  if (href.startsWith("/")) {
+    return !href.startsWith("//") && !href.startsWith("/\\");
+  }
+  // Absolute explorer URL: https scheme, host stellar.expert.
+  try {
+    const url = new URL(href);
+    return url.protocol === "https:" && url.hostname === "stellar.expert";
+  } catch {
+    return false;
+  }
+};
+
 const NotificationCentre = ({ closeOnNavigate = true }: NotificationCentreProps) => {
+  const { address, network } = useWallet();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const refresh = useCallback(() => setNotifications(loadNotifications()), []);
+  const refresh = useCallback(
+    () => setNotifications(loadNotifications(address, network)),
+    [address, network]
+  );
 
   useEffect(() => {
-    // Pull the persisted list into React state once on mount; subsequent
-    // updates come from the explicit actions below.
+    // Pull the persisted list into React state once on mount and whenever the
+    // connected wallet/network changes; subsequent updates come from the
+    // explicit actions below.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
   }, [refresh]);
+
+  // On disconnect (or wallet/network switch) close the panel so the next user
+  // never sees the previous account's activity.
+  useEffect(() => {
+    if (!address) {
+      setOpen(false);
+    }
+  }, [address]);
 
   // Escape closes the panel and returns focus to the bell.
   useEffect(() => {
@@ -73,30 +115,30 @@ const NotificationCentre = ({ closeOnNavigate = true }: NotificationCentreProps)
 
   const handleActivate = useCallback(
     (id: string) => {
-      markNotificationRead(id);
+      markNotificationRead(id, address, network);
       refresh();
       if (closeOnNavigate) setOpen(false);
     },
-    [refresh, closeOnNavigate]
+    [refresh, closeOnNavigate, address, network]
   );
 
   const handleDismiss = useCallback(
     (id: string) => {
-      dismissNotification(id);
+      dismissNotification(id, address, network);
       refresh();
     },
-    [refresh]
+    [refresh, address, network]
   );
 
   const handleMarkAllRead = useCallback(() => {
-    markAllNotificationsRead();
+    markAllNotificationsRead(address, network);
     refresh();
-  }, [refresh]);
+  }, [refresh, address, network]);
 
   const handleClearAll = useCallback(() => {
-    clearNotifications();
+    clearNotifications(address, network);
     refresh();
-  }, [refresh]);
+  }, [refresh, address, network]);
 
   return (
     <div className="relative">
@@ -168,7 +210,10 @@ const NotificationCentre = ({ closeOnNavigate = true }: NotificationCentreProps)
           ) : (
             <ul className="max-h-80 overflow-y-auto divide-y divide-[var(--border)]">
               {notifications.map((notification) => {
-                const isExternal = /^https?:\/\//.test(notification.href);
+                const safeHref = isSafeNotificationHref(notification.href)
+                  ? notification.href
+                  : null;
+                const isExternal = safeHref !== null && /^https:\/\//.test(safeHref);
                 const itemLabel = notification.read
                   ? notification.title
                   : `${notification.title} (unread)`;
@@ -194,47 +239,6 @@ const NotificationCentre = ({ closeOnNavigate = true }: NotificationCentreProps)
                 return (
                   <li
                     key={notification.id}
-                    className={`relative group ${notification.read ? "" : "bg-[var(--surface-2)]/50"}`}
-                  >
-                    {isExternal ? (
-                      <a
-                        href={notification.href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={() => handleActivate(notification.id)}
-                        aria-label={itemLabel}
-                        className="block px-4 py-3 hover:bg-[var(--surface-2)] transition-colors"
-                      >
-                        {content}
-                      </a>
-                    ) : (
-                      <Link
-                        href={notification.href}
-                        onClick={() => handleActivate(notification.id)}
-                        aria-label={itemLabel}
-                        className="block px-4 py-3 hover:bg-[var(--surface-2)] transition-colors"
-                      >
-                        {content}
-                      </Link>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleDismiss(notification.id)}
-                      aria-label={`Dismiss notification: ${notification.title}`}
-                      title="Dismiss notification"
-                      className="absolute top-3 right-3 p-1 rounded text-[var(--text-muted)] opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-[var(--error)] transition-opacity"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
+                    className={`
 
-export default memo(NotificationCentre);
+/* … truncated 1768 chars — edit only what you need near the top … */

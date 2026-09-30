@@ -21,6 +21,7 @@ import {
   validateFundingSchedule,
   type FundingSchedule,
 } from "@/lib/fundingSchedules";
+import { useHydrated } from "@/hooks/useHydrated";
 import { FUNDING_LINK_ASSETS } from "@/lib/fundingLink";
 import { ROUTES } from "@/lib/routes";
 
@@ -35,7 +36,9 @@ import { ROUTES } from "@/lib/routes";
  * as the address book: the store isn't keyed to the connected wallet.
  */
 export default function FundingSchedulesPage() {
-  const [schedules, setSchedules] = useState<FundingSchedule[]>([]);
+  const [storedSchedules, setStoredSchedules] = useState<FundingSchedule[]>([]);
+  const hydrated = useHydrated();
+  const schedules = hydrated ? loadFundingSchedules() : storedSchedules;
 
   const [newLabel, setNewLabel] = useState("");
   const [newAddress, setNewAddress] = useState("");
@@ -59,11 +62,9 @@ export default function FundingSchedulesPage() {
   // AddressBookPage uses for its own store.
   useEffect(() => {
     checkAndNotifyDueSchedules();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSchedules(loadFundingSchedules());
   }, []);
 
-  const refresh = () => setSchedules(loadFundingSchedules());
+  const refresh = () => setStoredSchedules(loadFundingSchedules());
 
   const handleAdd = (event: React.FormEvent) => {
     event.preventDefault();

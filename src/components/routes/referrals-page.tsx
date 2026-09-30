@@ -31,13 +31,16 @@ export default function ReferralsPage() {
   const { isConnected, address, network, isNetworkSupported, connect, isConnecting } = useWallet();
   const { status: copyStatus, copy: copyToClipboard } = useCopyToClipboard();
 
-  const [stats, setStats] = useState<ReferralStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  const [statsResult, setStatsResult] = useState<{ key: string; stats: ReferralStats | null; error: boolean } | null>(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
 
-  const [qrSvg, setQrSvg] = useState<string | null>(null);
-  const [qrError, setQrError] = useState(false);
+  const [qrResult, setQrResult] = useState<{ link: string; svg: string | null; error: boolean } | null>(null);
+  const requestKey = `${address ?? ""}:${network}:${refreshIndex}`;
+  const requestEnabled = Boolean(isConnected && address && isNetworkSupported);
+  const currentStats = statsResult?.key === requestKey ? statsResult : null;
+  const stats = currentStats?.stats ?? null;
+  const loading = requestEnabled && currentStats === null;
+  const loadError = currentStats?.error ?? false;
 
   useEffect(() => {
     if (!isConnected || !address) return;
@@ -46,23 +49,15 @@ export default function ReferralsPage() {
     if (!isNetworkSupported) return;
     let cancelled = false;
 
-    setLoading(true);
-    setLoadError(false);
-
     getReferralStats(address, network).then((result) => {
       if (cancelled) return;
-      if (result) {
-        setStats(result);
-      } else {
-        setLoadError(true);
-      }
-      setLoading(false);
+      setStatsResult({ key: requestKey, stats: result, error: !result });
     });
 
     return () => {
       cancelled = true;
     };
-  }, [isConnected, address, network, isNetworkSupported, refreshIndex]);
+  }, [isConnected, address, network, isNetworkSupported, refreshIndex, requestKey]);
 
   const referralLink = useMemo(() => {
     if (!stats) return null;
@@ -70,20 +65,23 @@ export default function ReferralsPage() {
     return buildReferralLink(stats.referralCode, origin);
   }, [stats]);
 
+  const currentQr = qrResult?.link === referralLink ? qrResult : null;
+  const qrSvg = currentQr?.svg ?? null;
+  const qrError = currentQr?.error ?? false;
+
   useEffect(() => {
     if (!referralLink) return;
     let cancelled = false;
-    setQrError(false);
 
     // `type: "svg"` renders a plain markup string with no canvas/DOM
     // dependency, unlike toDataURL/toCanvas — this keeps QR generation
     // working identically in the browser and in tests.
     QRCode.toString(referralLink, { type: "svg", margin: 1, width: 176 })
       .then((svg) => {
-        if (!cancelled) setQrSvg(svg);
+        if (!cancelled) setQrResult({ link: referralLink, svg, error: false });
       })
       .catch(() => {
-        if (!cancelled) setQrError(true);
+        if (!cancelled) setQrResult({ link: referralLink, svg: null, error: true });
       });
 
     return () => {
@@ -122,7 +120,7 @@ export default function ReferralsPage() {
           </div>
           <h1 className="text-2xl font-bold mb-2">Connect Your Wallet</h1>
           <p className="text-[var(--text-muted)] mb-6">
-            Connect your Freighter wallet to view your referral link and stats.
+            Connect your wallet to view your referral link and stats.
           </p>
           <button
             type="button"
@@ -130,7 +128,7 @@ export default function ReferralsPage() {
             disabled={isConnecting}
             className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isConnecting ? "Connecting..." : "Connect Freighter"}
+            {isConnecting ? "Connecting..." : "Connect Wallet"}
           </button>
         </div>
       </div>
@@ -148,7 +146,7 @@ export default function ReferralsPage() {
 
       {!isNetworkSupported ? (
         <div role="alert" className="card p-8 text-center text-sm text-[var(--error)]">
-          Freighter&apos;s network isn&apos;t supported here, so referral data can&apos;t be loaded. Switch to Testnet or
+          Your wallet&apos;s network isn&apos;t supported here, so referral data can&apos;t be loaded. Switch to Testnet or
           Mainnet.
         </div>
       ) : loading ? (

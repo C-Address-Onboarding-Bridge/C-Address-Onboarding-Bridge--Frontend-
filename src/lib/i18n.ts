@@ -34,6 +34,30 @@ export interface TranslationSet {
     amount: string;
     transfer: string;
     insufficient_balance: string;
+    subtitle: string;
+    from_label: string;
+    to_label: string;
+    amount_label: string;
+    amount_placeholder: string;
+    max: string;
+    maxLabel: string;
+    available: string;
+    estimated_fee: string;
+    you_receive: string;
+    review_transfer: string;
+    confirm_transfer: string;
+    connect_first: string;
+    enter_amount: string;
+    invalid_amount: string;
+    amount_required: string;
+    bridge_success: string;
+    bridge_failed: string;
+    wallet_required: string;
+    network_required: string;
+    loading_balance: string;
+    refresh_balance: string;
+    refreshBalanceLabel: string;
+    back_to_home: string;
   };
   help: {
     title: string;
@@ -115,6 +139,30 @@ const translations: Record<Locale, TranslationSet> = {
       amount: 'Amount',
       transfer: 'Transfer',
       insufficient_balance: 'Insufficient balance',
+      subtitle: 'Move funds from a classic Stellar G-address to a Soroban C-address.',
+      from_label: 'From',
+      to_label: 'To',
+      amount_label: 'Amount',
+      amount_placeholder: '0.00',
+      max: 'Max',
+      maxLabel: 'Use maximum amount',
+      available: 'Available',
+      estimated_fee: 'Estimated fee',
+      you_receive: 'You receive',
+      review_transfer: 'Review Transfer',
+      confirm_transfer: 'Confirm Transfer',
+      connect_first: 'Connect your wallet to bridge assets.',
+      enter_amount: 'Enter an amount to continue.',
+      invalid_amount: 'Please enter a valid amount.',
+      amount_required: 'Amount is required.',
+      bridge_success: 'Transfer submitted successfully.',
+      bridge_failed: 'Transfer failed. Please try again.',
+      wallet_required: 'A connected wallet is required.',
+      network_required: 'Please select a network.',
+      loading_balance: 'Loading balance...',
+      refresh_balance: 'Refresh balance',
+      refreshBalanceLabel: 'Refresh balance',
+      back_to_home: 'Back to home',
     },
     help: {
       title: 'Help Centre',
@@ -194,6 +242,30 @@ const translations: Record<Locale, TranslationSet> = {
       amount: 'Cantidad',
       transfer: 'Transferir',
       insufficient_balance: 'Saldo insuficiente',
+      subtitle: 'Mueve fondos desde una G-address clásica de Stellar a una C-address Soroban.',
+      from_label: 'Desde',
+      to_label: 'Hacia',
+      amount_label: 'Cantidad',
+      amount_placeholder: '0,00',
+      max: 'Máx',
+      maxLabel: 'Usar cantidad máxima',
+      available: 'Disponible',
+      estimated_fee: 'Tarifa estimada',
+      you_receive: 'Recibirás',
+      review_transfer: 'Revisar transferencia',
+      confirm_transfer: 'Confirmar transferencia',
+      connect_first: 'Conecta tu billetera para transferir activos.',
+      enter_amount: 'Introduce una cantidad para continuar.',
+      invalid_amount: 'Introduce una cantidad válida.',
+      amount_required: 'La cantidad es obligatoria.',
+      bridge_success: 'Transferencia enviada correctamente.',
+      bridge_failed: 'La transferencia falló. Inténtalo de nuevo.',
+      wallet_required: 'Se requiere una billetera conectada.',
+      network_required: 'Selecciona una red.',
+      loading_balance: 'Cargando saldo...',
+      refresh_balance: 'Actualizar saldo',
+      refreshBalanceLabel: 'Actualizar saldo',
+      back_to_home: 'Volver al inicio',
     },
     help: {
       title: 'Centro de Ayuda',
@@ -273,6 +345,30 @@ const translations: Record<Locale, TranslationSet> = {
       amount: 'Montant',
       transfer: 'Transférer',
       insufficient_balance: 'Solde insuffisant',
+      subtitle: 'Déplacez des fonds d\'une G-address Stellar classique vers une C-address Soroban.',
+      from_label: 'Depuis',
+      to_label: 'Vers',
+      amount_label: 'Montant',
+      amount_placeholder: '0,00',
+      max: 'Max',
+      maxLabel: 'Utiliser le montant maximum',
+      available: 'Disponible',
+      estimated_fee: 'Frais estimés',
+      you_receive: 'Vous recevez',
+      review_transfer: 'Vérifier le transfert',
+      confirm_transfer: 'Confirmer le transfert',
+      connect_first: 'Connectez votre portefeuille pour transférer des actifs.',
+      enter_amount: 'Saisissez un montant pour continuer.',
+      invalid_amount: 'Veuillez saisir un montant valide.',
+      amount_required: 'Le montant est requis.',
+      bridge_success: 'Transfert envoyé avec succès.',
+      bridge_failed: 'Le transfert a échoué. Veuillez réessayer.',
+      wallet_required: 'Un portefeuille connecté est requis.',
+      network_required: 'Veuillez sélectionner un réseau.',
+      loading_balance: 'Chargement du solde...',
+      refresh_balance: 'Actualiser le solde',
+      refreshBalanceLabel: 'Actualiser le solde',
+      back_to_home: 'Retour à l\'accueil',
     },
     help: {
       title: 'Centre d\'Aide',
@@ -280,9 +376,9 @@ const translations: Record<Locale, TranslationSet> = {
       c_address_explanation: 'Une C-address est un compte intelligent Soroban. Elle commence par C et comporte 56 caractères. Contrairement à une G-address, il s\'agit d\'un contrat intelligent qui peut détenir des actifs et exécuter de la logique sur le réseau Soroban.',
       g_address_explanation: 'Une G-address est un compte Stellar classique. Elle commence par G et comporte 56 caractères. C\'est le type de compte standard sur Stellar et elle peut financer des C-addresses.',
       fee_explanation: 'Les frais sont payés en XLM pour couvrir le coût de la transaction sur le réseau Stellar. Les opérations de contrats intelligents Soroban nécessitent des frais réduits pour compenser les nœuds du réseau.',
-      bridge_explanation: 'Le Pont G → C vous permet d\'envoyer des fonds depuis une G-address Stellar classique vers une C-address Soroban. C\'est utile si vous avez déjà des XLM ou d\'autres actifs sur Stellar et souhaitez les utiliser dans des dApps Soroban.',
-      onramp_explanation: 'L\'Onramp Fiat vous permet d\'acheter des cryptomonnaies avec une carte de crédit et de les envoyer directement à votre C-address. C\'est le moyen le plus simple de commencer si vous n\'avez pas encore d\'actifs Stellar.',
-      cex_explanation: 'Le Retrait CEX vous permet de retirer des fonds directement depuis un exchange centralisé vers votre C-address. Cela évite de devoir d\'abord retirer vers une G-address puis effectuer un pont.',
+      bridge_explanation: 'Le Pont G → C vous permet d\'envoyer des fonds depuis une G-address Stellar classique vers une C-address Soroban. C\'est utile si vous possédez déjà des XLM ou d\'autres actifs sur Stellar et souhaitez les utiliser dans des dApps Soroban.',
+      onramp_explanation: 'L\'Onramp Fiat vous permet d\'acheter des cryptomonnaies par carte de crédit et de les envoyer directement à votre C-address. C\'est le moyen le plus simple de commencer si vous ne possédez pas encore d\'actifs Stellar.',
+      cex_explanation: 'Le Retrait CEX vous permet de retirer des fonds directement d\'un exchange centralisé vers votre C-address. Cela évite de devoir d\'abord retirer vers une G-address puis effectuer un pont.',
       close: 'Fermer',
       keyboard_hint: 'Utilisez Tab pour naviguer, Entrée pour sélectionner, Échap pour fermer',
     },
@@ -291,7 +387,7 @@ const translations: Record<Locale, TranslationSet> = {
       connect_step: 'Connectez votre portefeuille pour commencer.',
       verify_step: 'Complétez la vérification d\'identité.',
       complete: 'Commencer',
-      skip: 'Passer',
+      skip: 'Ignorer',
     },
     profile: {
       title: 'Profil',
@@ -322,7 +418,7 @@ const translations: Record<Locale, TranslationSet> = {
     errors: {
       wallet_not_found: 'Veuillez installer un portefeuille Stellar pour continuer.',
       connection_failed: 'Impossible de se connecter à votre portefeuille.',
-      network_mismatch: 'Veuillez passer au bon réseau.',
+      network_mismatch: 'Veuillez passer au réseau correct.',
       transaction_failed: 'La transaction a échoué. Veuillez réessayer.',
       invalid_address: 'L\'adresse n\'est pas valide.',
     },
@@ -352,16 +448,40 @@ const translations: Record<Locale, TranslationSet> = {
       amount: 'Quantia',
       transfer: 'Transferir',
       insufficient_balance: 'Saldo insuficiente',
+      subtitle: 'Mova fundos de uma G-address clássica da Stellar para uma C-address Soroban.',
+      from_label: 'De',
+      to_label: 'Para',
+      amount_label: 'Valor',
+      amount_placeholder: '0,00',
+      max: 'Máx',
+      maxLabel: 'Usar valor máximo',
+      available: 'Disponível',
+      estimated_fee: 'Taxa estimada',
+      you_receive: 'Você recebe',
+      review_transfer: 'Revisar transferência',
+      confirm_transfer: 'Confirmar transferência',
+      connect_first: 'Conecte sua carteira para transferir ativos.',
+      enter_amount: 'Insira um valor para continuar.',
+      invalid_amount: 'Insira um valor válido.',
+      amount_required: 'O valor é obrigatório.',
+      bridge_success: 'Transferência enviada com sucesso.',
+      bridge_failed: 'A transferência falhou. Tente novamente.',
+      wallet_required: 'É necessária uma carteira conectada.',
+      network_required: 'Selecione uma rede.',
+      loading_balance: 'Carregando saldo...',
+      refresh_balance: 'Atualizar saldo',
+      refreshBalanceLabel: 'Atualizar saldo',
+      back_to_home: 'Voltar ao início',
     },
     help: {
       title: 'Central de Ajuda',
       search_placeholder: 'Pesquisar ajuda...',
-      c_address_explanation: 'Um C-address é uma conta inteligente Soroban. Começa com C e tem 56 caracteres. Ao contrário de um G-address, é um contrato inteligente que pode manter ativos e executar lógica na rede Soroban.',
-      g_address_explanation: 'Um G-address é uma conta Stellar clássica. Começa com G e tem 56 caracteres. É o tipo de conta padrão na Stellar e pode financiar C-addresses.',
+      c_address_explanation: 'Uma C-address é uma conta inteligente Soroban. Ela começa com C e tem 56 caracteres. Diferente de uma G-address, é um contrato inteligente que pode manter ativos e executar lógica na rede Soroban.',
+      g_address_explanation: 'Uma G-address é uma conta clássica da Stellar. Ela começa com G e tem 56 caracteres. É o tipo de conta padrão na Stellar e pode financiar C-addresses.',
       fee_explanation: 'As taxas são pagas em XLM para cobrir o custo da transação na rede Stellar. As operações de contratos inteligentes Soroban exigem uma pequena taxa para compensar os nós da rede.',
-      bridge_explanation: 'A Ponte G → C permite enviar fundos de um G-address Stellar clássico para um C-address Soroban. Isso é útil se você já tem XLM ou outros ativos na Stellar e quer usá-los em dApps Soroban.',
-      onramp_explanation: 'O Onramp Fiat permite comprar criptomoedas com um cartão de crédito e enviá-las diretamente para o seu C-address. Esta é a maneira mais fácil de começar se você ainda não tem ativos Stellar.',
-      cex_explanation: 'O Saque CEX permite sacar fundos diretamente de uma exchange centralizada para o seu C-address. Isso evita a necessidade de primeiro sacar para um G-address e depois fazer a ponte.',
+      bridge_explanation: 'A Ponte G → C permite enviar fundos de uma G-address clássica da Stellar para uma C-address Soroban. Isso é útil se você já tem XLM ou outros ativos na Stellar e quer usá-los em dApps Soroban.',
+      onramp_explanation: 'O Onramp Fiat permite comprar criptomoedas com cartão de crédito e enviá-las diretamente para sua C-address. Esta é a maneira mais fácil de começar se você ainda não tem ativos Stellar.',
+      cex_explanation: 'O Saque CEX permite sacar fundos diretamente de uma exchange centralizada para sua C-address. Isso evita a necessidade de primeiro sacar para uma G-address e depois fazer a ponte.',
       close: 'Fechar',
       keyboard_hint: 'Use Tab para navegar, Enter para selecionar, Escape para fechar',
     },
@@ -415,13 +535,13 @@ export function getTranslations(locale: Locale): TranslationSet {
 export function t(locale: Locale, key: string): string {
   const set = getTranslations(locale);
   const parts = key.split('.');
-  let value: unknown = set;
+  let current: unknown = set;
   for (const part of parts) {
-    if (value && typeof value === 'object' && part in (value as Record<string, unknown>)) {
-      value = (value as Record<string, unknown>)[part];
+    if (current && typeof current === 'object' && part in (current as Record<string, unknown>)) {
+      current = (current as Record<string, unknown>)[part];
     } else {
       return key;
     }
   }
-  return typeof value === 'string' ? value : key;
+  return typeof current === 'string' ? current : key;
 }

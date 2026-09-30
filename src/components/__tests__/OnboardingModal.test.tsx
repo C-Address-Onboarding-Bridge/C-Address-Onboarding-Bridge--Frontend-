@@ -112,4 +112,13 @@ describe('OnboardingModal', () => {
     fireEvent.click(screen.getByTestId('next-button')); // Complete
     expect(onComplete).toHaveBeenCalledOnce();
   });
+
+  it('resumes the saved step without copying storage into state from an effect', () => {
+    localStorage.setItem('onboarding:test-resume', '1');
+    render(<OnboardingModal {...defaultProps} storageKey="onboarding:test-resume" />);
+
+    expect(screen.getByTestId('step-title')).toHaveTextContent('Connect Wallet');
+    expect(screen.getByTestId('step-indicator')).toHaveTextContent('Step 2 of 3');
+    expect(localStorage.getItem('onboarding:test-resume')).toBe('1');
+  });
 });

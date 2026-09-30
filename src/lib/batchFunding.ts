@@ -6,7 +6,7 @@
  * single-recipient bridge flow uses (`@/lib/stellar`) rather than
  * re-deriving checksum or amount-format logic here.
  */
-import { isCAddress, isValidStellarAddress, isValidStellarAmount } from "./stellar";
+import { isCAddress, isValidStellarAddress, isValidStellarAmount, toStroops, fromStroops } from "./stellar";
 import { MAX_BATCH_RECIPIENTS } from "./types";
 
 export { MAX_BATCH_RECIPIENTS };
@@ -38,20 +38,49 @@ export interface ParsedBatch {
 const HEADER_TOKENS = new Set(["address", "recipient", "c-address", "to"]);
 
 /**
- * Splits one line into fields on commas, stripping a single layer of
- * surrounding double quotes per field. Not a full RFC 4180 parser — batch
- * rows are just (address, amount), neither of which legitimately contains a
- * comma, so this covers plain CSV and spreadsheet-quoted exports without the
- * complexity of embedded-comma/escaped-quote handling.
+ * Splits one line into fields on commas, honouring RFC 4180 quoting so commas
+ * inside a quoted field are not treated as delimiters. A doubled quote (`""`)
+ * inside a quoted field is unescaped to a single `"`. Unquoted fields are
+ * trimmed; quoted fields have their surrounding quotes stripped and are
+ * trimmed of surrounding whitespace.
  */
 function splitCsvLine(line: string): string[] {
-  return line.split(",").map((field) => {
-    const trimmed = field.trim();
-    if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
-      return trimmed.slice(1, -1).trim();
+  const fields: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  let quoted = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += char;
+      }
+      continue;
     }
-    return trimmed;
-  });
+
+    if (char === '"') {
+      inQuotes = true;
+      quoted = true;
+    } else if (char === ",") {
+      fields.push(quoted ? current.trim() : current.trim());
+      current = "";
+      quoted = false;
+    } else {
+      current += char;
+    }
+  }
+
+  fields.push(quoted ? current.trim() : current.trim());
+  return fields;
 }
 
 /**
@@ -163,9 +192,23 @@ export function getInvalidRows(parsed: ParsedBatch): BatchRow[] {
   return parsed.rows.filter((row) => !isRowValid(row));
 }
 
-/** Sum of amounts across valid rows only — invalid rows have no reliable amount. */
+/**
+ * Sum of amounts across valid rows only — invalid rows have no reliable amount.
+ *
+ * Summed in stroops (bigint) so 7-decimal amounts don't accumulate float
+ * rounding error (e.g. 0.1 + 0.2). Returns the total as a number for display;
+ * use `computeBatchTotalStroops` when an exact value is needed for comparison.
+ */
 export function computeBatchTotal(rows: BatchRow[]): number {
-  return rows.reduce((sum, row) => (isRowValid(row) ? sum + parseFloat(row.amount) : sum), 0);
+  return fromStroops(computeBatchTotalStroops(rows));
+}
+
+/** Exact sum of valid row amounts, in stroops (bigint). */
+export function computeBatchTotalStroops(rows: BatchRow[]): bigint {
+  return rows.reduce(
+    (sum, row) => (isRowValid(row) ? sum + toStroops(row.amount) : sum),
+    0n,
+  );
 }
 
 /** True once the batch (valid + invalid rows) exceeds the per-batch recipient cap. */
