@@ -18,6 +18,12 @@
  * `localStorage`, SSR-safe accessors, and every stored entry re-validated on
  * read so a corrupted or hand-edited record is dropped rather than breaking
  * the whole list.
+ *
+ * Schedules are scoped to a network (#693): a testnet schedule must not show
+ * up — or be acted on — while the app is on mainnet, where the same C-address
+ * may belong to someone else or not exist. Storage is keyed per network, and
+ * any pre-existing unscoped list is migrated once into the current network's
+ * bucket on first read.
  */
 import { validateBatchAddress, validateBatchAmount } from "./batchFunding";
 import { isCAddress, isValidStellarAmount } from "./stellar";
@@ -25,6 +31,7 @@ import { hasControlChars } from "./profile";
 import { addNotification } from "./notifications";
 import { FUNDING_LINK_ASSETS, buildFundingLink, type FundingLinkAsset } from "./fundingLink";
 import { ROUTES } from "./routes";
+import { getNetwork, type StellarNetwork } from "./network";
 
 /** Same budget as a recipient label (`RECIPIENT_LABEL_MAX_LENGTH` in addressBook.ts). */
 export const SCHEDULE_LABEL_MAX_LENGTH = 32;
@@ -32,7 +39,13 @@ export const SCHEDULE_LABEL_MAX_LENGTH = 32;
 /** Cap on saved schedules, same reasoning/order of magnitude as MAX_BATCH_RECIPIENTS (types.ts). */
 export const MAX_FUNDING_SCHEDULES = 20;
 
-const STORAGE_KEY = "fundingSchedules:v1";
+/** Legacy, unscoped key. Read once for migration, then left untouched. */
+const LEGACY_STORAGE_KEY = "fundingSchedules:v1";
+
+/** Per-network storage key, e.g. `fundingSchedules:v1:testnet`. */
+export function fundingSchedulesStorageKey(network: StellarNetwork): string {
+  return `${LEGACY_STORAGE_KEY}:${network}`;
+}
 
 export const FUNDING_FREQUENCIES = ["weekly", "biweekly", "monthly"] as const;
 export type FundingFrequency = (typeof FUNDING_FREQUENCIES)[number];
@@ -65,6 +78,8 @@ export interface FundingSchedule {
   createdAt: number;
   updatedAt: number;
   paused: boolean;
+  /** Network this schedule belongs to (#693). */
+  network: StellarNetwork;
   /** Epoch ms the schedule was last marked completed, if ever. */
   lastCompletedAt?: number;
   /**
@@ -174,6 +189,7 @@ export function isRenderableSchedule(value: unknown): value is FundingSchedule {
   if (typeof v.createdAt !== "number" || !Number.isFinite(v.createdAt)) return false;
   if (typeof v.updatedAt !== "number" || !Number.isFinite(v.updatedAt)) return false;
   if (typeof v.paused !== "boolean") return false;
+  if (v.network !== "mainnet" && v.network !== "testnet") return false;
   if (v.lastCompletedAt !== undefined && (typeof v.lastCompletedAt !== "number" || !Number.isFinite(v.lastCompletedAt))) {
     return false;
   }
@@ -184,13 +200,67 @@ export function isRenderableSchedule(value: unknown): value is FundingSchedule {
   return true;
 }
 
+/**
+ * One-time migration (#693): moves any pre-existing unscoped list into the
+ * current network's bucket, stamping each entry with that network. Runs at
+ * most once per network — the legacy key is removed after a successful move
+ * so a later network switch cannot re-import the same entries.
+ */
+function migrateLegacySchedules(store: Storage, network: StellarNetwork): void {
+  let raw: string | null;
+  try {
+    raw = store.getItem(LEGACY_STORAGE_KEY);
+  } catch {
+    return;
+  }
+  if (!raw) return;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+
+  const entries = Array.isArray(parsed) ? parsed : [];
+  const migrated = entries
+    .filter(isRenderableSchedule)
+    .map((schedule) => ({ ...schedule, network }));
+
+  const key = fundingSchedulesStorageKey(network);
+  try {
+    if (migrated.length > 0) {
+      const existing = store.getItem(key);
+      let current: FundingSchedule[] = [];
+      if (existing) {
+        try {
+          const parsedExisting = JSON.parse(existing);
+          if (Array.isArray(parsedExisting)) {
+            current = parsedExisting.filter(isRenderableSchedule);
+          }
+        } catch {
+          current = [];
+        }
+      }
+      const merged = [...current, ...migrated].slice(0, MAX_FUNDING_SCHEDULES);
+      store.setItem(key, JSON.stringify(merged));
+    }
+    store.removeItem(LEGACY_STORAGE_KEY);
+  } catch {
+    // Storage full or blocked — leave the legacy key in place to retry later.
+  }
+}
+
 function readRaw(): unknown[] {
   const store = storage();
   if (!store) return [];
 
+  const network = getNetwork();
+  migrateLegacySchedules(store, network);
+
   let raw: string | null;
   try {
-    raw = store.getItem(STORAGE_KEY);
+    raw = store.getItem(fundingSchedulesStorageKey(network));
   } catch {
     return [];
   }
@@ -208,7 +278,7 @@ function persist(schedules: FundingSchedule[]): boolean {
   const store = storage();
   if (!store) return false;
   try {
-    store.setItem(STORAGE_KEY, JSON.stringify(schedules));
+    store.setItem(fundingSchedulesStorageKey(getNetwork()), JSON.stringify(schedules));
     return true;
   } catch {
     return false;
