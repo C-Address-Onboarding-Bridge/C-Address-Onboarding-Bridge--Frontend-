@@ -8,6 +8,13 @@ import { auditAccessibility } from "./helpers/a11y";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// The lock/claims feature is behind the locked_transfers flag (#672), off by
+// default; this file doesn't exercise it, so the mocked value doesn't matter
+// beyond satisfying the provider requirement.
+vi.mock("@/contexts/FeatureFlagContext", () => ({
+  useFeatureFlag: () => false,
+}));
+
 vi.mock("@/components/wallet-provider", () => ({
   useWallet: () => ({
     isConnected: true,
@@ -41,6 +48,8 @@ vi.mock("@/lib/stellar", () => {
     getAccountMinimumBalance: () => "1",
     getEstimatedFeeXLM: vi.fn().mockResolvedValue("~0.00001 XLM"),
     toSafeErrorMessage: (_e: unknown, fallback: string) => fallback,
+    assertActiveAccountMatches: vi.fn().mockResolvedValue(undefined),
+    signPreparedTransaction: vi.fn().mockResolvedValue("stub-signed-xdr"),
   };
 });
 

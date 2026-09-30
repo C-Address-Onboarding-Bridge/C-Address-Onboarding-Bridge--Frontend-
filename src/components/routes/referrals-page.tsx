@@ -120,7 +120,7 @@ export default function ReferralsPage() {
           </div>
           <h1 className="text-2xl font-bold mb-2">Connect Your Wallet</h1>
           <p className="text-[var(--text-muted)] mb-6">
-            Connect your Freighter wallet to view your referral link and stats.
+            Connect your wallet to view your referral link and stats.
           </p>
           <button
             type="button"
@@ -128,7 +128,7 @@ export default function ReferralsPage() {
             disabled={isConnecting}
             className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isConnecting ? "Connecting..." : "Connect Freighter"}
+            {isConnecting ? "Connecting..." : "Connect Wallet"}
           </button>
         </div>
       </div>
@@ -146,7 +146,7 @@ export default function ReferralsPage() {
 
       {!isNetworkSupported ? (
         <div role="alert" className="card p-8 text-center text-sm text-[var(--error)]">
-          Freighter&apos;s network isn&apos;t supported here, so referral data can&apos;t be loaded. Switch to Testnet or
+          Your wallet&apos;s network isn&apos;t supported here, so referral data can&apos;t be loaded. Switch to Testnet or
           Mainnet.
         </div>
       ) : loading ? (

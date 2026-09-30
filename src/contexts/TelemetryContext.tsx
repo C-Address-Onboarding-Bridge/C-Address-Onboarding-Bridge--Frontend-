@@ -9,7 +9,7 @@ import {
   type TelemetryConsent,
   captureEvent,
 } from "@/lib/telemetry";
-import { useHydrated } from "@/hooks/useHydrated";
+import { TelemetryConsentPrompt } from "@/components/TelemetryConsentPrompt";
 
 interface TelemetryContextType {
   consent: TelemetryConsent;
@@ -54,7 +54,17 @@ export function TelemetryProvider({ children }: TelemetryProviderProps) {
     captureEvent,
   };
 
-  return <TelemetryContext.Provider value={value}>{children}</TelemetryContext.Provider>;
+  // Don't render children until hydrated to avoid hydration mismatch
+  if (!isHydrated) {
+    return <>{children}</>;
+  }
+
+  return (
+    <TelemetryContext.Provider value={value}>
+      {children}
+      {consent === "pending" && <TelemetryConsentPrompt />}
+    </TelemetryContext.Provider>
+  );
 }
 
 export function useTelemetry() {

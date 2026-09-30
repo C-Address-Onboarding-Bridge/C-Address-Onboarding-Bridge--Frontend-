@@ -21,6 +21,12 @@ const VALID_C_ADDRESS = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC
 // hit the TDZ) — see vi.hoisted's own docs for why.
 const FROM_ADDRESS = vi.hoisted(() => "G" + "A".repeat(55));
 
+// This file specifically exercises the lock UI, which is hidden behind the
+// locked_transfers flag by default (#672) — force it on.
+vi.mock("@/contexts/FeatureFlagContext", () => ({
+  useFeatureFlag: () => true,
+}));
+
 vi.mock("@/components/wallet-provider", () => ({
   useWallet: () => ({
     isConnected: true,
@@ -49,7 +55,8 @@ vi.mock("@/lib/stellar", () => ({
   getAccountMinimumBalance: () => "1",
   getEstimatedFeeXLM: vi.fn().mockResolvedValue("~0.00001 XLM"),
   toSafeErrorMessage: (_e: unknown, fallback: string) => fallback,
-  shouldWarnOnMainnetAction: () => false,
+  assertActiveAccountMatches: vi.fn().mockResolvedValue(undefined),
+  signPreparedTransaction: vi.fn().mockResolvedValue("stub-signed-xdr"),
 }));
 
 const createLockMock = vi.fn();
@@ -66,7 +73,8 @@ vi.mock("@/lib/api", () => ({
   // The bridge page also pulls these from @/lib/api; a partial factory makes
   // vitest throw on import before any assertion runs.
   getFeeTierPreview: () => Promise.resolve(null),
-  submitBatchFunding: () => Promise.resolve({ results: [] }),
+  prepareBatchFunding: () => Promise.resolve({ xdr: "stub-xdr" }),
+  submitSignedBatchFunding: () => Promise.resolve({ results: [] }),
 }));
 
 async function fillForm() {

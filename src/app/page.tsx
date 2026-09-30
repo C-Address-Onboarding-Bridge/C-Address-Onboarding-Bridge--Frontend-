@@ -40,7 +40,7 @@ const steps = [
   {
     step: "01",
     title: "Connect Wallet",
-    description: "Connect your Freighter wallet — the connected account funds the transfer.",
+    description: "Connect your wallet — the connected account funds the transfer.",
   },
   {
     step: "02",
@@ -65,7 +65,7 @@ function useOnboardingSteps() {
     {
       id: "connect-wallet",
       title: "Connect Wallet",
-      description: "Connect your Freighter wallet to get started.",
+      description: "Connect your wallet to get started.",
       href: "/dashboard",
       check: () => isConnected,
     },

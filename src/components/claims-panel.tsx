@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, Clock3, Lock, Loader2, LockOpen } from "lucide-react";
 import { claimLock, listIncomingLocks, LockAlreadyClaimedError } from "@/lib/api";
+import { signClaimProof } from "@/lib/stellar";
 import {
   countdownTo,
   formatCountdown,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/locks";
 import type { StellarNetwork } from "@/lib/types";
 import LiveRegion from "@/components/live-region";
+import { useFeatureFlag } from "@/contexts/FeatureFlagContext";
 
 /** How often the panel re-fetches lock status from the API. */
 const LOCKS_POLL_INTERVAL_MS = 15_000;
@@ -47,6 +49,10 @@ function truncateAddress(address: string): string {
  * last. See `src/lib/locks.ts` for the (placeholder) lock shape.
  */
 export default function ClaimsPanel({ address, network, isNetworkSupported }: ClaimsPanelProps) {
+  // The /locks routes this panel polls and claims against don't exist on the
+  // backend yet, and claiming sent nothing proving the caller controls the
+  // claimant account — hidden until both are resolved. (#672)
+  const enabled = useFeatureFlag("locked_transfers");
   const [locks, setLocks] = useState<LockRecord[]>([]);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [errorState, setError] = useState<string | null>(null);
@@ -61,8 +67,9 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
   const visibleLocks = enabled && loadedKey === targetKey ? locks : [];
 
   const refresh = useMemo(
-    () => async () => {
-      if (!address || !isNetworkSupported) return;
+    () => async (isInitial: boolean) => {
+      if (!enabled || !address || !isNetworkSupported) return;
+      if (isInitial) setLoading(true);
       try {
         const result = await listIncomingLocks(address, network);
         setLocks(sortLocksByUnlockTime(result));
@@ -76,11 +83,15 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
         setLoadedKey(targetKey);
       }
     },
-    [address, network, isNetworkSupported]
+    [enabled, address, network, isNetworkSupported]
   );
 
   useEffect(() => {
-    if (!address || !isNetworkSupported) return;
+    if (!enabled || !address || !isNetworkSupported) {
+      setLocks([]);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     const tick = () => {
       if (cancelled) return;
@@ -122,7 +133,10 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
     setClaimingId(lock.id);
     setFeedback(null);
     try {
-      const updated = await claimLock(lock.id, address, network);
+      // Proves the connected wallet controls `address` before the claim is
+      // sent — the previous version sent no such proof. (#672)
+      const proof = await signClaimProof(address, lock.id, network);
+      const updated = await claimLock(lock.id, address, network, proof);
       setLocks((prev) => sortLocksByUnlockTime(prev.map((l) => (l.id === updated.id ? updated : l))));
       setFeedback({ lockId: lock.id, ok: true, message: `Claimed ${updated.amount} ${updated.asset}.` });
     } catch (e: unknown) {
@@ -148,7 +162,7 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
     }
   };
 
-  if (!address) return null;
+  if (!enabled || !address) return null;
 
   const announcement = feedback
     ? feedback.ok

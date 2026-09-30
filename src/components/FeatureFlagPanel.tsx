@@ -70,17 +70,16 @@ export function FeatureFlagPanel() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
-  // Restricted to development, or to an explicitly authorised operator in
-  // production: NEXT_PUBLIC_FLAG_PANEL_TOKEN must be set and match a token
-  // the operator has stored in this browser's localStorage. Flags can
-  // control in-development or sensitive features, so the panel to flip them
-  // is not shipped open to every visitor. (#490)
-  const isAuthorisedInProd =
-    typeof window !== "undefined" &&
-    !!process.env.NEXT_PUBLIC_FLAG_PANEL_TOKEN &&
-    window.localStorage.getItem("ff_panel_token") === process.env.NEXT_PUBLIC_FLAG_PANEL_TOKEN;
-
-  if (process.env.NODE_ENV !== "development" && !isAuthorisedInProd) return null;
+  // The panel is a developer tool and is only rendered in development.
+  //
+  // It must NOT be gated on a NEXT_PUBLIC_* value: those are inlined into
+  // the client bundle, so any visitor could read the value from the JS and
+  // set the matching localStorage entry. That is not access control. (#706)
+  //
+  // If the panel ever needs to be reachable in production, gate it on a
+  // real server-side check (e.g. a signed cookie issued by an authenticated
+  // endpoint) rather than a public token comparison in the browser.
+  if (process.env.NODE_ENV !== "development") return null;
 
 
   return (

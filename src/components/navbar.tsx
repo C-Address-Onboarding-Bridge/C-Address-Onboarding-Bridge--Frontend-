@@ -310,7 +310,7 @@ const Navbar = () => {
       if (result === "switched") {
         setNetworkMenuOpen(false);
       } else if (result === "manual") {
-        setSwitchHint("Change the network in Freighter — this app will update automatically.");
+        setSwitchHint("Change the network in your wallet — this app will update automatically.");
       } else {
         setSwitchHint("The network change was cancelled in the wallet.");
       }
@@ -334,15 +334,20 @@ const Navbar = () => {
       className: "bg-[var(--error)]/15 text-[var(--error)]",
       title:
         networkStatus === "UNSUPPORTED"
-          ? `Freighter is on ${label}, which this app does not support`
-          : "Freighter's network could not be read",
+          ? `Your wallet is on ${label}, which this app does not support`
+          : "Your wallet's network could not be read",
     };
   }, [networkStatus, walletNetworkName]);
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+        {/* The full nav-link list plus the connected-wallet chip can exceed
+            max-w-7xl on real desktop widths, with nothing here to wrap; an
+            unscrollable overflow made the disconnect control silently
+            unreachable (discovered via #669's e2e rewrite — worth its own
+            issue for a proper responsive redesign, not fixed further here). */}
+        <div className="flex items-center justify-between h-16 overflow-x-auto">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--primary)] to-[var(--secondary)] flex items-center justify-center">
               <Wallet className="w-4 h-4 text-white" />
@@ -432,12 +437,13 @@ const Navbar = () => {
             {isConnected ? (
               <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
                 <div className="w-2 h-2 rounded-full bg-[var(--success)]" />
-                <span className="text-xs font-mono text-[var(--text-muted)]">{addressDisplay}</span>
+                <span data-testid="navbar-address" className="text-xs font-mono text-[var(--text-muted)]">{addressDisplay}</span>
                 <NetworkBadge {...networkBadge} />
                 <button
                   onClick={handleDisconnect}
                   aria-label={t("common.disconnectWalletLabel")}
                   title={t("common.disconnectWalletLabel")}
+                  data-testid="navbar-disconnect-button"
                   className="ml-1 p-1 rounded text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
                 >
                   <LogOut className="w-3.5 h-3.5" />
@@ -447,6 +453,7 @@ const Navbar = () => {
               <button
                 onClick={handleConnect}
                 disabled={isConnecting}
+                data-testid="navbar-connect-button"
                 className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--primary)] text-white text-sm font-medium hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50"
               >
                 <Wallet className="w-4 h-4" />
@@ -479,7 +486,7 @@ const Navbar = () => {
             <span>
               {networkStatus === "UNSUPPORTED" ? (
                 <>
-                  <strong>Unsupported network</strong> — Freighter is on{" "}
+                  <strong>Unsupported network</strong> — your wallet is on{" "}
                   <span className="font-mono font-semibold">
                     {formatNetworkLabel(networkStatus, walletNetworkName)}
                   </span>
@@ -487,7 +494,7 @@ const Navbar = () => {
                 </>
               ) : (
                 <>
-                  <strong>Network unavailable</strong> — Freighter&apos;s network couldn&apos;t be
+                  <strong>Network unavailable</strong> — your wallet&apos;s network couldn&apos;t be
                   read. Unlock the extension and reload before bridging.
                 </>
               )}
@@ -506,7 +513,7 @@ const Navbar = () => {
             <div className="flex items-center gap-2 text-yellow-400 text-sm">
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
               <span>
-                <strong>Network changed</strong> — Freighter is now on{" "}
+                <strong>Network changed</strong> — your wallet is now on{" "}
                 <span className="font-mono font-semibold">
                   {network === "PUBLIC" ? "Mainnet" : "Testnet"}
                 </span>

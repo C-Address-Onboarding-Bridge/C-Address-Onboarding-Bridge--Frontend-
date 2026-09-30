@@ -111,7 +111,7 @@ export default function ProfilePage() {
           </div>
           <h1 className="text-2xl font-bold mb-2">Connect Your Wallet</h1>
           <p className="text-[var(--text-muted)] mb-6">
-            Connect your Freighter wallet to view and edit your profile.
+            Connect your wallet to view and edit your profile.
           </p>
           <button
             type="button"
@@ -120,7 +120,7 @@ export default function ProfilePage() {
             className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Wallet className="w-4 h-4" />
-            {isConnecting ? "Connecting..." : "Connect Freighter"}
+            {isConnecting ? "Connecting..." : "Connect Wallet"}
           </button>
         </div>
       </div>

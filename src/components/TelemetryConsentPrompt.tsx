@@ -11,12 +11,20 @@ export function TelemetryConsentPrompt() {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-end z-50 p-4">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="telemetry-consent-title"
+      className="fixed inset-0 bg-black/50 flex items-end z-50 p-4"
+    >
       <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 p-6 flex items-start justify-between">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
+            <h2
+              id="telemetry-consent-title"
+              className="text-2xl font-bold text-gray-900 dark:text-white mb-1"
+            >
               Help us improve your experience
             </h2>
             <p className="text-sm text-gray-600 dark:text-gray-400">
@@ -24,7 +32,8 @@ export function TelemetryConsentPrompt() {
             </p>
           </div>
           <button
-            onClick={() => setConsent("denied")}
+            onClick={() => handleDecline()}
+            aria-label="Decline telemetry"
             className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
           >
             <X size={24} />

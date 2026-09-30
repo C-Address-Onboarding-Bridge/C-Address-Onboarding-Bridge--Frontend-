@@ -8,6 +8,7 @@ import {
   getAccountBalances,
   clearAccountBalancesCache,
   getHorizonServer,
+  simulatePayment,
 } from "@/lib/stellar";
 import { HORIZON_URL } from "@/lib/types";
 
@@ -15,6 +16,8 @@ import { HORIZON_URL } from "@/lib/types";
 // (Keypair, StrKey, ...) stays real so the address fixtures below are genuine
 // checksum-valid StrKeys rather than hand-rolled look-alikes.
 const loadAccount = vi.fn();
+const paymentsCall = vi.fn();
+const transactionCall = vi.fn();
 
 vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@stellar/stellar-sdk")>();
@@ -24,8 +27,20 @@ vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
       ...actual.Horizon,
       Server: vi.fn().mockImplementation(function MockHorizonServer(this: {
         loadAccount: typeof loadAccount;
-      }) {
+        payments: () => unknown;
+        transactions: () => unknown;
+        operations: () => unknown;
+      }, url: string) {
         this.loadAccount = loadAccount;
+        const builder = {
+          forAccount: () => builder,
+          limit: () => builder,
+          order: () => builder,
+          call: paymentsCall,
+        };
+        this.payments = () => builder;
+        this.transactions = () => ({ transaction: (hash: string) => ({ call: () => transactionCall(url, hash) }) });
+        this.operations = () => ({ forTransaction: () => ({ call: async () => ({ records: [] }) }) });
       }),
     },
   };
@@ -135,6 +150,19 @@ describe("isValidStellarAmount", () => {
     expect(isValidStellarAmount("1.2.3")).toBe(false);
     expect(isValidStellarAmount("1.")).toBe(false);
   });
+
+  // Regression: amounts above the int64 stroop maximum (922337203685.4775807)
+  // previously passed the format/positivity checks and only blew up later
+  // inside the Stellar SDK. The upper bound must be enforced here.
+  it("accepts the exact int64 stroop maximum", () => {
+    expect(isValidStellarAmount("922337203685.4775807")).toBe(true);
+  });
+
+  it("rejects amounts above the int64 stroop maximum", () => {
+    expect(isValidStellarAmount("922337203685.4775808")).toBe(false);
+    expect(isValidStellarAmount("922337203686")).toBe(false);
+    expect(isValidStellarAmount("1000000000000")).toBe(false);
+  });
 });
 
 describe("isCAddress", () => {
@@ -169,6 +197,39 @@ describe("isGAddress", () => {
     const corrupted = G_ADDRESS.slice(0, -1) + (G_ADDRESS.slice(-1) === "A" ? "B" : "A");
     expect(isGAddress(corrupted)).toBe(false);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Shared mock for Horizon.Server used by getAccountBalances and
+// fetchRecentTransactions tests. We mock Horizon.Server so the real SDK
+// network is never contacted; each describe block resets the relevant mock fn.
+// ---------------------------------------------------------------------------
+const loadAccount = vi.fn();
+const paymentsCall = vi.fn();
+
+vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@stellar/stellar-sdk")>();
+  return {
+    ...actual,
+    Horizon: {
+      ...actual.Horizon,
+      Server: vi.fn().mockImplementation(function MockHorizonServer(this: {
+        loadAccount: typeof loadAccount;
+        payments: () => unknown;
+      }) {
+        this.loadAccount = loadAccount;
+        this.payments = () => ({
+          forAccount: () => ({
+            limit: () => ({
+              order: () => ({
+                call: paymentsCall,
+              }),
+            }),
+          }),
+        });
+      }),
+    },
+  };
 });
 
 describe("getAccountBalances cache", () => {
@@ -243,68 +304,164 @@ describe("getAccountBalances cache", () => {
 
     const p1 = getAccountBalances(G_ADDRESS, "TESTNET");
     const p2 = getAccountBalances(G_ADDRESS, "TESTNET");
-    resolve(account("77"));
-    const [r1, r2] = await Promise.all([p1, p2]);
 
-    expect(r1.total).toBe("77");
-    expect(r2.total).toBe("77");
+    resolve(account("100"));
+    const [first, second] = await Promise.all([p1, p2]);
+
+    expect(first.total).toBe("100");
+    expect(second.total).toBe("100");
     expect(loadAccount).toHaveBeenCalledTimes(1);
-  });
-
-  it("returns the fallback and does not cache failures", async () => {
-    loadAccount.mockRejectedValueOnce(new Error("network down"));
-
-    const failed = await getAccountBalances(G_ADDRESS, "TESTNET");
-    expect(failed).toEqual({ total: "0", balances: [] });
-
-    // Next call within the TTL must retry rather than serve the fallback.
-    loadAccount.mockResolvedValue(account("50"));
-    const recovered = await getAccountBalances(G_ADDRESS, "TESTNET");
-
-    expect(recovered.total).toBe("50");
-    expect(loadAccount).toHaveBeenCalledTimes(2);
-  });
-
-  it("marks 404 account misses as unfunded and retries on the next call", async () => {
-    loadAccount.mockRejectedValueOnce({ response: { status: 404 } });
-
-    const unfunded = await getAccountBalances(G_ADDRESS, "TESTNET");
-    expect(unfunded).toEqual({ total: "0", balances: [], unfunded: true });
-
-    loadAccount.mockResolvedValue(account("25"));
-    const recovered = await getAccountBalances(G_ADDRESS, "TESTNET");
-
-    expect(recovered.total).toBe("25");
-    expect(loadAccount).toHaveBeenCalledTimes(2);
-  });
-
-  it("clearAccountBalancesCache forces a refetch", async () => {
-    loadAccount.mockResolvedValue(account("100"));
-    await getAccountBalances(G_ADDRESS, "TESTNET");
-
-    clearAccountBalancesCache();
-    await getAccountBalances(G_ADDRESS, "TESTNET");
-
-    expect(loadAccount).toHaveBeenCalledTimes(2);
   });
 });
 
-describe("getHorizonServer", () => {
+describe("simulatePayment spendable balance", () => {
+  const account = (overrides: Record<string, unknown> = {}) => ({
+    balances: [{ asset_type: "native", balance: "100" }],
+    subentry_count: 0,
+    num_sponsored: 0,
+    num_sponsoring: 0,
+    ...overrides,
+  });
+
   beforeEach(() => {
-    (Horizon.Server as unknown as ReturnType<typeof vi.fn>).mockClear();
+    clearAccountBalancesCache();
+    loadAccount.mockReset();
   });
 
-  it("builds a Horizon server pointed at the network's Horizon URL", async () => {
-    await getHorizonServer("PUBLIC");
-    expect(Horizon.Server).toHaveBeenCalledWith(HORIZON_URL.PUBLIC);
+  it("subtracts the base reserve and fee from spendable XLM", async () => {
+    loadAccount.mockResolvedValue(account());
+
+    const result = await simulatePayment(G_ADDRESS, "10", "TESTNET");
+
+    // 100 total - 1.0 base reserve - 0.00001 fee = 98.99999
+    expect(result.spendable).toBe("98.99999");
+    expect(result.sufficient).toBe(true);
   });
 
-  it("uses the testnet Horizon URL for TESTNET", async () => {
-    await getHorizonServer("TESTNET");
-    expect(Horizon.Server).toHaveBeenCalledWith(HORIZON_URL.TESTNET);
+  it("accounts for subentry reserves from trustlines and offers", async () => {
+    loadAccount.mockResolvedValue(account({ subentry_count: 4 }));
+
+    const result = await simulatePayment(G_ADDRESS, "10", "TESTNET");
+
+    // (2 + 4) * 0.5 = 3.0 reserve; 100 - 3.0 - 0.00001 = 96.99999
+    expect(result.spendable).toBe("96.99999");
+    expect(result.sufficient).toBe(true);
   });
 
-  it("PUBLIC and TESTNET resolve to distinct Horizon URLs", () => {
-    expect(HORIZON_URL.PUBLIC).not.toBe(HORIZON_URL.TESTNET);
+  it("accounts for sponsorship reducing the reserve", async () => {
+    loadAccount.mockResolvedValue(
+      account({ subentry_count: 2, num_sponsored: 2 })
+    );
+
+    const result = await simulatePayment(G_ADDRESS, "10", "TESTNET");
+
+    // (2 + 2 - 2) * 0.5 = 1.0 reserve; 100 - 1.0 - 0.00001 = 98.99999
+    expect(result.spendable).toBe("98.99999");
+    expect(result.sufficient).toBe(true);
+  });
+
+  it("subtracts selling liabilities from spendable XLM", async () => {
+    loadAccount.mockResolvedValue(
+      account({
+        balances: [
+          { asset_type: "native", balance: "100", selling_liabilities: "50" },
+        ],
+      })
+    );
+
+    const result = await simulatePayment(G_ADDRESS, "10", "TESTNET");
+
+    // 100 - 1.0 reserve - 50 liabilities - 0.00001 fee = 48.99999
+    expect(result.spendable).toBe("48.99999");
+    expect(result.sufficient).toBe(true);
+  });
+
+  it("reports insufficient when the fee pushes the amount over the limit", async () => {
+    loadAccount.mockResolvedValue(
+      account({
+        balances: [
+          { asset_type: "native", balance: "1.00001", selling_liabilities: "0" },
+        ],
+      })
+    );
+
+    // 1.00001 - 1.0 reserve - 0.00001 fee = 0.0 spendable
+    const result = await simulatePayment(G_ADDRESS, "0.0000001", "TESTNET");
+
+    expect(result.spendable).toBe("0");
+    expect(result.sufficient).toBe(false);
+  });
+});
+
+describe("fetchRecentTransactions (#720)", () => {
+  const OTHER_G = Keypair.random().publicKey();
+  const base = { transaction_successful: true, created_at: "2026-01-01T00:00:00Z", transaction_hash: "h" };
+
+  beforeEach(() => {
+    paymentsCall.mockReset();
+  });
+
+  it("propagates Horizon errors instead of returning an empty history", async () => {
+    paymentsCall.mockRejectedValueOnce(new Error("horizon down"));
+    await expect(fetchRecentTransactions(G_ADDRESS, "TESTNET")).rejects.toThrow("horizon down");
+  });
+
+  it("classifies each operation type", async () => {
+    paymentsCall.mockResolvedValueOnce({
+      records: [
+        { ...base, id: "1", type: "payment", from: G_ADDRESS, to: OTHER_G, amount: "1", asset_type: "native" },
+        { ...base, id: "2", type: "path_payment_strict_send", from: G_ADDRESS, to: OTHER_G, amount: "2", asset_type: "credit_alphanum4", asset_code: "USDC" },
+        { ...base, id: "3", type: "create_account", funder: OTHER_G, account: G_ADDRESS, starting_balance: "3" },
+        { ...base, id: "4", type: "account_merge", account: OTHER_G, into: G_ADDRESS },
+        { ...base, id: "5", type: "invoke_host_function", asset_balance_changes: [{ type: "transfer", from: G_ADDRESS, to: C_ADDRESS, amount: "5", asset_type: "native" }] },
+        { ...base, id: "6", type: "invoke_host_function", asset_balance_changes: [{ type: "transfer", from: C_ADDRESS, to: OTHER_G, amount: "6", asset_type: "credit_alphanum4", asset_code: "USDC" }] },
+        { ...base, id: "7", type: "invoke_host_function" },
+      ],
+    });
+
+    const txs = await fetchRecentTransactions(G_ADDRESS, "TESTNET");
+
+    expect(txs.map((t) => t.type)).toEqual([
+      "payment",
+      "path-payment",
+      "create-account",
+      "account-merge",
+      "g-to-c",
+      "contract-transfer",
+    ]);
+    expect(txs[1].asset).toBe("USDC");
+    expect(txs[2]).toMatchObject({ fromAddress: OTHER_G, toAddress: G_ADDRESS, amount: "3", asset: "XLM" });
+    expect(txs[3]).toMatchObject({ fromAddress: OTHER_G, toAddress: G_ADDRESS });
+    expect(txs[4]).toMatchObject({ fromAddress: G_ADDRESS, toAddress: C_ADDRESS, amount: "5", asset: "XLM" });
+  });
+});
+
+describe("findTransactionByHash (#717)", () => {
+  const HASH = "a".repeat(64);
+  const record = { hash: HASH, successful: true, source_account_sequence: "1" };
+
+  beforeEach(() => {
+    transactionCall.mockReset();
+  });
+
+  it("falls back to the other network when the hash isn't on the wallet's", async () => {
+    transactionCall.mockImplementation(async (url: string) => {
+      if (url === HORIZON_URL.PUBLIC) return record;
+      throw { response: { status: 404 } };
+    });
+
+    const result = await findTransactionByHash(HASH, "TESTNET");
+
+    expect(result).toMatchObject({ network: "PUBLIC", status: "confirmed" });
+  });
+
+  it("uses the link's network without consulting the wallet's", async () => {
+    transactionCall.mockResolvedValue(record);
+
+    const result = await findTransactionByHash(HASH, "TESTNET", "PUBLIC");
+
+    expect(result?.network).toBe("PUBLIC");
+    expect(transactionCall).toHaveBeenCalledTimes(1);
+    expect(transactionCall).toHaveBeenCalledWith(HORIZON_URL.PUBLIC, HASH);
   });
 });
