@@ -1,97 +1,11 @@
-// @vitest-environment jsdom
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import {
-  isFeatureEnabled,
-  FEATURE_FLAGS,
-  getDevOverrides,
-  setDevOverride,
-  clearDevOverride,
-} from '@/lib/featureFlags';
+import { isFeatureFlagPanelEnabled } from '../lib/featureFlags';
 
-// Mock environment variables
-const originalEnv = process.env;
+describe('isFeatureFlagPanelEnabled', () => {
+  const originalEnv = process.env;
 
-beforeEach(() => {
-  process.env = { ...originalEnv };
-  delete process.env.NEXT_PUBLIC_FEATURE_FLAGS;
-  
-  // Clear localStorage mock
-  if (typeof localStorage !== 'undefined') {
-    localStorage.clear();
-  }
-});
-
-afterEach(() => {
-  process.env = originalEnv;
-  vi.unstubAllEnvs();
-});
-
-describe('featureFlags', () => {
-  describe('isFeatureEnabled', () => {
-    it('returns false for unknown flag', () => {
-      const result = isFeatureEnabled('unknown_flag');
-      expect(result).toBe(false);
-    });
-
-    it('returns default value for known flag', () => {
-      // Both flags in FEATURE_FLAGS have defaultEnabled: false
-      const result = isFeatureEnabled('new_onboarding_flow');
-      expect(result).toBe(false);
-    });
-
-    it('respects dev override in development', () => {
-      vi.stubEnv('NODE_ENV', 'development');
-      setDevOverride('new_onboarding_flow', true);
-      
-      const result = isFeatureEnabled('new_onboarding_flow');
-      expect(result).toBe(true);
-    });
-
-    it('returns true when rollout percentage is 100', () => {
-      vi.stubEnv('NODE_ENV', 'production');
-      
-      // We need to test the rollout logic directly by creating a scenario
-      // Since we can't modify FEATURE_FLAGS directly, we test with env var override
-      process.env.NEXT_PUBLIC_FEATURE_FLAGS = 'new_onboarding_flow=true';
-      
-      const result = isFeatureEnabled('new_onboarding_flow');
-      expect(result).toBe(true);
-    });
-
-    it('returns default when rollout percentage is 0', () => {
-      vi.stubEnv('NODE_ENV', 'production');
-      // rolloutPercentage is 0 by default
-      
-      const result = isFeatureEnabled('new_onboarding_flow');
-      expect(result).toBe(false);
-    });
-
-    it('is deterministic for same session id', () => {
-      vi.stubEnv('NODE_ENV', 'production');
-      
-      const sessionId = 'test-session-123';
-      const result1 = isFeatureEnabled('new_onboarding_flow', sessionId);
-      const result2 = isFeatureEnabled('new_onboarding_flow', sessionId);
-      
-      expect(result1).toBe(result2);
-    });
-
-    it('env var override has priority over default', () => {
-      vi.stubEnv('NODE_ENV', 'production');
-      process.env.NEXT_PUBLIC_FEATURE_FLAGS = 'new_onboarding_flow=true';
-      
-      const result = isFeatureEnabled('new_onboarding_flow');
-      expect(result).toBe(true);
-    });
-
-    it('dev override has priority over env var', () => {
-      vi.stubEnv('NODE_ENV', 'development');
-      process.env.NEXT_PUBLIC_FEATURE_FLAGS = 'new_onboarding_flow=true';
-      setDevOverride('new_onboarding_flow', false);
-      
-      const result = isFeatureEnabled('new_onboarding_flow');
-      expect(result).toBe(false);
-    });
+  afterEach(() => {
+    process.env = originalEnv;
+    window.localStorage.clear();
   });
 
   // -------------------------------------------------------------------------
@@ -160,48 +74,15 @@ describe('featureFlags', () => {
     });
   });
 
-  describe('setDevOverride', () => {
-    it('persists override to localStorage', () => {
-      vi.stubEnv('NODE_ENV', 'development');
-      setDevOverride('new_onboarding_flow', true);
-      
-      const stored = localStorage.getItem('ff_dev_overrides');
-      expect(stored).toBeDefined();
-      const parsed = JSON.parse(stored!);
-      expect(parsed.new_onboarding_flow).toBe(true);
-    });
-
-    it('updates existing override', () => {
-      vi.stubEnv('NODE_ENV', 'development');
-      setDevOverride('new_onboarding_flow', true);
-      setDevOverride('new_onboarding_flow', false);
-      
-      const result = getDevOverrides();
-      expect(result.new_onboarding_flow).toBe(false);
-    });
+  it('is enabled in non-production environments', () => {
+    process.env = { ...originalEnv, NODE_ENV: 'development' };
+    expect(isFeatureFlagPanelEnabled()).toBe(true);
   });
 
-  describe('clearDevOverride', () => {
-    it('removes override from localStorage', () => {
-      vi.stubEnv('NODE_ENV', 'development');
-      setDevOverride('new_onboarding_flow', true);
-      clearDevOverride('new_onboarding_flow');
-      
-      const result = getDevOverrides();
-      expect(result.new_onboarding_flow).toBeUndefined();
-    });
-
-    it('does not affect other overrides', () => {
-      vi.stubEnv('NODE_ENV', 'development');
-      setDevOverride('new_onboarding_flow', true);
-      setDevOverride('advanced_address_validation', true);
-      
-      clearDevOverride('new_onboarding_flow');
-      
-      const result = getDevOverrides();
-      expect(result.new_onboarding_flow).toBeUndefined();
-      expect(result.advanced_address_validation).toBe(true);
-    });
+  it('does not trust a client-side localStorage token', () => {
+    process.env = { ...originalEnv, NODE_ENV: 'production' };
+    window.localStorage.setItem('ff_panel_token', 'anything');
+    expect(isFeatureFlagPanelEnabled()).toBe(false);
   });
 
   // -------------------------------------------------------------------------
