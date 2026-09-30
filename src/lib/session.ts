@@ -52,6 +52,7 @@ function storage(): Storage | null {
 
 /** True when `session` is older than the TTL and should be discarded. */
 export function isSessionExpired(session: WalletSession, now: number = Date.now()): boolean {
+  if (Number.isNaN(session.updatedAt)) return true;
   return now - session.updatedAt > SESSION_TTL_MS;
 }
 
