@@ -1,8 +1,10 @@
 "use client";
 
-import { use, useState, useEffect } from "react";
+import { use, useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { Share2, Copy, Check } from "lucide-react";
 import { isValidHash, toPublicConfirmation, getConfirmationUrl, type TransactionConfirmation, type PublicConfirmation } from "@/lib/confirmations";
+import type { StellarNetwork } from "@/lib/types";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 
 interface ConfirmationPageProps {
@@ -13,11 +15,9 @@ interface ConfirmationPageProps {
   }>;
 }
 
-async function fetchConfirmation(hash: string): Promise<TransactionConfirmation | null> {
+async function fetchConfirmation(hash: string, network: StellarNetwork): Promise<TransactionConfirmation | null> {
   try {
-    // In a real application, this would fetch from the API
-    // For now, return null to trigger the not-found state
-    const response = await fetch(`/api/confirmations/${hash}`);
+    const response = await fetch(`/api/confirmations/${hash}?network=${network}`);
     if (!response.ok) return null;
     return response.json();
   } catch {
@@ -25,8 +25,13 @@ async function fetchConfirmation(hash: string): Promise<TransactionConfirmation 
   }
 }
 
-export default function ConfirmationPage({ params }: ConfirmationPageProps) {
+function ConfirmationPageInner({ params }: ConfirmationPageProps) {
   const { hash } = use(params);
+  // The confirmation route has no other way to know which Horizon ledger to
+  // query — a hash alone doesn't say whether it's a testnet or mainnet
+  // transaction. Defaults to TESTNET, matching every other network-aware
+  // query param in this app (e.g. the transaction status route). (#676)
+  const network: StellarNetwork = useSearchParams().get("network") === "PUBLIC" ? "PUBLIC" : "TESTNET";
   const [confirmation, setConfirmation] = useState<PublicConfirmation | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +45,7 @@ export default function ConfirmationPage({ params }: ConfirmationPageProps) {
         return;
       }
 
-      const data = await fetchConfirmation(hash);
+      const data = await fetchConfirmation(hash, network);
       if (!data) {
         setError("Transaction not found");
         setIsLoading(false);
@@ -52,10 +57,10 @@ export default function ConfirmationPage({ params }: ConfirmationPageProps) {
     }
 
     load();
-  }, [hash]);
+  }, [hash, network]);
 
   const handleCopyLink = () => {
-    const url = getConfirmationUrl(hash);
+    const url = getConfirmationUrl(hash, network);
     copy(url);
   };
 
@@ -193,5 +198,13 @@ export default function ConfirmationPage({ params }: ConfirmationPageProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ConfirmationPage(props: ConfirmationPageProps) {
+  return (
+    <Suspense fallback={null}>
+      <ConfirmationPageInner {...props} />
+    </Suspense>
   );
 }

@@ -3,6 +3,13 @@ import React from "react";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import DashboardPage from "@/components/routes/dashboard-page";
+
+// DashboardPage mounts ClaimsPanel, which is gated behind the
+// locked_transfers flag (#672) — mock it off since none of these tests
+// exercise the lock/claims feature.
+vi.mock("@/contexts/FeatureFlagContext", () => ({
+  useFeatureFlag: () => false,
+}));
 import type { FeeTierStatus } from "@/lib/feeTiers";
 
 /**

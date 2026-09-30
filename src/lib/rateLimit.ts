@@ -1,78 +1,77 @@
 /**
- * Minimal in-memory fixed-window rate limiter for public API routes.
+ * Per-IP rate limiting for the backend proxy routes (#674).
  *
- * This is intentionally dependency-free. It is per-process, which is
- * sufficient to stop a single caller from hammering Horizon through the
- * app's server. For multi-instance deployments a shared store (e.g. Redis)
- * can be swapped in behind the same interface.
+ * In-memory, fixed-window counter. This is intentionally simple — no shared
+ * store (Redis, etc.) is configured anywhere in this repo, and a single
+ * Node.js server process is the deployment this app otherwise assumes (see
+ * src/lib/sequenceManager.ts's own in-memory cache for the same reasoning).
+ * On a multi-instance deployment each instance enforces its own limit
+ * independently, which is a weaker guarantee than a shared store but still
+ * meaningfully caps abuse per instance; documented in README.md alongside
+ * the new env vars this feature introduces.
  */
 
 export interface RateLimitResult {
-  /** Whether the request is allowed under the current window. */
   allowed: boolean;
-  /** Remaining requests in the current window (never negative). */
-  remaining: number;
-  /** Seconds until the window resets; used for the Retry-After header. */
-  retryAfter: number;
+  /** Seconds until the caller may retry, present only when `allowed` is false. */
+  retryAfterSeconds?: number;
 }
 
-interface WindowEntry {
+interface Bucket {
   count: number;
-  resetAt: number;
+  windowStart: number;
 }
 
-const buckets = new Map<string, WindowEntry>();
+const buckets = new Map<string, Bucket>();
 
-/**
- * Best-effort extraction of the caller IP from proxy headers, falling back
- * to a stable placeholder when no header is present (e.g. in tests).
- */
-export function getClientIp(headers: Headers): string {
-  const forwarded = headers.get('x-forwarded-for');
-  if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first;
-  }
-  return headers.get('x-real-ip') ?? 'unknown';
+/** Test-only: clears all counters so tests don't leak state into each other. */
+export function resetRateLimits(): void {
+  buckets.clear();
 }
 
 /**
- * Fixed-window rate limit check.
- *
- * @param key      Unique bucket key (typically `route:ip`).
- * @param limit    Max requests allowed per window.
- * @param windowMs Window length in milliseconds.
+ * Records one request against `key` and reports whether it's within the
+ * limit. `key` should already include whatever scope the caller wants rate
+ * limited independently (e.g. `${route}:${ip}`) — this function has no
+ * notion of routes or IPs on its own.
  */
 export function checkRateLimit(
   key: string,
-  limit: number,
-  windowMs: number,
+  options: { windowMs?: number; max?: number } = {}
 ): RateLimitResult {
+  const windowMs = options.windowMs ?? 60_000;
+  const max = options.max ?? 30;
   const now = Date.now();
-  const entry = buckets.get(key);
 
-  if (!entry || entry.resetAt <= now) {
-    buckets.set(key, { count: 1, resetAt: now + windowMs });
-    return { allowed: true, remaining: limit - 1, retryAfter: 0 };
+  const bucket = buckets.get(key);
+  if (!bucket || now - bucket.windowStart >= windowMs) {
+    buckets.set(key, { count: 1, windowStart: now });
+    return { allowed: true };
   }
 
-  if (entry.count >= limit) {
-    return {
-      allowed: false,
-      remaining: 0,
-      retryAfter: Math.max(1, Math.ceil((entry.resetAt - now) / 1000)),
-    };
+  if (bucket.count >= max) {
+    return { allowed: false, retryAfterSeconds: Math.ceil((bucket.windowStart + windowMs - now) / 1000) };
   }
 
-  entry.count += 1;
-  return {
-    allowed: true,
-    remaining: limit - entry.count,
-    retryAfter: 0,
-  };
+  bucket.count += 1;
+  return { allowed: true };
 }
 
-/** Test helper: clear all buckets between cases. */
-export function resetRateLimits(): void {
-  buckets.clear();
+/**
+ * Best-effort client IP extraction for a Next.js route handler's Request.
+ * `x-forwarded-for` may carry a comma-separated chain through multiple
+ * proxies — the first entry is the original client. Falls back to a shared
+ * "unknown" bucket (rather than throwing) when neither header is present,
+ * e.g. in local dev with no proxy in front — every unidentified caller then
+ * shares one limit rather than each getting an unlimited allowance.
+ */
+export function getClientIp(request: Request): string {
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  if (forwardedFor) {
+    const first = forwardedFor.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  const realIp = request.headers.get("x-real-ip");
+  if (realIp) return realIp;
+  return "unknown";
 }
