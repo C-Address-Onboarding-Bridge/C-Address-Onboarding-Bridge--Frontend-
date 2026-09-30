@@ -2,7 +2,10 @@
 
 echo "--- Frontend build ---"
 cd "$(dirname "$0")/.."
-npm run build
+# A production build now fails fast if NEXT_PUBLIC_API_URL is unset (#675) —
+# this hook only verifies the build itself succeeds, not real backend
+# connectivity, so a placeholder is enough here.
+NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-https://api.pre-push-placeholder.example}" npm run build
 if [ $? -ne 0 ]; then
   echo "FAILED: Frontend build"
   exit 1

@@ -20,20 +20,14 @@ import {
 import { useWallet } from "@/components/wallet-provider";
 import { IN_FLIGHT_TRANSACTION_KEY } from "@/components/error-boundary";
 import {
-  findTransactionByHash,
+  getExplorerUrl,
+  getTransactionByHash,
   subscribeToTransactionStatus,
   type TransactionDetails,
 } from "@/lib/stellar";
 
 /** Poll interval while the transaction is still in flight. (#474) */
 const IN_FLIGHT_POLL_MS = 5_000;
-
-/** Explorer URL built inline (the app's getExplorerUrl helper is stubbed for
- * another issue; this page must not crash on the detail route). */
-function explorerTxUrl(network: string, hash: string): string {
-  const base = network === "PUBLIC" ? "public" : "testnet";
-  return `https://stellar.expert/explorer/${base}/tx/${encodeURIComponent(hash)}`;
-}
 
 function stroopsToXlm(stroops: number): string {
   if (!Number.isFinite(stroops) || stroops <= 0) return "—";
@@ -215,7 +209,7 @@ export default function TransactionDetailPage({
         </Link>
         <div className="flex items-center gap-4">
           <a
-            href={explorerTxUrl(details.network, hash)}
+            href={getExplorerUrl(details.network, "tx", hash)}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-sm text-[var(--primary-light)] hover:underline"

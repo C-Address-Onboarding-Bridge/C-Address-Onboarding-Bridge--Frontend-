@@ -131,7 +131,7 @@ describe("ProfilePage (#325)", () => {
       await render();
 
       await act(async () => {
-        button("Connect Freighter")?.click();
+        button("Connect Wallet")?.click();
       });
 
       expect(wallet.connect).toHaveBeenCalledTimes(1);

@@ -21,6 +21,32 @@ export interface InFlightTransaction {
   asset: string;
 }
 
+/**
+ * Record a submitted-but-unconfirmed bridge transaction so the error boundary
+ * can surface it if the page crashes before confirmation. (#707)
+ */
+export function setInFlightTransaction(tx: InFlightTransaction): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(IN_FLIGHT_TRANSACTION_KEY, JSON.stringify(tx));
+  } catch {
+    // Storage may be unavailable (private mode, quota); recovery is best-effort.
+  }
+}
+
+/**
+ * Clear the in-flight record once the transaction reaches a terminal state
+ * (confirmed or failed). (#707)
+ */
+export function clearInFlightTransaction(): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.removeItem(IN_FLIGHT_TRANSACTION_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 interface ErrorBoundaryProps {
   children: ReactNode;
   /** Label passed to the telemetry path (handleError), e.g. "wallet". */

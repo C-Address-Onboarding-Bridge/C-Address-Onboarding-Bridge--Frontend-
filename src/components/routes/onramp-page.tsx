@@ -316,7 +316,7 @@ export default function OnrampPage() {
               }
             />
             {step === "form" && (
-              <div className="space-y-6">
+              <div className="space-y-6" data-testid="onramp-form">
                 <div>
                   <label className="block text-sm font-medium mb-3">Select Provider</label>
                   {/* Single column on phones: at ~320px two provider cards left the
@@ -327,6 +327,7 @@ export default function OnrampPage() {
                       <button
                         key={p.id}
                         type="button"
+                        data-testid={`onramp-provider-${p.id}`}
                         onClick={() => handleProviderSelect(p.id)}
                         aria-pressed={selectedProvider === p.id}
                         className={`p-4 rounded-lg border text-left transition-all ${

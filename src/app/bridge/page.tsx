@@ -3,16 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRightLeft, Wallet, Send, ArrowRight, Check, AlertCircle, Loader2, ExternalLink, HelpCircle, Lock as LockIcon } from "lucide-react";
 import { useWallet } from "@/components/wallet-provider";
-import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel, getEstimatedFeeXLM, toSafeErrorMessage, shouldWarnOnMainnetAction } from "@/lib/stellar";
+import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel, getEstimatedFeeXLM, toSafeErrorMessage, shouldWarnOnMainnetAction, assertActiveAccountMatches, signPreparedTransaction } from "@/lib/stellar";
 import type { AccountBalances, SimulationResult } from "@/lib/stellar";
-import { createLock, getFeeTierPreview } from "@/lib/api";
+import { createLock, getFeeTierPreview, prepareBatchFunding, submitSignedBatchFunding } from "@/lib/api";
 import { validateUnlockTime, type Lock as LockRecord } from "@/lib/locks";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useStepTransition } from "@/hooks/useStepTransition";
 import LiveRegion from "@/components/live-region";
 import BatchFundingForm from "@/components/BatchFundingForm";
-import { submitBatchFunding } from "@/lib/api";
 import { useHelp } from "@/contexts/HelpContext";
+import { useFeatureFlag } from "@/contexts/FeatureFlagContext";
 import type { FeeTierStatus } from "@/lib/feeTiers";
 import FeeTierDisplay from "@/components/fee-tier-display";
 import { addNotification } from "@/lib/notifications";
@@ -116,6 +116,10 @@ export default function BridgePage() {
     connect,
   } = useWallet();
   const { openHelp } = useHelp();
+  // Locked transfers/claims call /locks routes that don't exist on the
+  // backend yet, and claiming sent nothing proving the caller controls the
+  // claimant account — hidden until both are resolved. (#672)
+  const lockedTransfersEnabled = useFeatureFlag("locked_transfers");
   // The source is always Freighter's connected account, never free text.
   // Freighter signs with its active account regardless of what the transaction
   // names as its source, so any other value could only ever produce a
@@ -334,8 +338,8 @@ export default function BridgePage() {
     if (!isNetworkSupported) {
       setTxError(
         networkStatus === "UNSUPPORTED"
-          ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
-          : "Freighter's network couldn't be read. Unlock the extension and reload before submitting."
+          ? `Your wallet is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
+          : "Your wallet's network couldn't be read. Unlock the extension and reload before submitting."
       );
       setTxStatus("error");
       return;
@@ -405,8 +409,8 @@ export default function BridgePage() {
     if (!isNetworkSupported) {
       setTxError(
         networkStatus === "UNSUPPORTED"
-          ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
-          : "Freighter's network couldn't be read. Unlock the extension and reload before submitting."
+          ? `Your wallet is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
+          : "Your wallet's network couldn't be read. Unlock the extension and reload before submitting."
       );
       setTxStatus("error");
       return;
@@ -428,18 +432,22 @@ export default function BridgePage() {
     setLockResult(null);
   };
 
-  // Batch funding submits through the API's batch endpoint (which invokes the
-  // contract's batch_fund_c_address), not through a Freighter-signed classic
-  // payment repeated per recipient — see issue #465.
+  // Batch funding invokes the contract's batch_fund_c_address, which moves
+  // the connected wallet's funds and therefore needs the wallet's signature
+  // — the backend prepares the unsigned transaction, the wallet signs it,
+  // and only the signed XDR is submitted. (#465, #671)
   const handleBatchSubmit = async (recipients: { address: string; amount: string }[]) => {
     if (!isNetworkSupported) {
       throw new Error(
         networkStatus === "UNSUPPORTED"
-          ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
-          : "Freighter's network couldn't be read. Unlock the extension and reload before submitting."
+          ? `Your wallet is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
+          : "Your wallet's network couldn't be read. Unlock the extension and reload before submitting."
       );
     }
-    const response = await submitBatchFunding(fromAddress, recipients, network);
+    await assertActiveAccountMatches(fromAddress);
+    const { xdr } = await prepareBatchFunding(fromAddress, recipients, network);
+    const signedXdr = await signPreparedTransaction(xdr, network);
+    const response = await submitSignedBatchFunding(signedXdr, network);
     return response.results;
   };
 
@@ -530,15 +538,15 @@ export default function BridgePage() {
                     <AlertCircle className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
                     <p className="text-xs text-[var(--text-muted)]">
                       {networkStatus === "UNSUPPORTED"
-                        ? `Freighter is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
-                        : "Freighter's network couldn't be read. Unlock the extension and reload."}
+                        ? `Your wallet is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
+                        : "Your wallet's network couldn't be read. Unlock the extension and reload."}
                     </p>
                   </div>
                 )}
                 {!isConnected && (
                   <div className="p-4 rounded-lg bg-[var(--surface-2)] border border-dashed border-[var(--border)]">
                     <p className="text-xs text-[var(--text-muted)]">
-                      Connect Freighter to choose the source account before submitting a batch.
+                      Connect your wallet to choose the source account before submitting a batch.
                     </p>
                   </div>
                 )}
@@ -579,13 +587,13 @@ export default function BridgePage() {
                     <div>
                       <p className="text-sm font-medium text-[var(--error)]">
                         {networkStatus === "UNSUPPORTED"
-                          ? `Freighter is on ${networkLabel}`
-                          : "Freighter's network couldn't be read"}
+                          ? `Your wallet is on ${networkLabel}`
+                          : "Your wallet's network couldn't be read"}
                       </p>
                       <p className="text-xs text-[var(--text-muted)] mt-1">
                         {networkStatus === "UNSUPPORTED"
-                          ? "Switch to Testnet or Mainnet in Freighter to use the bridge. Balances and transactions are blocked until then, because the app can't tell which chain to use."
-                          : "Unlock the Freighter extension and reload the page. Nothing is submitted while the network is unknown — assuming Testnet would build transactions for the wrong chain."}
+                          ? "Switch to Testnet or Mainnet in your wallet to use the bridge. Balances and transactions are blocked until then, because the app can't tell which chain to use."
+                          : "Unlock your wallet and reload the page. Nothing is submitted while the network is unknown — assuming Testnet would build transactions for the wrong chain."}
                       </p>
                     </div>
                   </div>
@@ -609,14 +617,14 @@ export default function BridgePage() {
                         />
                       </div>
                       <p id="from-address-help" className="text-xs text-[var(--text-muted)] mt-1">
-                        Freighter signs with its active account, so the source must be the connected
-                        wallet. To send from a different account, switch accounts in Freighter.
+                        Your wallet signs with its active account, so the source must be the connected
+                        wallet. To send from a different account, switch accounts in your wallet.
                       </p>
                     </>
                   ) : (
                     <div className="p-4 rounded-lg bg-[var(--surface-2)] border border-dashed border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <p className="text-xs text-[var(--text-muted)]">
-                        Connect Freighter to choose the source account.
+                        Connect your wallet to choose the source account.
                       </p>
                       <button
                         onClick={connect}
@@ -743,48 +751,65 @@ export default function BridgePage() {
                   )}
                 </div>
 
-                <div className="p-4 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isLocked}
-                      onChange={(e) => setIsLocked(e.target.checked)}
-                      disabled={txStatus !== "idle"}
-                      data-testid="lock-toggle"
-                      className="w-4 h-4 rounded border-[var(--border)] accent-[var(--primary)]"
-                    />
-                    <span className="text-sm font-medium inline-flex items-center gap-1.5">
-                      <LockIcon className="w-3.5 h-3.5" />
-                      Lock until a future date
-                    </span>
-                  </label>
-                  <p className="text-xs text-[var(--text-muted)] mt-1 ml-7">
-                    Optional — instead of sending instantly, the recipient can claim this once the
-                    unlock time passes. Manage incoming locks from the Dashboard.
-                  </p>
-                  {isLocked && (
-                    <div className="mt-3 ml-7">
-                      <label htmlFor="unlock-at" className="block text-xs text-[var(--text-muted)] mb-1">
-                        Unlock date &amp; time
-                      </label>
+                {lockedTransfersEnabled && (
+                  <div className="p-4 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
+                    <label className="flex items-center gap-3 cursor-pointer">
                       <input
-                        id="unlock-at"
-                        type="datetime-local"
-                        value={unlockAt}
-                        onChange={(e) => setUnlockAt(e.target.value)}
+                        type="checkbox"
+                        checked={isLocked}
+                        onChange={(e) => setIsLocked(e.target.checked)}
                         disabled={txStatus !== "idle"}
-                        aria-invalid={!!unlockAt && unlockValidation?.ok === false}
-                        aria-describedby={unlockAt && unlockValidation?.ok === false ? "unlock-at-error" : undefined}
-                        className="w-full sm:w-auto px-4 py-2.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2 focus:border-[var(--primary)] transition-colors"
+                        data-testid="lock-toggle"
+                        className="w-4 h-4 rounded border-[var(--border)] accent-[var(--primary)]"
                       />
-                      {unlockAt && unlockValidation?.ok === false && (
-                        <p id="unlock-at-error" className="text-xs text-[var(--error)] mt-1" role="alert">
-                          {unlockValidation.error}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
+                      <span className="text-sm font-medium inline-flex items-center gap-1.5">
+                        <LockIcon className="w-3.5 h-3.5" />
+                        Lock until a future date
+                      </span>
+                    </label>
+                    <p className="text-xs text-[var(--text-muted)] mt-1 ml-7">
+                      Optional — instead of sending instantly, the recipient can claim this once the
+                      unlock time passes. Manage incoming locks from the Dashboard.
+                    </p>
+                    {isLocked && (
+                      <div className="mt-3 ml-7">
+                        <label htmlFor="unlock-at" className="block text-xs text-[var(--text-muted)] mb-1">
+                          Unlock date &amp; time
+                        </label>
+                        <input
+                          id="unlock-at"
+                          type="datetime-local"
+                          value={unlockAt}
+                          onChange={(e) => setUnlockAt(e.target.value)}
+                          disabled={txStatus !== "idle"}
+                          aria-invalid={!!unlockAt && unlockValidation?.ok === false}
+                          aria-describedby={unlockAt && unlockValidation?.ok === false ? "unlock-at-error" : undefined}
+                          className="w-full sm:w-auto px-4 py-2.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2 focus:border-[var(--primary)] transition-colors"
+                        />
+                        {unlockAt && unlockValidation?.ok === false && (
+                          <p id="unlock-at-error" className="text-xs text-[var(--error)] mt-1" role="alert">
+                            {unlockValidation.error}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Also shown on the form step, not only on review: while #284
+                    blocks instant bridging, review is unreachable for every
+                    valid C-address, so the tier and discounted quote would
+                    otherwise never be seen. The quote only appears once the
+                    amount is valid. (#468, #655) */}
+                <FeeTierDisplay
+                  status={feeTierStatus}
+                  amount={
+                    debouncedAmount && isValidStellarAmount(debouncedAmount)
+                      ? Number(debouncedAmount)
+                      : undefined
+                  }
+                  asset={asset}
+                />
 
                 {!isLocked && bridgingBlocked && (
                   <div className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3">
@@ -1048,7 +1073,7 @@ export default function BridgePage() {
               className="w-full flex items-center justify-center gap-2 px-4 py-3 min-h-[44px] rounded-xl border border-[var(--primary)]/30 text-[var(--primary-light)] font-medium hover:bg-[var(--primary)]/5 transition-colors text-sm"
             >
               <Wallet className="w-4 h-4" />
-              Connect Freighter Wallet
+              Connect Wallet
             </button>
           )}
         </div>
