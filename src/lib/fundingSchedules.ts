@@ -66,6 +66,8 @@ export interface FundingSchedule {
   amount: string;
   asset: FundingLinkAsset;
   frequency: FundingFrequency;
+  /** The network this schedule is for (TESTNET or PUBLIC). */
+  network: "TESTNET" | "PUBLIC";
   /** Epoch ms the next funding is due. */
   nextRunAt: number;
   /**

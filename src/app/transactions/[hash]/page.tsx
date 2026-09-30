@@ -90,7 +90,7 @@ export default function TransactionDetailPage({
   }, [hash, walletNetwork, linkNetwork, tick]);
 
   // A well-formed hash that Horizon hasn't ingested yet is still in flight —
-  // keep polling until it lands or the user leaves. (#474)
+  // keep polling until it lands or the user leaves, but only when SSE is unavailable. (#474)
   useEffect(() => {
     if (currentLoadState !== "found" || details?.status !== "pending") return;
     const timer = setTimeout(() => setTick((t) => t + 1), IN_FLIGHT_POLL_MS);
