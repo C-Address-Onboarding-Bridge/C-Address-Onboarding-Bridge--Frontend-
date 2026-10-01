@@ -153,3 +153,49 @@ export function clearSession(): void {
     // Ignore errors in privacy mode
   }
 }
+
+// ---------------------------------------------------------------------------
+// One-per-session mainnet confirmation (#759)
+// ---------------------------------------------------------------------------
+export const MAINNET_SESSION_STORAGE_KEY = "bridge:mainnet_session_confirmed";
+
+function getSessionStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether the user has explicitly confirmed mainnet execution in this session (#759). */
+export function isMainnetSessionConfirmed(): boolean {
+  const store = getSessionStorage();
+  if (!store) return false;
+  try {
+    return store.getItem(MAINNET_SESSION_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+/** Marks mainnet execution confirmed for the current session (#759). */
+export function setMainnetSessionConfirmed(confirmed = true): void {
+  const store = getSessionStorage();
+  if (!store) return;
+  try {
+    if (confirmed) {
+      store.setItem(MAINNET_SESSION_STORAGE_KEY, "true");
+    } else {
+      store.removeItem(MAINNET_SESSION_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore errors in privacy mode
+  }
+}
+
+/** Clears mainnet session confirmation. */
+export function clearMainnetSessionConfirmed(): void {
+  setMainnetSessionConfirmed(false);
+}
+

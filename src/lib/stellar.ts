@@ -23,7 +23,11 @@ import {
   isSupportedNetwork,
 } from "./types";
 import { withSequenceRetry } from "./sequenceManager";
-import { getNetwork as getFreighterNetwork } from "@stellar/freighter-api";
+export {
+  isMainnetSessionConfirmed,
+  setMainnetSessionConfirmed,
+  clearMainnetSessionConfirmed,
+} from "./session";
 
 export type { AppNetwork, WalletNetworkState, BridgeTransactionData } from "./types";
 
@@ -194,16 +198,33 @@ const SWITCH_POLL_INTERVAL_MS = 500;
 const SWITCH_POLL_TIMEOUT_MS = 8_000;
 
 /**
- * Whether a mainnet action needs an explicit warning: the user is on mainnet
- * and the network changed recently, and they haven't acknowledged it yet.
- * Pure so it is unit-testable without rendering the page. (#480)
+ * Whether a mainnet action needs an explicit warning or confirmation.
+ *
+ * Warns if:
+ * 1. The network is "PUBLIC" (Mainnet), AND
+ * 2. Either:
+ *    a) The user switched networks recently and has not yet acknowledged the switch (#480), OR
+ *    b) The user has not yet confirmed a mainnet action in this session (one-per-session confirmation, #759).
+ *
+ * Pure so it is unit-testable without rendering the page.
+ *
+ * @param network - "PUBLIC" or "TESTNET"
+ * @param recentlyChangedNetwork - true if a network switch occurred recently
+ * @param acknowledged - true if the warning was already acknowledged in the current review prompt
+ * @param sessionConfirmed - optional: true if mainnet was already confirmed in this session
  */
 export function shouldWarnOnMainnetAction(
   network: StellarNetwork,
   recentlyChangedNetwork: boolean,
-  acknowledged: boolean
+  acknowledged: boolean,
+  sessionConfirmed?: boolean
 ): boolean {
-  return network === "PUBLIC" && recentlyChangedNetwork && !acknowledged;
+  if (network !== "PUBLIC") return false;
+  if (acknowledged) return false;
+  if (sessionConfirmed !== undefined) {
+    return recentlyChangedNetwork || !sessionConfirmed;
+  }
+  return recentlyChangedNetwork;
 }
 
 /**
