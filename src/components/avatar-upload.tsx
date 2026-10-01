@@ -5,6 +5,7 @@ import { Camera, Loader2, Trash2 } from "lucide-react";
 import {
   AVATAR_ACCEPT_ATTR,
   avatarInitials,
+  downscaleAvatar,
   isRenderableAvatar,
   loadAvatar,
   removeAvatar,
@@ -58,18 +59,25 @@ export default function AvatarUpload({ address, size = 56 }: AvatarUploadProps) 
     setError(null);
     setReading(true);
     const reader = new FileReader();
-    reader.onload = () => {
-      setReading(false);
+    reader.onload = async () => {
       const result = reader.result;
       if (!isRenderableAvatar(result)) {
+        setReading(false);
         setError("That image couldn't be read. Try a different file.");
         return;
       }
-      if (!saveAvatar(address, result)) {
+      try {
+        const processed = await downscaleAvatar(result);
+        if (!saveAvatar(address, processed)) {
+          setError("Couldn't save the image — browser storage may be full.");
+          return;
+        }
+        setAvatarRecord({ address, value: processed });
+      } catch {
         setError("Couldn't save the image — browser storage may be full.");
-        return;
+      } finally {
+        setReading(false);
       }
-      setAvatarRecord({ address, value: result });
     };
     reader.onerror = () => {
       setReading(false);

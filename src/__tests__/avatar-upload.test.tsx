@@ -164,6 +164,30 @@ describe("AvatarUpload", () => {
     expect(window.localStorage.getItem(avatarStorageKey(ADDRESS))).toBeNull();
   });
 
+  it("surfaces a clear error when storage is full", async () => {
+    await render(ADDRESS);
+
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      const err = new Error("QuotaExceededError");
+      err.name = "QuotaExceededError";
+      throw err;
+    });
+
+    await selectFile(pngFile(64));
+
+    for (let i = 0; i < 50; i++) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      if (container?.textContent?.includes("storage may be full")) break;
+    }
+
+    expect(container?.textContent).toContain(
+      "Couldn't save the image — browser storage may be full."
+    );
+    expect(container?.querySelector("img")).toBeNull();
+  });
+
   it("clears the stored avatar when Remove is clicked", async () => {
     window.localStorage.setItem(avatarStorageKey(ADDRESS), PNG_DATA_URL);
     await render(ADDRESS);

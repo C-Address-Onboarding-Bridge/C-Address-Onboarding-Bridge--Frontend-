@@ -47,6 +47,9 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
 }
 
+/** Maximum width and height in pixels for stored avatars to prevent quota exhaustion. */
+export const MAX_AVATAR_DIMENSION = 128;
+
 /**
  * Validates a picked file before it is read. Takes the structural subset of
  * `File` it needs so it can be unit-tested without a DOM `File`.
@@ -70,6 +73,98 @@ export function validateAvatarFile(file: Pick<File, "type" | "size">): AvatarVal
 /** True when `value` is a base64 image data URL that is safe to render. */
 export function isRenderableAvatar(value: unknown): value is string {
   return typeof value === "string" && DATA_URL_PATTERN.test(value);
+}
+
+/** Checks whether the environment supports 2D canvas operations. */
+function supportsCanvas2D(): boolean {
+  if (typeof window === "undefined" || typeof document === "undefined") return false;
+  try {
+    const canvas = document.createElement("canvas");
+    return Boolean(canvas.getContext && canvas.getContext("2d"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Downscales an image data URL to fit within `maxDimension` x `maxDimension` before
+ * persisting to localStorage. If the environment lacks 2D canvas support (e.g. SSR,
+ * jsdom), or if the image is already within bounds, returns the original data URL.
+ */
+export async function downscaleAvatar(
+  dataUrl: string,
+  maxDimension = MAX_AVATAR_DIMENSION
+): Promise<string> {
+  if (!isRenderableAvatar(dataUrl) || !supportsCanvas2D()) {
+    return dataUrl;
+  }
+
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      const timer = setTimeout(() => {
+        resolve(dataUrl);
+      }, 1000);
+
+      img.onload = () => {
+        clearTimeout(timer);
+        try {
+          const width = img.naturalWidth || img.width;
+          const height = img.naturalHeight || img.height;
+
+          if (!width || !height || (width <= maxDimension && height <= maxDimension)) {
+            resolve(dataUrl);
+            return;
+          }
+
+          let targetWidth = width;
+          let targetHeight = height;
+
+          if (width > height) {
+            if (width > maxDimension) {
+              targetHeight = Math.round((height * maxDimension) / width);
+              targetWidth = maxDimension;
+            }
+          } else {
+            if (height > maxDimension) {
+              targetWidth = Math.round((width * maxDimension) / height);
+              targetHeight = maxDimension;
+            }
+          }
+
+          const canvas = document.createElement("canvas");
+          canvas.width = targetWidth;
+          canvas.height = targetHeight;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            resolve(dataUrl);
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+          const mimeMatch = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+]+);base64,/);
+          const mimeType = mimeMatch ? mimeMatch[1] : "image/png";
+          const outputMime =
+            mimeType === "image/jpeg" || mimeType === "image/webp" ? mimeType : "image/png";
+
+          const scaled = canvas.toDataURL(outputMime, 0.85);
+          resolve(isRenderableAvatar(scaled) ? scaled : dataUrl);
+        } catch {
+          resolve(dataUrl);
+        }
+      };
+
+      img.onerror = () => {
+        clearTimeout(timer);
+        resolve(dataUrl);
+      };
+
+      img.src = dataUrl;
+    } catch {
+      resolve(dataUrl);
+    }
+  });
 }
 
 /** Storage key for an address. Exported so tests and docs can reference it. */
@@ -104,15 +199,38 @@ export function loadAvatar(address: string | null | undefined): string | null {
  * Persists `dataUrl` for `address`. Returns false when the value is not a safe
  * data URL or the write failed (most likely a quota error), so callers can
  * surface a message instead of silently losing the image.
+ *
+ * If the initial setItem fails due to storage quota, it performs a best-effort
+ * eviction of other stale `avatar:*` keys before retrying once.
  */
 export function saveAvatar(address: string | null | undefined, dataUrl: string): boolean {
   if (!address || !isRenderableAvatar(dataUrl)) return false;
   const store = storage();
   if (!store) return false;
+  const key = avatarStorageKey(address);
   try {
-    store.setItem(avatarStorageKey(address), dataUrl);
+    store.setItem(key, dataUrl);
     return true;
   } catch {
+    // Attempt best-effort quota eviction of other stored avatars
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < store.length; i++) {
+        const k = store.key(i);
+        if (k && k.startsWith(STORAGE_PREFIX) && k !== key) {
+          keysToRemove.push(k);
+        }
+      }
+      if (keysToRemove.length > 0) {
+        for (const k of keysToRemove) {
+          store.removeItem(k);
+        }
+        store.setItem(key, dataUrl);
+        return true;
+      }
+    } catch {
+      // Storage remains full
+    }
     return false;
   }
 }
