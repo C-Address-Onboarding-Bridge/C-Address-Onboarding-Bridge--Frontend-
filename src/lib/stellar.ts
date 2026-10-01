@@ -23,7 +23,7 @@ import {
   isSupportedNetwork,
 } from "./types";
 import { withSequenceRetry } from "./sequenceManager";
-import { getNetwork as getFreighterNetwork } from "@stellar/freighter-api";
+import { isValidContract, isValidEd25519PublicKey } from "./strkey";
 
 export type { AppNetwork, WalletNetworkState, BridgeTransactionData } from "./types";
 
@@ -1147,30 +1147,101 @@ export function getAccountMinimumBalance(): string {
   return "1.0";
 }
 
+/** Horizon /fee_stats response structure. (#758) */
+export interface HorizonFeeStats {
+  last_ledger?: string;
+  last_ledger_base_fee?: string;
+  ledger_capacity_usage?: string;
+  fee_charged?: {
+    max?: string;
+    min?: string;
+    mode?: string;
+    p10?: string;
+    p20?: string;
+    p30?: string;
+    p40?: string;
+    p50?: string;
+    p60?: string;
+    p70?: string;
+    p80?: string;
+    p90?: string;
+    p95?: string;
+    p99?: string;
+  };
+  max_fee?: {
+    max?: string;
+    min?: string;
+    mode?: string;
+    p10?: string;
+    p20?: string;
+    p30?: string;
+    p40?: string;
+    p50?: string;
+    p60?: string;
+    p70?: string;
+    p80?: string;
+    p90?: string;
+    p95?: string;
+    p99?: string;
+  };
+}
+
+export type FeePercentile = "p50" | "p60" | "p70" | "p80" | "p90" | "p95" | "p99";
+
+export interface RecommendedFeeOptions {
+  /** Maximum fee in stroops that the bid cannot exceed. Defaults to 10_000 stroops. */
+  ceilingStroops?: number;
+  /** Percentile of accepted fees from Horizon fee_stats to bid. Defaults to "p70". */
+  percentile?: FeePercentile;
+}
+
+/** Default fee ceiling to protect against runaway fees (~0.001 XLM). */
+export const DEFAULT_MAX_FEE_STROOPS = 10_000;
+
 /**
- * Fetch the current recommended fee from the Horizon fee-stats endpoint and
- * return a fee bid that is 2× the network base fee, capped at 10 000 stroops.
+ * Fetch the recommended fee bid from the Horizon /fee_stats endpoint.
  *
- * Using a dynamic fee instead of the hardcoded BASE_FEE constant avoids
- * `tx_insufficient_fee` rejections during surge-pricing windows (when the
- * network raises the minimum fee above 100 stroops). (#301)
+ * During normal network conditions, bids the market rate (or at least base fee).
+ * During surge pricing, bids from the accepted market percentile (e.g. p70 or p90)
+ * to prevent transactions from stalling or timing out in the mempool (#758).
+ *
+ * Subject to a configurable ceiling (`ceilingStroops`, defaulting to 10 000 stroops).
  *
  * @param network - "PUBLIC" or "TESTNET"
- * @returns Fee in stroops as a string (e.g. "200")
+ * @param options - Optional configurable ceiling and percentile
+ * @returns Fee in stroops as a string (e.g. "100", "500", "1500")
  */
-export async function getRecommendedFee(network: StellarNetwork): Promise<string> {
-  const MAX_FEE_STROOPS = 10_000;
+export async function getRecommendedFee(
+  network: StellarNetwork,
+  options?: RecommendedFeeOptions
+): Promise<string> {
+  const ceiling = options?.ceilingStroops ?? DEFAULT_MAX_FEE_STROOPS;
+  const percentile: FeePercentile = options?.percentile ?? "p70";
+
   try {
-    const feeStats = await fetchHorizonJson<{ last_ledger_base_fee?: string }>(
+    const feeStats = await fetchHorizonJson<HorizonFeeStats>(
       network,
       "/fee_stats"
     );
+
     const baseFee = Number.parseInt(feeStats.last_ledger_base_fee ?? "", 10) || 100;
-    const bid = Math.min(baseFee * 2, MAX_FEE_STROOPS);
+
+    // Use fee_charged percentile (what transactions actually paid) or fall back to max_fee
+    const percentileVal =
+      feeStats.fee_charged?.[percentile] ??
+      feeStats.fee_charged?.p70 ??
+      feeStats.max_fee?.[percentile] ??
+      feeStats.max_fee?.p70;
+
+    const marketFee = Number.parseInt(percentileVal ?? "", 10) || baseFee;
+
+    // Must be at least the base fee to be accepted by Stellar core
+    const targetFee = Math.max(baseFee, marketFee);
+    const bid = Math.min(targetFee, ceiling);
+
     return String(bid);
   } catch {
-    // Fall back to the hardcoded BASE_FEE constant if the fee-stats call fails
-    // so the transaction is still submitted rather than silently blocked.
+    // Fall back to 100 stroops on network/parse failure
     return "100";
   }
 }
@@ -1244,8 +1315,11 @@ export async function requestTestXLM(address: string): Promise<FaucetRequest> {
  * @param network - "PUBLIC" or "TESTNET"
  * @returns Fee string in the form "~X.XXXXXXX XLM"
  */
-export async function getEstimatedFeeXLM(network: StellarNetwork): Promise<string> {
-  const stroops = await getRecommendedFee(network);
+export async function getEstimatedFeeXLM(
+  network: StellarNetwork,
+  options?: RecommendedFeeOptions
+): Promise<string> {
+  const stroops = await getRecommendedFee(network, options);
   const xlm = Number(stroops) / STROOPS_PER_XLM;
   // Show up to 7 decimal places and strip trailing zeros so
   // "~0.00002 XLM" is shown rather than "~0.0000200 XLM".
