@@ -874,7 +874,7 @@ export default function BridgePage() {
                         <HelpCircle className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                    <span className="text-sm">{estimatedFee}</span>
+                    <span className="text-sm" data-testid="review-fee">{estimatedFee}</span>
                   </div>
                 </div>
 
