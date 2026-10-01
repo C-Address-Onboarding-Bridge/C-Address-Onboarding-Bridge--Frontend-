@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRightLeft, Wallet, Send, ArrowRight, Check, AlertCircle, Loader2, ExternalLink, HelpCircle, Lock as LockIcon } from "lucide-react";
+import { ArrowRightLeft, Wallet, Send, ArrowRight, Check, AlertCircle, AlertTriangle, Loader2, ExternalLink, HelpCircle, Lock as LockIcon } from "lucide-react";
 import { useWallet } from "@/components/wallet-provider";
-import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel, getEstimatedFeeXLM, toSafeErrorMessage, shouldWarnOnMainnetAction, assertActiveAccountMatches, signPreparedTransaction } from "@/lib/stellar";
+import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel, getEstimatedFeeXLM, toSafeErrorMessage, shouldWarnOnMainnetAction, isMainnetSessionConfirmed, setMainnetSessionConfirmed, assertActiveAccountMatches, signPreparedTransaction } from "@/lib/stellar";
 import type { AccountBalances, SimulationResult } from "@/lib/stellar";
 import { createLock, getFeeTierPreview, prepareBatchFunding, submitSignedBatchFunding } from "@/lib/api";
 import { validateUnlockTime, type Lock as LockRecord } from "@/lib/locks";
@@ -409,9 +409,9 @@ export default function BridgePage() {
       setTxStatus("error");
       return;
     }
-    // Warn before a mainnet action initiated shortly after a network change:
-    // real funds are at stake and the switch may have been a mistake. (#480)
-    if (shouldWarnOnMainnetAction(network, recentlyChangedNetwork, mainnetWarning)) {
+    // Warn before a mainnet action initiated shortly after a network change (#480)
+    // or as a one-per-session mainnet confirmation (#759): real funds are at stake.
+    if (shouldWarnOnMainnetAction(network, recentlyChangedNetwork, mainnetWarning, isMainnetSessionConfirmed())) {
       setMainnetWarning(true);
       return;
     }
@@ -424,6 +424,7 @@ export default function BridgePage() {
     setTxHash(null);
     setTxError(null);
     setLockResult(null);
+    setMainnetWarning(false);
   };
 
   // Batch funding invokes the contract's batch_fund_c_address, which moves
@@ -879,6 +880,46 @@ export default function BridgePage() {
                 </div>
 
                 <FeeTierDisplay status={feeTierStatus} amount={Number(amount)} asset={asset} />
+
+                {mainnetWarning && network === "PUBLIC" && (
+                  <div
+                    role="alert"
+                    data-testid="mainnet-warning"
+                    className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3"
+                  >
+                    <AlertTriangle className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-[var(--error)]">Mainnet warning</p>
+                      <p className="text-xs text-[var(--text-muted)] mt-1">
+                        {recentlyChangedNetwork
+                          ? "You changed networks recently. This transaction will send real funds on Mainnet and can't be undone. Make sure you intend to use real assets before continuing."
+                          : "This transaction will send real funds on Mainnet and can't be undone. Confirm you intend to execute this transaction on Mainnet before continuing."}
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        <button
+                          type="button"
+                          data-testid="confirm-mainnet-warning"
+                          onClick={() => {
+                            setMainnetWarning(false);
+                            setMainnetSessionConfirmed(true);
+                            void performConfirm();
+                          }}
+                          className="px-4 py-2 rounded-lg bg-[var(--error)] text-white text-xs font-medium hover:bg-[var(--error)]/90 transition-colors"
+                        >
+                          I understand — continue on Mainnet
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="cancel-mainnet-warning"
+                          onClick={() => setMainnetWarning(false)}
+                          className="px-4 py-2 rounded-lg border border-[var(--border)] text-xs font-medium text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {txError && (
                   <div className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3">
