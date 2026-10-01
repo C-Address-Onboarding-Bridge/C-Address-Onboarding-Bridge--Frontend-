@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   ACCEPTED_AVATAR_TYPES,
   AVATAR_ACCEPT_ATTR,
   AVATAR_MAX_BYTES,
+  MAX_AVATAR_DIMENSION,
   avatarInitials,
   avatarStorageKey,
+  downscaleAvatar,
   formatBytes,
   isRenderableAvatar,
   loadAvatar,
@@ -18,17 +20,20 @@ const PNG = "data:image/png;base64,iVBORw0KGgo=";
 const ADDRESS_A = "GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW";
 const ADDRESS_B = "CABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW";
 
-describe("validateAvatarFile (#342)", () => {
+describe("validateAvatarFile (#342, #761)", () => {
   it("accepts every advertised image type", () => {
     for (const type of ACCEPTED_AVATAR_TYPES) {
       expect(validateAvatarFile({ type, size: 1024 })).toEqual({ ok: true });
     }
   });
 
-  it("rejects non-image and non-listed types", () => {
+  it("rejects non-image and non-listed types with clear unsupported error", () => {
     for (const type of ["application/pdf", "image/svg+xml", "text/html", ""]) {
       const result = validateAvatarFile({ type, size: 1024 });
       expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toContain("Unsupported file type");
+      }
     }
   });
 
@@ -40,7 +45,10 @@ describe("validateAvatarFile (#342)", () => {
     expect(validateAvatarFile({ type: "image/png", size: AVATAR_MAX_BYTES }).ok).toBe(true);
     const tooBig = validateAvatarFile({ type: "image/png", size: AVATAR_MAX_BYTES + 1 });
     expect(tooBig.ok).toBe(false);
-    if (!tooBig.ok) expect(tooBig.error).toContain("512 KB");
+    if (!tooBig.ok) {
+      expect(tooBig.error).toContain("512 KB");
+      expect(tooBig.error).toContain("the limit is 512 KB");
+    }
   });
 
   it("exposes the accepted types as an accept attribute", () => {
@@ -108,6 +116,107 @@ describe("avatar storage", () => {
     expect(saveAvatar(null, PNG)).toBe(false);
     expect(loadAvatar(null)).toBeNull();
     expect(() => removeAvatar(undefined)).not.toThrow();
+  });
+
+  it("evicts stale avatars from other addresses when storage quota is exceeded (#761)", () => {
+    const otherAddress = "GOTHERADDRESSXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    localStorage.setItem(avatarStorageKey(otherAddress), PNG);
+
+    let firstAttempt = true;
+    const originalSetItem = localStorage.setItem.bind(localStorage);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string
+    ) {
+      if (firstAttempt && key === avatarStorageKey(ADDRESS_A)) {
+        firstAttempt = false;
+        const err = new Error("QuotaExceededError");
+        err.name = "QuotaExceededError";
+        throw err;
+      }
+      return originalSetItem(key, value);
+    });
+
+    const success = saveAvatar(ADDRESS_A, PNG);
+    expect(success).toBe(true);
+    expect(loadAvatar(ADDRESS_A)).toBe(PNG);
+    expect(loadAvatar(otherAddress)).toBeNull();
+    vi.restoreAllMocks();
+  });
+
+  it("returns false gracefully when storage is full and eviction does not free space", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      const err = new Error("QuotaExceededError");
+      err.name = "QuotaExceededError";
+      throw err;
+    });
+
+    expect(saveAvatar(ADDRESS_A, PNG)).toBe(false);
+    expect(loadAvatar(ADDRESS_A)).toBeNull();
+    vi.restoreAllMocks();
+  });
+});
+
+describe("downscaleAvatar (#761)", () => {
+  it("returns original data URL when image is already compact or in headless jsdom", async () => {
+    const result = await downscaleAvatar(PNG);
+    expect(result).toBe(PNG);
+  });
+
+  it("returns non-image or invalid URL untouched without throwing", async () => {
+    const invalid = "javascript:alert(1)";
+    const result = await downscaleAvatar(invalid);
+    expect(result).toBe(invalid);
+  });
+
+  it("scales down dimensions when canvas 2D is available", async () => {
+    const fakeDataUrl =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const scaledDataUrl = "data:image/png;base64,c2NhbGVk";
+
+    const drawImageMock = vi.fn();
+    const toDataURLMock = vi.fn().mockReturnValue(scaledDataUrl);
+
+    vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+      if (tag === "canvas") {
+        return {
+          getContext: (type: string) => {
+            if (type === "2d") {
+              return { drawImage: drawImageMock };
+            }
+            return null;
+          },
+          toDataURL: toDataURLMock,
+          width: 0,
+          height: 0,
+        } as unknown as HTMLCanvasElement;
+      }
+      return document.createElement(tag);
+    });
+
+    const originalImage = window.Image;
+    try {
+      class MockImage {
+        width = 256;
+        height = 256;
+        naturalWidth = 256;
+        naturalHeight = 256;
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        set src(_val: string) {
+          setTimeout(() => this.onload && this.onload(), 0);
+        }
+      }
+      window.Image = MockImage as unknown as typeof Image;
+
+      const result = await downscaleAvatar(fakeDataUrl, MAX_AVATAR_DIMENSION);
+      expect(result).toBe(scaledDataUrl);
+      expect(drawImageMock).toHaveBeenCalled();
+    } finally {
+      window.Image = originalImage;
+      vi.restoreAllMocks();
+    }
   });
 });
 
