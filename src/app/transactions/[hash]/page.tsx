@@ -22,7 +22,7 @@ import { useWallet } from "@/components/wallet-provider";
 import { IN_FLIGHT_TRANSACTION_KEY } from "@/components/error-boundary";
 import {
   getExplorerUrl,
-  getTransactionByHash,
+  findTransactionByHash,
   subscribeToTransactionStatus,
   type TransactionDetails,
 } from "@/lib/stellar";
@@ -65,7 +65,7 @@ export default function TransactionDetailPage({
   const hydrated = useHydrated();
   const [transportOverride, setTransportOverride] = useState<"polling" | null>(null);
   const liveTransport = transportOverride ?? (hydrated && typeof EventSource === "undefined" ? "polling" : "sse");
-  const requestKey = `${hash}:${network}:${tick}`;
+  const requestKey = `${hash}:${linkNetwork ?? walletNetwork}:${tick}`;
   const currentLoadState = loadedRequestKey === requestKey ? loadState : "loading";
 
   useEffect(() => {

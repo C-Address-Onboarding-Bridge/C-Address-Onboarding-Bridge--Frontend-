@@ -1826,3 +1826,21 @@ export async function getRebateVolume(address: string, network: StellarNetwork):
     return null;
   }
 }
+
+/**
+ * Looks a transaction up by hash. When the link names a network only that one
+ * is tried; otherwise the wallet's network is tried first, then the other. (#717, #853)
+ */
+export async function findTransactionByHash(
+  hash: string,
+  walletNetwork: StellarNetwork,
+  linkNetwork?: StellarNetwork | null
+): Promise<TransactionDetails | null> {
+  const other: StellarNetwork = walletNetwork === "PUBLIC" ? "TESTNET" : "PUBLIC";
+  const order: StellarNetwork[] = linkNetwork ? [linkNetwork] : [walletNetwork, other];
+  for (const net of order) {
+    const result = await getTransactionByHash(hash, net);
+    if (result) return result;
+  }
+  return null;
+}
