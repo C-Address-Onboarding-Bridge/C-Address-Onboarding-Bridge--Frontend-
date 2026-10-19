@@ -121,6 +121,9 @@ export function useLocale(): LocaleContextValue {
   const ctx = useContext(LocaleContext);
   if (!ctx) {
     // Graceful fallback outside the provider (e.g. isolated unit tests).
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('useLocale was called outside <LocaleProvider>; locale changes will be ignored.');
+    }
     return {
       locale: DEFAULT_LOCALE,
       t: (key: string) => rawT(DEFAULT_LOCALE, key),
