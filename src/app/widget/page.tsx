@@ -25,6 +25,7 @@ import {
   isTrustedParentOrigin,
   parseWidgetConfig,
   postWidgetMessage,
+  WIDGET_MESSAGE_SOURCE,
   type WidgetConfig,
   type WidgetOutboundMessage,
 } from "@/lib/widget";
@@ -68,11 +69,11 @@ function FundingWidget({ config }: { config: WidgetConfig }) {
   // Tell the host we're up, and let it size the iframe to fit — the host
   // has no way to know our content height otherwise.
   useEffect(() => {
-    postWidgetMessage(window.parent, { source: "aframp-widget", type: "ready" }, config.parentOrigin);
+    postWidgetMessage(window.parent, { source: WIDGET_MESSAGE_SOURCE, type: "ready" }, config.parentOrigin);
     const reportHeight = () =>
       postWidgetMessage(
         window.parent,
-        { source: "aframp-widget", type: "resize", height: document.body.scrollHeight },
+        { source: WIDGET_MESSAGE_SOURCE, type: "resize", height: document.body.scrollHeight },
         config.parentOrigin
       );
     reportHeight();
@@ -121,17 +122,17 @@ function FundingWidget({ config }: { config: WidgetConfig }) {
       );
       setTxHash(result.hash);
       setPhase("success");
-      send({ source: "aframp-widget", type: "success", txHash: result.hash, amount, asset: config.asset });
+      send({ source: WIDGET_MESSAGE_SOURCE, type: "success", txHash: result.hash, amount, asset: config.asset });
     } catch (cause) {
       const message = toSafeErrorMessage(cause, "Transaction failed. Please try again.");
       setError(message);
       setPhase("error");
-      send({ source: "aframp-widget", type: "error", message });
+      send({ source: WIDGET_MESSAGE_SOURCE, type: "error", message });
     }
   }
 
   function handleCancel() {
-    send({ source: "aframp-widget", type: "cancel" });
+    send({ source: WIDGET_MESSAGE_SOURCE, type: "cancel" });
   }
 
   return (
@@ -141,7 +142,7 @@ function FundingWidget({ config }: { config: WidgetConfig }) {
       className={`flex min-h-dvh flex-col gap-4 p-5 ${isDark ? "bg-neutral-900 text-neutral-50" : "bg-white text-neutral-900"}`}
     >
       <header className="flex items-center justify-between">
-        <p className="text-sm font-semibold">Fund with Aframp</p>
+        <p className="text-sm font-semibold">Fund with C-Address Bridge</p>
         <button
           type="button"
           onClick={handleCancel}
