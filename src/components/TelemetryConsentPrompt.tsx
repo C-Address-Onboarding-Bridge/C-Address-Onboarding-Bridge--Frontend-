@@ -32,7 +32,9 @@ export function TelemetryConsentPrompt() {
             </p>
           </div>
           <button
-            onClick={() => handleDecline()}
+            // Closing the prompt is a decline (#756: this called an undefined
+            // handleDecline and threw).
+            onClick={() => setConsent("denied")}
             aria-label="Decline telemetry"
             className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
           >

@@ -10,6 +10,7 @@ import {
   captureEvent,
 } from "@/lib/telemetry";
 import { TelemetryConsentPrompt } from "@/components/TelemetryConsentPrompt";
+import { useHydrated } from "@/hooks/useHydrated";
 
 interface TelemetryContextType {
   consent: TelemetryConsent;
@@ -54,15 +55,17 @@ export function TelemetryProvider({ children }: TelemetryProviderProps) {
     captureEvent,
   };
 
-  // Don't render children until hydrated to avoid hydration mismatch
-  if (!isHydrated) {
-    return <>{children}</>;
-  }
-
+  // Always provide the context: children that call useTelemetry() on the
+  // first (server/hydration) render must not throw. Before hydration the
+  // values are the deterministic defaults above (pending, first visit,
+  // disabled), so server and client markup match. Only the consent prompt
+  // waits for hydration, since whether to show it depends on localStorage.
+  // (Previously this referenced an undefined `isHydrated` and returned the
+  // children without a provider, so the provider threw on every render.)
   return (
     <TelemetryContext.Provider value={value}>
       {children}
-      {consent === "pending" && <TelemetryConsentPrompt />}
+      {hydrated && consent === "pending" && <TelemetryConsentPrompt />}
     </TelemetryContext.Provider>
   );
 }
