@@ -16,6 +16,7 @@ import { useFeatureFlag } from "@/contexts/FeatureFlagContext";
 import type { FeeTierStatus } from "@/lib/feeTiers";
 import FeeTierDisplay from "@/components/fee-tier-display";
 import { addNotification } from "@/lib/notifications";
+import { setInFlightTransaction, clearInFlightTransaction } from "@/components/error-boundary";
 
 type FlowMode = "single" | "batch";
 type Step = "form" | "review" | "confirm";
@@ -374,6 +375,16 @@ export default function BridgePage() {
         (phase) => setTxStatus(phase)
       );
       setTxHash(result.hash);
+      // Record the submitted hash so the error boundary can link back to it
+      // if the page crashes before the user leaves the confirm screen. (#868)
+      setInFlightTransaction({
+        hash: result.hash,
+        network,
+        from: fromAddress,
+        to: toAddress,
+        amount,
+        asset,
+      });
       setTxStatus("success");
       setStep("confirm");
       // Record the outcome in the notification centre so the result survives
@@ -424,6 +435,7 @@ export default function BridgePage() {
     setTxHash(null);
     setTxError(null);
     setLockResult(null);
+    clearInFlightTransaction();
   };
 
   // Batch funding invokes the contract's batch_fund_c_address, which moves

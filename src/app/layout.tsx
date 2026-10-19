@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { Geist, JetBrains_Mono } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
-import { ErrorBoundary, WalletErrorBoundary } from "@/components/error-boundary";
+import { AppProviders } from "@/components/AppProviders";
 import { AppChrome } from "@/components/app-chrome";
 
 const geist = Geist({
@@ -107,7 +107,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </script>
       </head>
       <body className="antialiased">
-        <AppChrome>{children}</AppChrome>
+        <AppProviders>
+          <AppChrome>{children}</AppChrome>
+        </AppProviders>
       </body>
     </html>
   );
