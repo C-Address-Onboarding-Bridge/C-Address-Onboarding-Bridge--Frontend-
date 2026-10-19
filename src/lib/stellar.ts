@@ -9,6 +9,9 @@ import {
   Account,
   StrKey,
   Keypair,
+  Contract,
+  Address,
+  scValToNative,
 } from "@stellar/stellar-sdk";
 import { getNetwork as getFreighterNetwork } from "@stellar/freighter-api";
 import {
@@ -1765,6 +1768,9 @@ export async function getTransactionByHash(
 /* #673 — Fee-tier rebate lookup (Soroban RPC)                                 */
 /* -------------------------------------------------------------------------- */
 
+/** Well-known valid G-address used only as the simulation source account. */
+const REBATE_SIMULATION_SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
 /**
  * Reads an account's cumulative tier-qualifying volume from the bridge
  * contract's `rebate_for(user)` view function via a Soroban RPC simulation
@@ -1797,10 +1803,10 @@ export async function getRebateVolume(address: string, network: StellarNetwork):
     const server = await getSorobanRpcServer(network);
     const passphrase = await getNetworkPassphrase(network);
     const contract = new Contract(BRIDGE_CONTRACT_ID);
-    // The source account only needs to be a syntactically valid keypair for
-    // the envelope — this transaction is simulated, never submitted, so its
-    // sequence number is never checked against a real account.
-    const account = new Account(address, "0");
+    // The source account only needs to be a syntactically valid G-address for
+    // the envelope — this transaction is simulated, never submitted. The queried
+    // address may be a C-address, which Account cannot wrap, so use a fixed placeholder.
+    const account = new Account(REBATE_SIMULATION_SOURCE, "0");
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
       networkPassphrase: passphrase,
@@ -1815,7 +1821,8 @@ export async function getRebateVolume(address: string, network: StellarNetwork):
     const native = scValToNative(simulation.result.retval);
     const volume = Number(native);
     return Number.isFinite(volume) ? volume : null;
-  } catch {
+  } catch (error) {
+    console.debug("getRebateVolume failed", error);
     return null;
   }
 }
