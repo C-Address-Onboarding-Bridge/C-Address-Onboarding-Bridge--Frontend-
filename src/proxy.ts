@@ -26,23 +26,31 @@ function toOrigin(url: string | undefined): string | null {
   }
 }
 
-const connectSrcOrigins = Array.from(
+export function buildConnectSrcOrigins(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  return Array.from(
   new Set(
     [
       "'self'",
-      toOrigin(process.env.NEXT_PUBLIC_API_URL),
+      toOrigin(env.NEXT_PUBLIC_API_URL),
       "https://friendbot.stellar.org",
       "https://horizon.stellar.org",
       "https://horizon-testnet.stellar.org",
-      toOrigin(process.env.NEXT_PUBLIC_SOROBAN_RPC_URL),
-      toOrigin(process.env.NEXT_PUBLIC_SOROBAN_RPC_TESTNET_URL),
-      toOrigin(process.env.NEXT_PUBLIC_SOROBAN_RPC_MAINNET_URL),
+      toOrigin(env.NEXT_PUBLIC_SOROBAN_RPC_URL),
+      toOrigin(env.NEXT_PUBLIC_SOROBAN_RPC_TESTNET_URL),
+      toOrigin(env.NEXT_PUBLIC_SOROBAN_RPC_MAINNET_URL),
       "https://soroban-testnet.stellar.org",
     ].filter((origin): origin is string => Boolean(origin)),
   ),
-);
+  );
+}
 
-const cspHeader = [
+export function buildCsp(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const connectSrcOrigins = buildConnectSrcOrigins(env);
+  return [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
@@ -55,6 +63,15 @@ const cspHeader = [
   "object-src 'none'",
   "upgrade-insecure-requests",
 ].join("; ");
+}
+
+export function buildWidgetCsp(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  return buildCsp(env).replace("frame-ancestors 'none'", "frame-ancestors *");
+}
+
+const cspHeader = buildCsp();
 
 /**
  * The widget is meant to be framed by arbitrary host pages, so it can't ship
@@ -63,12 +80,9 @@ const cspHeader = [
  * security boundary for the widget is the postMessage origin check in
  * src/lib/widget.ts, not who is allowed to frame it.
  */
-const widgetCspHeader = cspHeader.replace(
-  "frame-ancestors 'none'",
-  "frame-ancestors *",
-);
+const widgetCspHeader = buildWidgetCsp();
 
-function isWidgetPath(pathname: string): boolean {
+export function isWidgetPath(pathname: string): boolean {
   return pathname === "/widget" || pathname.startsWith("/widget/");
 }
 
