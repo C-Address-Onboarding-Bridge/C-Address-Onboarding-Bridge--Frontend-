@@ -72,7 +72,7 @@ function isWidgetPath(pathname: string): boolean {
   return pathname === "/widget" || pathname.startsWith("/widget/");
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const response = NextResponse.next();
 
   response.headers.set(
