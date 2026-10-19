@@ -27,10 +27,19 @@ jobs:
 
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm run test
+      # The coverage provider is installed ad hoc (not saved to package.json) at
+      # the installed vitest version, then the suite is run once with coverage.
       - name: Coverage report
-        run: npm run test -- --coverage
-        continue-on-error: true
+        run: |
+          VITEST_VERSION="$(node -p "require('vitest/package.json').version")"
+          npm install --no-save --no-audit --no-fund "@vitest/coverage-v8@${VITEST_VERSION}"
+          npx vitest run --coverage --coverage.provider=v8 --coverage.reporter=text --coverage.reporter=lcov --coverage.include='src/**'
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
+          if-no-files-found: warn
       - run: npm run build
         env:
           ENFORCE_BUDGET: "true"
