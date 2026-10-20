@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { SOROBAN_RPC_URL, HORIZON_URL } from "./lib/types";
 
 /**
  * Enforcing CSP applied to every route except the embeddable widget.
@@ -17,9 +18,13 @@ const CSP_HEADER_NAME = "Content-Security-Policy";
 
 /**
  * Origins the app is allowed to talk to. Built from the configured URLs so the
- * policy can't drift from what the app actually calls (#700): the API
+ * policy can't drift from what the app actually calls (#700, #882): the API
  * (health/batch/locks), friendbot (faucet), the Horizon hosts and the
  * configured Soroban RPC endpoints (testnet and mainnet).
+ *
+ * The Soroban RPC and Horizon origins come from the same constants the app
+ * uses to build its clients (src/lib/types.ts), so a custom mainnet RPC or
+ * Horizon host is never blocked by the enforcing CSP.
  */
 function toOrigin(url: string | undefined): string | null {
   if (!url) return null;
@@ -36,11 +41,11 @@ const connectSrcOrigins = Array.from(
       "'self'",
       toOrigin(process.env.NEXT_PUBLIC_API_URL),
       "https://friendbot.stellar.org",
-      "https://horizon.stellar.org",
-      "https://horizon-testnet.stellar.org",
-      toOrigin(process.env.NEXT_PUBLIC_SOROBAN_RPC_URL),
-      toOrigin(process.env.NEXT_PUBLIC_SOROBAN_RPC_TESTNET_URL),
-      toOrigin(process.env.NEXT_PUBLIC_SOROBAN_RPC_MAINNET_URL),
+      toOrigin(HORIZON_URL.PUBLIC),
+      toOrigin(HORIZON_URL.TESTNET),
+      toOrigin(SOROBAN_RPC_URL.PUBLIC),
+      toOrigin(SOROBAN_RPC_URL.TESTNET),
+      toOrigin(process.env.NEXT_PUBLIC_TRANSACTION_STATUS_URL),
       "https://soroban-testnet.stellar.org",
     ].filter((origin): origin is string => Boolean(origin)),
   ),
