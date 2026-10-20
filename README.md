@@ -154,3 +154,6 @@ MIT
 
 <!-- handsoff-issue-735 -->
 - #735: i18n: translate the onramp page
+
+<!-- handsoff-issue-880 -->
+- #880: bug: bridge form persistence for mobile wallet hand-offs (#487) is never used
