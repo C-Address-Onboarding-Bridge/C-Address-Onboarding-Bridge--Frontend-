@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 /**
- * Tests for the CSP nonce middleware behaviour (issue #457).
+ * Tests for the CSP nonce middleware behaviour (issue #457, #876).
  *
  * We test the CSP string-building logic directly without running a full
  * Next.js middleware stack, since that would require a live Edge runtime.
@@ -47,7 +47,7 @@ function buildConnectSrc(env: Record<string, string | undefined>): string {
 function buildCsp(nonce: string, isDev: boolean): string {
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}'${isDev ? " 'unsafe-eval'" : ""}`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self'",
@@ -70,7 +70,7 @@ function buildCsp(nonce: string, isDev: boolean): string {
 function buildWidgetCsp(nonce: string, isDev: boolean): string {
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}'${isDev ? " 'unsafe-eval'" : ""}`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self'",
@@ -117,6 +117,12 @@ describe("CSP nonce middleware", () => {
     const nonce = "testNonce1234==";
     const csp = buildCsp(nonce, false);
     expect(csp).toContain(`'nonce-${nonce}'`);
+  });
+
+  it("script-src includes 'strict-dynamic' so nonce-trusted scripts can load children", () => {
+    const csp = buildCsp("abc123", false);
+    const scriptSrc = csp.split(";").find((d) => d.trim().startsWith("script-src"));
+    expect(scriptSrc).toContain("'strict-dynamic'");
   });
 
   it("different calls produce CSP strings referencing their respective nonces", () => {
