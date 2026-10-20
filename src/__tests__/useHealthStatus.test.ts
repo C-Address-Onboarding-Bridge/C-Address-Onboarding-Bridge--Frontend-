@@ -76,4 +76,29 @@ describe('useHealthStatus', () => {
 
     await waitFor(() => expect(mockedFetchHealth).toHaveBeenCalledTimes(2));
   });
+
+  it('makes exactly one request per poll interval across degraded/healthy transitions', async () => {
+    mockedFetchHealth.mockResolvedValueOnce({ status: 'unhealthy' });
+
+    renderHook(() => useHealthStatus());
+
+    await waitFor(() => expect(mockedFetchHealth).toHaveBeenCalledTimes(1));
+
+    mockedFetchHealth.mockResolvedValueOnce({ status: 'ok' });
+    act(() => {
+      jest.advanceTimersByTime(30_000);
+    });
+    await waitFor(() => expect(mockedFetchHealth).toHaveBeenCalledTimes(2));
+
+    mockedFetchHealth.mockResolvedValueOnce({ status: 'unhealthy' });
+    act(() => {
+      jest.advanceTimersByTime(30_000);
+    });
+    await waitFor(() => expect(mockedFetchHealth).toHaveBeenCalledTimes(3));
+
+    act(() => {
+      jest.advanceTimersByTime(30_000);
+    });
+    await waitFor(() => expect(mockedFetchHealth).toHaveBeenCalledTimes(4));
+  });
 });

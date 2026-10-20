@@ -1,136 +1,107 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { getHealthStatus, type HealthStatus } from '@/lib/api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { getHealthStatus, HealthStatus } from '../lib/api';
 
-/**
- * Hook to poll the API health status (#498).
- *
- * Returns the latest health status and polling state.
- * Automatically stops polling when the component unmounts.
- * Polling is paused while the tab is hidden and refreshed on visibility (#712).
- */
+const POLL_INTERVAL = 30_000;
+const INITIAL_DELAY = 2_000;
+const RETAIN_TIME = 5_000;
 
-interface UseHealthStatusOptions {
-  pollInterval?: number;
-  initialDelay?: number;
-  retainTime?: number;
-}
-
-const DEFAULT_POLL_INTERVAL = 30000; // 30 seconds
-const DEFAULT_INITIAL_DELAY = 2000; // Start polling after 2 seconds
-const DEFAULT_RETAIN_TIME = 5000; // Keep degraded status for 5 seconds after recovery
-
-/**
- * Sentinel status used when the health endpoint is completely unreachable.
- * A total outage must surface the banner just like a partial one (#710).
- */
 const UNREACHABLE_STATUS: HealthStatus = {
   status: 'unhealthy',
+  timestamp: new Date().toISOString(),
+  services: {},
+  circuitBreakers: {},
   message: 'Service unreachable',
 };
 
-export function useHealthStatus(options: UseHealthStatusOptions = {}) {
-  const {
-    pollInterval = DEFAULT_POLL_INTERVAL,
-    initialDelay = DEFAULT_INITIAL_DELAY,
-    retainTime = DEFAULT_RETAIN_TIME,
-  } = options;
+export interface UseHealthStatusResult {
+  status: HealthStatus | null;
+  isDegraded: boolean;
+  isLoading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+}
 
-  const [health, setHealth] = useState<HealthStatus | null>(null);
+export function useHealthStatus(
+  pollInterval: number = POLL_INTERVAL,
+  initialDelay: number = INITIAL_DELAY,
+  retainTime: number = RETAIN_TIME,
+): UseHealthStatusResult {
+  const [status, setStatus] = useState<HealthStatus | null>(null);
   const [isDegraded, setIsDegraded] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const retainTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const initialDelayRef = useRef<NodeJS.Timeout | null>(null);
+  const isDegradedRef = useRef(false);
+  const retainTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const checkHealth = useCallback(async () => {
-    setIsLoading(true);
     try {
-      const status = await getHealthStatus();
-      setHealth(status);
+      const result = await getHealthStatus();
+      setStatus(result);
       setError(null);
 
-      // Only show degraded banner if service is actually degraded
-      if (status && (status.status === 'degraded' || status.status === 'unhealthy')) {
+      if (result.status === 'unhealthy') {
+        if (retainTimeoutRef.current) {
+          clearTimeout(retainTimeoutRef.current);
+          retainTimeoutRef.current = null;
+        }
+        isDegradedRef.current = true;
         setIsDegraded(true);
-
-        // Clear any existing timeout
+      } else if (isDegradedRef.current) {
         if (retainTimeoutRef.current) {
           clearTimeout(retainTimeoutRef.current);
         }
-      } else if (isDegraded) {
-        // Keep the degraded banner visible for retainTime to avoid flashing
         retainTimeoutRef.current = setTimeout(() => {
+          retainTimeoutRef.current = null;
+          isDegradedRef.current = false;
           setIsDegraded(false);
         }, retainTime);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-
-      // A null result means the health endpoint was unreachable. Retry once
-      // before declaring a total outage so a transient blip doesn't flash
-      // the banner (#710).
-      let status: HealthStatus | null = null;
-      try {
-        status = await getHealthStatus();
-      } catch {
-        status = null;
+      setStatus(UNREACHABLE_STATUS);
+      setError(err instanceof Error ? err.message : 'Service unreachable');
+      if (retainTimeoutRef.current) {
+        clearTimeout(retainTimeoutRef.current);
+        retainTimeoutRef.current = null;
       }
-
-      if (status) {
-        setHealth(status);
-        if (status.status === 'degraded' || status.status === 'unhealthy') {
-          setIsDegraded(true);
-          if (retainTimeoutRef.current) {
-            clearTimeout(retainTimeoutRef.current);
-          }
-        }
-      } else {
-        // Still unreachable after the retry: treat as a total outage.
-        setHealth(UNREACHABLE_STATUS);
-        setIsDegraded(true);
-        if (retainTimeoutRef.current) {
-          clearTimeout(retainTimeoutRef.current);
-        }
-      }
+      isDegradedRef.current = true;
+      setIsDegraded(true);
     } finally {
       setIsLoading(false);
     }
-  }, [isDegraded, retainTime]);
+  }, [retainTime]);
 
   useEffect(() => {
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
     const startPolling = () => {
-      if (pollIntervalRef.current) {
-        return;
-      }
-      pollIntervalRef.current = setInterval(checkHealth, pollInterval);
+      if (intervalId) return;
+      intervalId = setInterval(() => {
+        void checkHealth();
+      }, pollInterval);
     };
 
     const stopPolling = () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
       }
     };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        // Pause polling while the tab is hidden (#712).
-        stopPolling();
-      } else {
-        // Refresh immediately when the tab becomes visible again (#712).
-        checkHealth();
+      if (document.visibilityState === 'visible') {
+        void checkHealth();
         startPolling();
+      } else {
+        stopPolling();
       }
     };
 
-    // Start polling after initial delay
     initialDelayRef.current = setTimeout(() => {
-      checkHealth();
-
-      // Then poll at regular intervals, unless the tab is already hidden
-      if (document.visibilityState !== 'hidden') {
+      initialDelayRef.current = null;
+      void checkHealth();
+      if (document.visibilityState === 'visible') {
         startPolling();
       }
     }, initialDelay);
@@ -139,21 +110,17 @@ export function useHealthStatus(options: UseHealthStatusOptions = {}) {
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      stopPolling();
       if (initialDelayRef.current) {
         clearTimeout(initialDelayRef.current);
+        initialDelayRef.current = null;
       }
-      stopPolling();
       if (retainTimeoutRef.current) {
         clearTimeout(retainTimeoutRef.current);
+        retainTimeoutRef.current = null;
       }
     };
   }, [checkHealth, pollInterval, initialDelay]);
 
-  return {
-    health,
-    isDegraded,
-    isLoading,
-    error,
-    refetch: checkHealth,
-  };
+  return { status, isDegraded, isLoading, error, refresh: checkHealth };
 }
