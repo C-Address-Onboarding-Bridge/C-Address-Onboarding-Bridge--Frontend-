@@ -17,6 +17,11 @@ import bundleAnalyzer from "@next/bundle-analyzer";
  *      allows img-src 'self' data:", and `src/__tests__/security-audit.ts`
  *      asserts the whole header set. Both were describing headers this config
  *      no longer sent.
+ *
+ * NOTE (#879): the Content-Security-Policy itself is emitted by
+ * `src/middleware.ts`, which needs a per-request nonce and env-driven
+ * connect-src. This file only carries the static headers, so there is exactly
+ * one CSP on every response.
  */
 
 const withBundleAnalyzer = bundleAnalyzer({
@@ -42,46 +47,7 @@ const maxJsAssetBytes = 1024 * 1024;
 // bundle-size budget violations fail the build instead of scrolling past.
 const enforceBudget = process.env.ENFORCE_BUDGET === "true";
 
-const isDev = process.env.NODE_ENV === "development";
-
-// Report-Only for the initial rollout (#239); flip to "Content-Security-Policy"
-// once real traffic is confirmed not to trigger violations.
-const CSP_HEADER_NAME = "Content-Security-Policy-Report-Only";
-
-// NOTE on 'unsafe-inline' in script-src / style-src: this weakens XSS protection
-// and is a deliberate tradeoff. The App Router injects inline bootstrap scripts
-// for hydration and Tailwind 4 injects inline styles; removing 'unsafe-inline'
-// would need a nonce-based CSP with per-request nonce generation and forced
-// dynamic rendering on every page — tracked as a follow-up.
-//
-// `img-src ... data:` is what lets locally stored avatars render; see
-// `src/lib/avatar.ts` for why they are data URLs.
-//
-// IMPORTANT: if NEXT_PUBLIC_SOROBAN_RPC_URL_PUBLIC points at a custom mainnet
-// Soroban RPC endpoint, that exact origin must be added to connect-src or its
-// calls will be blocked once this header is enforcing.
-const cspHeader = `
-  default-src 'self';
-  script-src 'self'${isDev ? " 'unsafe-eval'" : ""};
-  style-src 'self' 'unsafe-inline';
-  img-src 'self' data:;
-  font-src 'self';
-  connect-src 'self'
-    https://horizon.stellar.org
-    https://horizon-testnet.stellar.org
-    https://soroban-testnet.stellar.org;
-  base-uri 'self';
-  form-action 'self';
-  frame-ancestors 'none';
-  object-src 'none';
-  upgrade-insecure-requests;
-`;
-
 const securityHeaders = [
-  {
-    key: CSP_HEADER_NAME,
-    value: cspHeader.replace(/\s{2,}/g, " ").trim(),
-  },
   {
     key: "X-Frame-Options",
     value: "DENY",
@@ -98,24 +64,17 @@ const securityHeaders = [
 
 /**
  * The embeddable widget (#558) exists specifically to be framed by
- * third-party host pages, so it can't ship the blanket `frame-ancestors
- * 'none'` / `X-Frame-Options: DENY` above — that would break every embed.
- * There's no "any origin may frame me" value for X-Frame-Options (ALLOW-FROM
- * is deprecated and ignored by current browsers), so it's omitted here
- * rather than set to something misleading; `frame-ancestors *` is the actual,
- * modern equivalent. The real security boundary for the widget isn't "who
- * can put us in an iframe" — it's the postMessage origin check in
- * src/lib/widget.ts, since the widget never trusts a message (or reveals a
- * result) without validating the declared parent origin.
+ * third-party host pages, so it can't ship the blanket `X-Frame-Options: DENY`
+ * above — that would break every embed. There's no "any origin may frame me"
+ * value for X-Frame-Options (ALLOW-FROM is deprecated and ignored by current
+ * browsers), so it's omitted here rather than set to something misleading; the
+ * middleware's `frame-ancestors *` is the actual, modern equivalent. The real
+ * security boundary for the widget isn't "who can put us in an iframe" — it's
+ * the postMessage origin check in src/lib/widget.ts, since the widget never
+ * trusts a message (or reveals a result) without validating the declared
+ * parent origin.
  */
 const widgetSecurityHeaders = [
-  {
-    key: CSP_HEADER_NAME,
-    value: cspHeader
-      .replace(/frame-ancestors 'none';/, "frame-ancestors *;")
-      .replace(/\s{2,}/g, " ")
-      .trim(),
-  },
   {
     key: "Referrer-Policy",
     value: "strict-origin-when-cross-origin",
@@ -152,11 +111,17 @@ const nextConfig: NextConfig = {
 
   async headers() {
     return [
-      // Excludes /widget so its relaxed frame-ancestors below is the only
-      // one ever applied there — no two entries ever match the same path.
+      // Excludes /widget and /widget/* so its relaxed headers below are the
+      // only ones ever applied there — no two entries ever match the same
+      // path. Scoped exactly (not a "starts with widget" prefix) so routes
+      // like /widgets or /widget-preview keep X-Frame-Options: DENY.
       {
-        source: "/((?!widget).*)",
+        source: "/((?!widget(?:/|$)).*)",
         headers: securityHeaders,
+      },
+      {
+        source: "/widget",
+        headers: widgetSecurityHeaders,
       },
       {
         source: "/widget/:path*",

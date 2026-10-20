@@ -4,6 +4,10 @@ import type { NextRequest } from "next/server";
 /**
  * Enforcing CSP applied to every route except the embeddable widget.
  *
+ * This middleware is the single source of truth for the CSP (#879). The
+ * previous Report-Only copy in next.config.ts has been removed so pages no
+ * longer receive two conflicting policies.
+ *
  * `frame-ancestors 'none'` is the important part here: it stops any page from
  * framing the app. The widget (#558) is the one deliberate exception — it
  * exists to be embedded by third-party hosts — so it gets its own policy below
@@ -42,9 +46,13 @@ const connectSrcOrigins = Array.from(
   ),
 );
 
+const isDev = process.env.NODE_ENV !== "production";
+
 const cspHeader = [
   "default-src 'self'",
-  "script-src 'self'",
+  // `next dev` compiles with eval; without 'unsafe-eval' the enforcing policy
+  // breaks local development (#879). Production never gets it.
+  `script-src 'self'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "font-src 'self'",

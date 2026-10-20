@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 /**
  * Tests for the CSP nonce middleware behaviour (issue #457).
@@ -214,5 +216,27 @@ describe("CSP framing for /widget (issue #699)", () => {
     expect(csp).toContain("base-uri 'self'");
     expect(csp).toContain("form-action 'self'");
     expect(csp).toContain("upgrade-insecure-requests");
+  });
+});
+
+describe("single CSP source of truth (issue #879)", () => {
+  const nextConfigSource = readFileSync(
+    resolve(__dirname, "../../next.config.ts"),
+    "utf8",
+  );
+
+  it("next.config.ts does not emit its own CSP header", () => {
+    expect(nextConfigSource).not.toContain("Content-Security-Policy");
+    expect(nextConfigSource).not.toContain("cspHeader");
+  });
+
+  it("next.config.ts keeps X-Frame-Options for non-widget routes", () => {
+    expect(nextConfigSource).toContain("X-Frame-Options");
+  });
+
+  it("next.config.ts scopes the widget exclusion to /widget and /widget/:path*", () => {
+    expect(nextConfigSource).toContain('source: "/widget"');
+    expect(nextConfigSource).toContain('source: "/widget/:path*"');
+    expect(nextConfigSource).not.toContain("/((?!widget).*)");
   });
 });
