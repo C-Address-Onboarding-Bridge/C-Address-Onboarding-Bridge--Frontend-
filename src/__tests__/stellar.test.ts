@@ -8,7 +8,9 @@ import {
   getAccountBalances,
   clearAccountBalancesCache,
   getHorizonServer,
-  simulatePayment,
+  getSpendableBalance,
+  fetchRecentTransactions,
+  findTransactionByHash,
 } from "@/lib/stellar";
 import { HORIZON_URL } from "@/lib/types";
 
@@ -204,33 +206,6 @@ describe("isGAddress", () => {
 // fetchRecentTransactions tests. We mock Horizon.Server so the real SDK
 // network is never contacted; each describe block resets the relevant mock fn.
 // ---------------------------------------------------------------------------
-const loadAccount = vi.fn();
-const paymentsCall = vi.fn();
-
-vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@stellar/stellar-sdk")>();
-  return {
-    ...actual,
-    Horizon: {
-      ...actual.Horizon,
-      Server: vi.fn().mockImplementation(function MockHorizonServer(this: {
-        loadAccount: typeof loadAccount;
-        payments: () => unknown;
-      }) {
-        this.loadAccount = loadAccount;
-        this.payments = () => ({
-          forAccount: () => ({
-            limit: () => ({
-              order: () => ({
-                call: paymentsCall,
-              }),
-            }),
-          }),
-        });
-      }),
-    },
-  };
-});
 
 describe("getAccountBalances cache", () => {
   const account = (xlm: string) => ({
@@ -314,7 +289,7 @@ describe("getAccountBalances cache", () => {
   });
 });
 
-describe("simulatePayment spendable balance", () => {
+describe("getSpendableBalance spendable balance", () => {
   const account = (overrides: Record<string, unknown> = {}) => ({
     balances: [{ asset_type: "native", balance: "100" }],
     subentry_count: 0,
@@ -331,7 +306,7 @@ describe("simulatePayment spendable balance", () => {
   it("subtracts the base reserve and fee from spendable XLM", async () => {
     loadAccount.mockResolvedValue(account());
 
-    const result = await simulatePayment(G_ADDRESS, "10", "TESTNET");
+    const result = await getSpendableBalance(G_ADDRESS, "10", "TESTNET");
 
     // 100 total - 1.0 base reserve - 0.00001 fee = 98.99999
     expect(result.spendable).toBe("98.99999");
@@ -341,7 +316,7 @@ describe("simulatePayment spendable balance", () => {
   it("accounts for subentry reserves from trustlines and offers", async () => {
     loadAccount.mockResolvedValue(account({ subentry_count: 4 }));
 
-    const result = await simulatePayment(G_ADDRESS, "10", "TESTNET");
+    const result = await getSpendableBalance(G_ADDRESS, "10", "TESTNET");
 
     // (2 + 4) * 0.5 = 3.0 reserve; 100 - 3.0 - 0.00001 = 96.99999
     expect(result.spendable).toBe("96.99999");
@@ -353,7 +328,7 @@ describe("simulatePayment spendable balance", () => {
       account({ subentry_count: 2, num_sponsored: 2 })
     );
 
-    const result = await simulatePayment(G_ADDRESS, "10", "TESTNET");
+    const result = await getSpendableBalance(G_ADDRESS, "10", "TESTNET");
 
     // (2 + 2 - 2) * 0.5 = 1.0 reserve; 100 - 1.0 - 0.00001 = 98.99999
     expect(result.spendable).toBe("98.99999");
@@ -369,7 +344,7 @@ describe("simulatePayment spendable balance", () => {
       })
     );
 
-    const result = await simulatePayment(G_ADDRESS, "10", "TESTNET");
+    const result = await getSpendableBalance(G_ADDRESS, "10", "TESTNET");
 
     // 100 - 1.0 reserve - 50 liabilities - 0.00001 fee = 48.99999
     expect(result.spendable).toBe("48.99999");
@@ -386,7 +361,7 @@ describe("simulatePayment spendable balance", () => {
     );
 
     // 1.00001 - 1.0 reserve - 0.00001 fee = 0.0 spendable
-    const result = await simulatePayment(G_ADDRESS, "0.0000001", "TESTNET");
+    const result = await getSpendableBalance(G_ADDRESS, "0.0000001", "TESTNET");
 
     expect(result.spendable).toBe("0");
     expect(result.sufficient).toBe(false);

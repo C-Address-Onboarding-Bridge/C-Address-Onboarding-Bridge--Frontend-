@@ -23,7 +23,6 @@ import {
   isSupportedNetwork,
 } from "./types";
 import { withSequenceRetry } from "./sequenceManager";
-import { getNetwork as getFreighterNetwork } from "@stellar/freighter-api";
 
 export type { AppNetwork, WalletNetworkState, BridgeTransactionData } from "./types";
 
@@ -412,24 +411,44 @@ export function formatNetworkLabel(
 // hand-rolled regex cannot verify the checksum and, as [G|C] showed, is easy
 // to get subtly wrong (that character class also accepted a leading '|').
 export function isValidStellarAddress(address: string): boolean {
-  return isValidEd25519PublicKey(address) || isValidContract(address);
+  return StrKey.isValidEd25519PublicKey(address) || StrKey.isValidContract(address);
 }
+
+// The int64 stroop maximum is 922337203685.4775807 XLM (2^63-1 stroops).
+// Amounts above this overflow the int64 representation inside the Stellar SDK
+// and are silently accepted by the format/positivity check but rejected by the
+// SDK at transaction-build time with an opaque error. Enforcing it here gives
+// callers a clear message before any signing attempt.
+// JavaScript cannot represent these values as floats (they round to the same
+// IEEE-754 number), so we compare integer and fractional parts separately.
+const MAX_STELLAR_AMOUNT_INT = 922337203685n;
+const MAX_STELLAR_AMOUNT_FRAC = 4775807n; // 7 decimal places
 
 export function isValidStellarAmount(amount: string): boolean {
   if (!amount || typeof amount !== "string") return false;
   if (!/^\d+(\.\d{1,7})?$/.test(amount)) return false;
   const num = Number(amount);
-  return !isNaN(num) && num > 0;
+  if (isNaN(num) || num <= 0) return false;
+
+  // BigInt comparison for the int64 stroop ceiling.
+  const [intPart, fracPart = ""] = amount.split(".");
+  const intVal = BigInt(intPart);
+  if (intVal > MAX_STELLAR_AMOUNT_INT) return false;
+  if (intVal === MAX_STELLAR_AMOUNT_INT) {
+    const fracPadded = fracPart.padEnd(7, "0");
+    if (BigInt(fracPadded) > MAX_STELLAR_AMOUNT_FRAC) return false;
+  }
+  return true;
 }
 
 /** Whether `address` is a valid Soroban contract address (a `C...` StrKey). */
 export function isCAddress(address: string): boolean {
-  return isValidContract(address);
+  return StrKey.isValidContract(address);
 }
 
 /** Whether `address` is a valid Stellar account address (a `G...` ed25519 StrKey). */
 export function isGAddress(address: string): boolean {
-  return isValidEd25519PublicKey(address);
+  return StrKey.isValidEd25519PublicKey(address);
 }
 
 export interface PaymentResult {
@@ -439,7 +458,7 @@ export interface PaymentResult {
 
 export interface AccountBalances {
   total: string;
-  balances: { asset: string; amount: string }[];
+  balances: { asset: string; amount: string; asset_issuer?: string }[];
   /** True when the account does not exist on-chain (unfunded). (#293) */
   unfunded?: boolean;
 }
@@ -450,6 +469,22 @@ interface HorizonBalance {
   asset_issuer?: string;
   balance: string;
 }
+
+/**
+ * Canonical issuers for supported non-native assets, keyed by network.
+ * Used by `resolveAsset` to reject a trustline that shares an asset code with
+ * a canonical asset but belongs to a different (potentially fake) issuer.
+ *
+ * Circle USDC:
+ *   PUBLIC  — GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+ *   TESTNET — GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
+ */
+export const CANONICAL_ISSUERS: Readonly<Record<string, Partial<Record<StellarNetwork, string>>>> = {
+  USDC: {
+    PUBLIC: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+    TESTNET: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+  },
+};
 
 interface HorizonCollection<T> {
   _embedded?: { records?: T[] };
@@ -608,6 +643,7 @@ async function loadAccountBalances(
   const balances = (account.balances ?? []).map((b) => ({
     asset: b.asset_type === "native" ? "XLM" : (b.asset_code || "unknown"),
     amount: b.balance,
+    ...(b.asset_issuer ? { asset_issuer: b.asset_issuer } : {}),
   }));
   const total = balances.find((b) => b.asset === "XLM")?.amount || "0";
   return { total, balances };
@@ -682,6 +718,47 @@ export async function getAccountBalances(
  */
 export function clearAccountBalancesCache(): void {
   balanceCache.clear();
+}
+
+/**
+ * Returns the spendable XLM balance for `address` and whether `amount` fits
+ * within it after subtracting reserves, selling liabilities, and a standard
+ * transaction fee. (#577)
+ *
+ * Reserve = (2 + subentry_count + num_sponsoring - num_sponsored) × 0.5 XLM
+ * Spendable = balance − reserve − selling_liabilities − fee
+ */
+export async function getSpendableBalance(
+  address: string,
+  amount: string,
+  network: StellarNetwork
+): Promise<{ spendable: string; sufficient: boolean }> {
+  const BASE_RESERVE_XLM = 0.5;
+  const BASE_ENTRIES = 2;
+  const FEE_XLM = 0.00001; // 100 stroops
+
+  const server = await getHorizonServer(network);
+  const account = await server.loadAccount(address);
+
+  const native = (account.balances as HorizonBalance[]).find(
+    (b) => b.asset_type === "native"
+  );
+  const balance = Number(native?.balance ?? "0");
+  const liabilities = Number((native as { selling_liabilities?: string })?.selling_liabilities ?? "0");
+
+  const subentries = Number((account as unknown as { subentry_count?: number }).subentry_count ?? 0);
+  const sponsored = Number((account as unknown as { num_sponsored?: number }).num_sponsored ?? 0);
+  const sponsoring = Number((account as unknown as { num_sponsoring?: number }).num_sponsoring ?? 0);
+
+  const reserve = (BASE_ENTRIES + subentries + sponsoring - sponsored) * BASE_RESERVE_XLM;
+  const spendable = Math.max(0, balance - reserve - liabilities - FEE_XLM);
+
+  // Round to 5 decimal places to match Stellar's stroop precision display.
+  const spendableStr = spendable.toFixed(5).replace(/\.?0+$/, "") || "0";
+  return {
+    spendable: spendableStr,
+    sufficient: Number(amount) <= spendable,
+  };
 }
 
 export async function fetchRecentTransactions(
@@ -941,7 +1018,8 @@ export async function assertActiveAccountMatches(sourceAddress: string): Promise
 async function resolveAsset(
   server: Horizon.Server,
   sourceAddress: string,
-  assetCode: string
+  assetCode: string,
+  network: StellarNetwork
 ): Promise<Asset> {
   const { Asset } = await import("@stellar/stellar-sdk");
   if (assetCode === "XLM") {
@@ -950,6 +1028,28 @@ async function resolveAsset(
 
   const account = await server.loadAccount(sourceAddress);
   const balances = account.balances as HorizonBalance[];
+
+  // When a canonical issuer is known for this asset/network, require an exact
+  // code+issuer match so a fake token with the same code (e.g. a rogue USDC)
+  // cannot be silently used instead of Circle's.  Fail explicitly if the
+  // account only holds the non-canonical issuer — using it would send a
+  // worthless asset while the UI shows the canonical name. (#921)
+  const canonicalIssuer = CANONICAL_ISSUERS[assetCode]?.[network];
+  if (canonicalIssuer) {
+    const matchingBalance = balances.find(
+      (b) => b.asset_code === assetCode && b.asset_issuer === canonicalIssuer
+    );
+    if (!matchingBalance) {
+      throw new Error(
+        `No canonical ${assetCode} trustline found for this account. ` +
+          `Ensure your account has a trustline to the canonical issuer (${canonicalIssuer}).`
+      );
+    }
+    return new Asset(assetCode, canonicalIssuer);
+  }
+
+  // For assets without a configured canonical issuer, fall back to the first
+  // matching trustline (existing behaviour).
   const matchingBalance = balances.find((b) => b.asset_code === assetCode);
   if (!matchingBalance) {
     throw new Error(`No ${assetCode} trustline found for this account`);
@@ -982,7 +1082,7 @@ export async function buildAndSubmitPayment(
 
   const server = await getHorizonServer(network);
   const passphrase = await getNetworkPassphrase(network);
-  const asset = await resolveAsset(server, sourceAddress, assetCode);
+  const asset = await resolveAsset(server, sourceAddress, assetCode, network);
 
   return buildSignAndSubmit(
     sourceAddress,
@@ -1197,7 +1297,7 @@ export interface FaucetRequest {
  *   `network === "TESTNET"` before invoking.
  */
 export async function requestTestXLM(address: string): Promise<FaucetRequest> {
-  if (!isValidEd25519PublicKey(address)) {
+  if (!StrKey.isValidEd25519PublicKey(address)) {
     return { success: false, message: "Invalid Stellar address." };
   }
 
@@ -1818,4 +1918,59 @@ export async function getRebateVolume(address: string, network: StellarNetwork):
   } catch {
     return null;
   }
+}
+
+/**
+ * Looks up a transaction hash across networks, respecting an explicit link
+ * network when provided (#717).
+ *
+ * - If `linkNetwork` is given, only that network is consulted.
+ * - Otherwise, `walletNetwork` is tried first; on a 404, the other network
+ *   is tried as a fallback (a hash shared from a different network).
+ *
+ * Returns `null` when the hash is malformed or not found on either network.
+ */
+export async function findTransactionByHash(
+  hash: string,
+  walletNetwork: StellarNetwork,
+  linkNetwork?: StellarNetwork
+): Promise<TransactionDetails | null> {
+  if (!TRANSACTION_HASH_PATTERN.test(hash)) return null;
+
+  const tryNetwork = async (network: StellarNetwork): Promise<TransactionDetails | null> => {
+    const server = await getHorizonServer(network);
+    try {
+      const record = await server.transactions().transaction(hash).call();
+      return {
+        hash,
+        network,
+        status: record.successful ? "confirmed" : "failed",
+        createdAt: record.created_at ?? null,
+        ledger: null,
+        ledgerClosedAt: null,
+        feeChargedStroops: 0,
+        feeStroops: 0,
+        fromAddress: null,
+        toAddress: null,
+        amount: null,
+        asset: null,
+        memo: null,
+        sequence: null,
+      };
+    } catch (e: unknown) {
+      const err = e as { response?: { status?: number } };
+      if (err?.response?.status === 404) return null;
+      throw e;
+    }
+  };
+
+  if (linkNetwork) {
+    return tryNetwork(linkNetwork);
+  }
+
+  const primary = await tryNetwork(walletNetwork).catch(() => null);
+  if (primary) return primary;
+
+  const other: StellarNetwork = walletNetwork === "PUBLIC" ? "TESTNET" : "PUBLIC";
+  return tryNetwork(other).catch(() => null);
 }

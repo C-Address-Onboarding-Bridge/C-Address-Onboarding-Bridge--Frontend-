@@ -51,7 +51,10 @@ export interface HealthStatus {
 function resolveApiBaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_API_URL;
   if (url) return url;
-  if (process.env.NODE_ENV === 'production') {
+  // Use bracket notation so the Vite test runner's client-inject plugin does
+  // not try to replace this string literal with an oxc JS-mode transform, which
+  // chokes on TypeScript syntax. Runtime behaviour is identical. (#920)
+  if (process["env"]["NODE_ENV"] === 'production') {
     throw new Error(
       'NEXT_PUBLIC_API_URL is not set. Set it in your production environment before building/deploying — ' +
         'without it, every API call silently targets a domain this project does not control.'
@@ -154,6 +157,10 @@ export async function getHealthStatus(): Promise<HealthStatus | null> {
     }
 
     return parseHealthResponse(await response.json());
+  };
+
+  try {
+    return await attempt();
   } catch (error) {
     console.error('Failed to fetch health status, retrying:', error);
   }
@@ -504,35 +511,6 @@ export async function getFeeTierPreview(
       return null;
     }
     return (await response.json()) as FeeTierStatus;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Referral stats (#469).
- *
- * PLACEHOLDER INTERFACE: see `src/lib/referrals.ts` for why — no contract
- * source or referral API route exists anywhere in this repo to build against
- * yet. The route (`GET /referrals?address=&network=`) and response shape are
- * a best-guess and must be reconciled against the real API once it lands.
- *
- * Returns null both when the account has no referral data yet and when the
- * request itself fails — callers treat "no data" as "hide the referral
- * display" either way.
- */
-export async function getReferralStats(
-  address: string,
-  network: StellarNetwork
-): Promise<ReferralStats | null> {
-  try {
-    const response = await fetch(
-      `${API_BASE_URL}/referrals?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
-    );
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as ReferralStats;
   } catch {
     return null;
   }
