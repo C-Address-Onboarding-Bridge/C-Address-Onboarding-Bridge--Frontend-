@@ -40,7 +40,7 @@ export function toPublicConfirmation(confirmation: TransactionConfirmation): Pub
     hash: confirmation.hash,
     amount: confirmation.amount,
     asset: confirmation.asset,
-    timestamp: new Date(confirmation.timestamp / 1000).toISOString(),
+    timestamp: new Date(confirmation.timestamp).toISOString(),
     fromAddressTruncated: truncateAddress(confirmation.fromAddress),
     toAddressTruncated: truncateAddress(confirmation.toAddress),
     fee: confirmation.fee,
