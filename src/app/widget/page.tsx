@@ -25,6 +25,7 @@ import {
   isTrustedParentOrigin,
   parseWidgetConfig,
   postWidgetMessage,
+  getAllowedEmbedderOrigins,
   type WidgetConfig,
   type WidgetOutboundMessage,
 } from "@/lib/widget";
@@ -241,12 +242,17 @@ function WidgetPageInner() {
   // The widget must not trust the self-declared `parentOrigin` query param:
   // any site can embed it with its own origin and overlay it to trick users
   // into signing a funding transaction (clickjacking). Cross-check the
-  // declared origin against the browser-reported ancestor origin(s) before
-  // rendering anything that can move funds.
+  // declared origin against the browser-reported ancestor origin(s) and the
+  // configured allowlist before rendering anything that can move funds.
   const [trusted, setTrusted] = useState<boolean | null>(null);
 
   useEffect(() => {
-    setTrusted(isTrustedParentOrigin(result.config.parentOrigin));
+    const allowedOrigins = getAllowedEmbedderOrigins();
+    const evidence = {
+      ancestorOrigins: typeof window !== "undefined" ? window.location.ancestorOrigins || null : null,
+      referrer: typeof document !== "undefined" ? document.referrer || null : null,
+    };
+    setTrusted(isTrustedParentOrigin(result.config.parentOrigin, allowedOrigins, evidence));
   }, [result.config.parentOrigin]);
 
   if (trusted === null) {

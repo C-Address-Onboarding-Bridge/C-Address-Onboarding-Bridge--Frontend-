@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { getAllowedEmbedderOrigins, buildFrameAncestorsCsp } from "@/lib/widget";
 
 /**
  * Enforcing CSP applied to every route except the embeddable widget.
@@ -57,16 +58,17 @@ const cspHeader = [
 ].join("; ");
 
 /**
- * The widget is meant to be framed by arbitrary host pages, so it can't ship
- * `frame-ancestors 'none'`. This mirrors the relaxed policy in next.config.ts
- * (which omits X-Frame-Options for /widget for the same reason). The real
- * security boundary for the widget is the postMessage origin check in
- * src/lib/widget.ts, not who is allowed to frame it.
+ * The widget CSP is built from the registered embedder allowlist
+ * (NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS env var). When nothing is registered,
+ * frame-ancestors is set to 'none' to prevent framing by unregistered origins.
+ * This is computed per-request so changes to the allowlist take effect
+ * without redeployment.
  */
-const widgetCspHeader = cspHeader.replace(
-  "frame-ancestors 'none'",
-  "frame-ancestors *",
-);
+function getWidgetCspHeader(): string {
+  const allowedOrigins = getAllowedEmbedderOrigins();
+  const frameAncestors = buildFrameAncestorsCsp(allowedOrigins);
+  return cspHeader.replace("frame-ancestors 'none'", frameAncestors);
+}
 
 function isWidgetPath(pathname: string): boolean {
   return pathname === "/widget" || pathname.startsWith("/widget/");
@@ -77,7 +79,7 @@ export function middleware(request: NextRequest) {
 
   response.headers.set(
     CSP_HEADER_NAME,
-    isWidgetPath(request.nextUrl.pathname) ? widgetCspHeader : cspHeader,
+    isWidgetPath(request.nextUrl.pathname) ? getWidgetCspHeader() : cspHeader,
   );
 
   return response;

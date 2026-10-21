@@ -518,7 +518,7 @@ export default function DashboardPage() {
           ) : (
             <>
               <div className="text-2xl font-bold mb-1">
-                {shownBalance !== null ? parseFloat(shownBalance).toFixed(2) : "—"}
+                {shownBalance !== null ? parseFloat(shownBalance).toFixed(7) : "—"}
               </div>
               <div className="text-xs text-[var(--text-muted)]">XLM</div>
               {network === "TESTNET" && !showLoading && (shownBalance === null || parseFloat(shownBalance) === 0) && (
