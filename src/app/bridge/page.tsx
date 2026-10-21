@@ -703,7 +703,7 @@ export default function BridgePage() {
                         placeholder="0.00"
                         aria-invalid={(!validAmount && !!amount) || insufficientBalance}
                         aria-describedby={
-                          (!validAmount && amount) ? "amount-format-error" :
+                          (!validAmount && debouncedAmount) ? "amount-format-error" :
                           insufficientBalance ? "amount-balance-error" : undefined
                         }
                         className="w-full px-4 py-3 min-h-[44px] rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2 focus:border-[var(--primary)] transition-colors"
@@ -732,7 +732,7 @@ export default function BridgePage() {
                     </select>
                   </div>
                   {!validAmount && debouncedAmount && (
-                    <p className="text-xs text-[var(--error)] mt-1">
+                    <p id="amount-format-error" className="text-xs text-[var(--error)] mt-1" role="alert">
                       Invalid amount. Enter a positive number with up to 7 decimal places (e.g. &quot;10&quot; or &quot;0.5&quot;).
                     </p>
                   )}

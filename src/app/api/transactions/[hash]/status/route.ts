@@ -22,12 +22,29 @@ interface RateLimitEntry {
 }
 
 const rateLimitStore = new Map<string, RateLimitEntry>();
+const CLEANUP_INTERVAL_MS = 60_000;
+
+// Periodically clean up expired entries to prevent unbounded memory growth
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of rateLimitStore.entries()) {
+      // Evict entries older than 5 minutes (enough time for multiple windows)
+      if (entry.resetAt + 5 * 60_000 < now) {
+        rateLimitStore.delete(key);
+      }
+    }
+  }, CLEANUP_INTERVAL_MS);
+}
 
 function getClientIp(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for");
   if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first) return first;
+    // Use the rightmost (last) entry: the most recent proxy's IP, which we trust.
+    // The leftmost entry (client's claim) is untrusted and can be forged to bypass limits.
+    const parts = forwarded.split(",");
+    const last = parts[parts.length - 1]?.trim();
+    if (last) return last;
   }
   return request.headers.get("x-real-ip") ?? "unknown";
 }
