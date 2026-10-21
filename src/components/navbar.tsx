@@ -292,7 +292,7 @@ const Navbar = () => {
       return { label, className: "bg-[var(--success)]/15 text-[var(--success)]" };
     }
     if (displayNetworkStatus === "TESTNET") {
-      return { label, className: "bg-yellow-500/15 text-yellow-400" };
+      return { label, className: "bg-[var(--warning)]/15 text-[var(--warning)]" };
     }
     if (displayNetworkStatus === "UNSUPPORTED") {
       return { label, className: "bg-[var(--error)]/15 text-[var(--error)]" };
@@ -327,7 +327,7 @@ const Navbar = () => {
       return { label, className: "bg-[var(--success)]/15 text-[var(--success)]", title: "Connected to Mainnet" };
     }
     if (networkStatus === "TESTNET") {
-      return { label, className: "bg-yellow-500/15 text-yellow-400", title: "Connected to Testnet" };
+      return { label, className: "bg-[var(--warning)]/15 text-[var(--warning)]", title: "Connected to Testnet" };
     }
     return {
       label,
@@ -507,10 +507,10 @@ const Navbar = () => {
         <div
           role="alert"
           aria-live="assertive"
-          className="border-t border-yellow-500/30 bg-yellow-500/10 px-4 py-2"
+          className="border-t border-[var(--warning)]/30 bg-[var(--warning)]/10 px-4 py-2"
         >
           <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-yellow-400 text-sm">
+            <div className="flex items-center gap-2 text-[var(--warning)] text-sm">
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
               <span>
                 <strong>Network changed</strong> — your wallet is now on{" "}
@@ -523,7 +523,7 @@ const Navbar = () => {
             <button
               onClick={dismissNetworkMismatch}
               aria-label="Dismiss network change warning"
-              className="flex-shrink-0 text-yellow-400/70 hover:text-yellow-400 transition-colors"
+              className="flex-shrink-0 text-[var(--warning)]/70 hover:text-[var(--warning)] transition-colors"
             >
               <X className="w-4 h-4" />
             </button>

@@ -23,7 +23,8 @@ import {
   isSupportedNetwork,
 } from "./types";
 import { withSequenceRetry } from "./sequenceManager";
-import { getNetwork as getFreighterNetwork } from "@stellar/freighter-api";
+import { extractTransferFromOps } from "./operationTransfer";
+export type { OperationTransfer } from "./operationTransfer";
 
 export type { AppNetwork, WalletNetworkState, BridgeTransactionData } from "./types";
 
@@ -1709,12 +1710,12 @@ export async function getTransactionByHash(
       type?: string;
       transaction_successful?: boolean;
     }>>(network, `${basePath}/operations?limit=200`);
-    const payment = operations._embedded?.records?.find((op) => op.type === "payment");
-    if (payment && payment.type === "payment") {
-      fromAddress = payment.from ?? null;
-      toAddress = payment.to ?? null;
-      amount = payment.amount ?? null;
-      asset = payment.asset_type === "native" ? "XLM" : (payment.asset_code ?? null);
+    const transfer = extractTransferFromOps(operations._embedded?.records ?? []);
+    if (transfer) {
+      fromAddress = transfer.fromAddress;
+      toAddress = transfer.toAddress;
+      amount = transfer.amount;
+      asset = transfer.asset;
     }
   } catch {
     // Ignore — the record itself is enough to render the detail page.

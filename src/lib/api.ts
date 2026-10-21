@@ -153,9 +153,13 @@ export async function getHealthStatus(): Promise<HealthStatus | null> {
       throw new Error(`Health check failed (${response.status})`);
     }
 
-    return parseHealthResponse(await response.json());
-  } catch (error) {
-    console.error('Failed to fetch health status, retrying:', error);
+    return parseHealthResponse(await response.json()) ?? unreachableHealthStatus();
+  };
+
+  try {
+    return await attempt();
+  } catch (_retry) {
+    // First attempt failed — retry once before giving up.
   }
 
   try {

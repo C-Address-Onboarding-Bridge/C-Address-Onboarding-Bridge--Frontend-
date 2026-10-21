@@ -26,6 +26,15 @@
 .DS_Store
 *.pem
 
+# Stray PR description files committed by mistake (#908)
+pr-description*.md
+docs-pr-description*.md
+# Percy visual-diff config is not a project dependency (#908)
+.percy.yml
+
+# Test snapshots — generated files that should not be committed
+**/__snapshots__/
+
 # debug
 npm-debug.log*
 yarn-debug.log*
