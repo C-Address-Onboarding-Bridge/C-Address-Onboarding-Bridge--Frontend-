@@ -197,6 +197,10 @@ const SWITCH_POLL_TIMEOUT_MS = 8_000;
  * Whether a mainnet action needs an explicit warning: the user is on mainnet
  * and the network changed recently, and they haven't acknowledged it yet.
  * Pure so it is unit-testable without rendering the page. (#480)
+ *
+ * This covers only the recent-switch case. The bridge also asks once per
+ * session before any mainnet transaction; see `getMainnetConfirmationReason`
+ * in `./mainnetConfirmation`. (#759)
  */
 export function shouldWarnOnMainnetAction(
   network: StellarNetwork,
@@ -739,8 +743,8 @@ async function buildSignAndSubmit(
   onPhase?: (phase: "signing" | "submitting") => void
 ): Promise<PaymentResult> {
   const { TransactionBuilder, Operation, Account } = await import("@stellar/stellar-sdk");
-  // Fetch a dynamic fee bid (2× base fee, capped at 10 000 stroops) so the
-  // transaction is not rejected during surge-pricing windows. (#301)
+  // Bid from recently charged fees (capped) so the transaction is not left
+  // waiting during surge-pricing windows. (#301, #758)
   const fee = await getRecommendedFee(network);
 
   return withSequenceRetry(
@@ -1147,31 +1151,85 @@ export function getAccountMinimumBalance(): string {
   return "1.0";
 }
 
+/** Percentiles of recently charged fees a bid may be taken from. (#758) */
+export type FeePercentile = "p50" | "p70" | "p80" | "p90" | "p95" | "p99";
+
+/** Network minimum base fee, in stroops; also the fallback bid. */
+export const MIN_BASE_FEE_STROOPS = 100;
+/** Default percentile of recently charged fees to bid. (#758) */
+export const DEFAULT_FEE_PERCENTILE: FeePercentile = "p70";
+/** Default ceiling on a fee bid, in stroops (0.01 XLM). (#758) */
+export const DEFAULT_MAX_FEE_STROOPS = 100_000;
+
+const FEE_PERCENTILES: readonly FeePercentile[] = ["p50", "p70", "p80", "p90", "p95", "p99"];
+
+/** The parts of Horizon's `/fee_stats` response the fee bid uses. */
+export interface HorizonFeeStats {
+  last_ledger_base_fee?: string;
+  fee_charged?: Partial<Record<FeePercentile, string>>;
+}
+
+export interface FeeBidOptions {
+  /** Percentile of `fee_charged` to bid. Default {@link DEFAULT_FEE_PERCENTILE}. */
+  percentile?: FeePercentile;
+  /** Highest bid, in stroops. Default `NEXT_PUBLIC_MAX_FEE_STROOPS` or {@link DEFAULT_MAX_FEE_STROOPS}. */
+  maxFeeStroops?: number;
+}
+
+function parseStroops(value: string | undefined): number | null {
+  if (value === undefined || !/^\d+$/.test(value.trim())) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+/** The configured fee ceiling: `NEXT_PUBLIC_MAX_FEE_STROOPS` when valid, else the default. */
+export function getMaxFeeStroops(): number {
+  const configured = parseStroops(process.env.NEXT_PUBLIC_MAX_FEE_STROOPS);
+  return configured !== null && configured >= MIN_BASE_FEE_STROOPS
+    ? configured
+    : DEFAULT_MAX_FEE_STROOPS;
+}
+
 /**
- * Fetch the current recommended fee from the Horizon fee-stats endpoint and
- * return a fee bid that is 2× the network base fee, capped at 10 000 stroops.
+ * Compute a fee bid from Horizon fee stats: the chosen percentile of fees
+ * actually charged in recent ledgers, never below the ledger's base fee and
+ * never above the ceiling. Pure, so it is testable without network calls.
  *
- * Using a dynamic fee instead of the hardcoded BASE_FEE constant avoids
- * `tx_insufficient_fee` rejections during surge-pricing windows (when the
- * network raises the minimum fee above 100 stroops). (#301)
+ * The base fee alone is the network minimum, which is almost always 100
+ * stroops; under surge pricing transactions bidding it wait until they time
+ * out. Charged-fee percentiles track what is really being accepted. (#758)
+ */
+export function computeFeeBid(stats: HorizonFeeStats, options: FeeBidOptions = {}): number {
+  const percentile =
+    options.percentile && FEE_PERCENTILES.includes(options.percentile)
+      ? options.percentile
+      : DEFAULT_FEE_PERCENTILE;
+  const ceiling = Math.max(
+    MIN_BASE_FEE_STROOPS,
+    Math.floor(options.maxFeeStroops ?? getMaxFeeStroops())
+  );
+  const baseFee = parseStroops(stats.last_ledger_base_fee) ?? MIN_BASE_FEE_STROOPS;
+  const charged = parseStroops(stats.fee_charged?.[percentile]) ?? baseFee;
+  return Math.min(Math.max(charged, baseFee), ceiling);
+}
+
+/**
+ * Fetch Horizon fee stats and return a fee bid in stroops, as a string (see
+ * {@link computeFeeBid}). Falls back to the minimum base fee if the request
+ * fails, so the transaction is still submitted rather than blocked. (#301, #758)
  *
  * @param network - "PUBLIC" or "TESTNET"
- * @returns Fee in stroops as a string (e.g. "200")
+ * @returns Fee in stroops as a string (e.g. "250")
  */
-export async function getRecommendedFee(network: StellarNetwork): Promise<string> {
-  const MAX_FEE_STROOPS = 10_000;
+export async function getRecommendedFee(
+  network: StellarNetwork,
+  options: FeeBidOptions = {}
+): Promise<string> {
   try {
-    const feeStats = await fetchHorizonJson<{ last_ledger_base_fee?: string }>(
-      network,
-      "/fee_stats"
-    );
-    const baseFee = Number.parseInt(feeStats.last_ledger_base_fee ?? "", 10) || 100;
-    const bid = Math.min(baseFee * 2, MAX_FEE_STROOPS);
-    return String(bid);
+    const feeStats = await fetchHorizonJson<HorizonFeeStats>(network, "/fee_stats");
+    return String(computeFeeBid(feeStats, options));
   } catch {
-    // Fall back to the hardcoded BASE_FEE constant if the fee-stats call fails
-    // so the transaction is still submitted rather than silently blocked.
-    return "100";
+    return String(MIN_BASE_FEE_STROOPS);
   }
 }
 
