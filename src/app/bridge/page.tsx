@@ -244,10 +244,12 @@ export default function BridgePage() {
   useEffect(() => {
     if (!address || !isNetworkSupported) return;
     let cancelled = false;
-    setBalanceError(null);
     getAccountBalances(address, network)
       .then((result) => {
-        if (!cancelled) setSourceBalances(result);
+        if (!cancelled) {
+          setSourceBalances(result);
+          setBalanceError(null);
+        }
       })
       .catch((e: unknown) => {
         if (cancelled) return;
