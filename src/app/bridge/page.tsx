@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRightLeft, Wallet, Send, ArrowRight, Check, AlertCircle, Loader2, ExternalLink, HelpCircle, Lock as LockIcon } from "lucide-react";
 import { useWallet } from "@/components/wallet-provider";
-import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel, getEstimatedFeeXLM, toSafeErrorMessage, shouldWarnOnMainnetAction, assertActiveAccountMatches, signPreparedTransaction } from "@/lib/stellar";
+import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel, getEstimatedFeeXLM, toSafeErrorMessage, assertActiveAccountMatches, signPreparedTransaction } from "@/lib/stellar";
 import type { AccountBalances, SimulationResult } from "@/lib/stellar";
 import { createLock, getFeeTierPreview, prepareBatchFunding, submitSignedBatchFunding } from "@/lib/api";
 import { validateUnlockTime, type Lock as LockRecord } from "@/lib/locks";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useMainnetConfirmation } from "@/hooks/useMainnetConfirmation";
+import { MAINNET_CONFIRMATION_MESSAGES } from "@/lib/mainnetConfirmation";
 import { useStepTransition } from "@/hooks/useStepTransition";
 import LiveRegion from "@/components/live-region";
 import BatchFundingForm from "@/components/BatchFundingForm";
@@ -159,9 +161,13 @@ export default function BridgePage() {
   // `simulating` covers the in-flight fetch. (#478)
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [simulating, setSimulating] = useState(false);
-  // Set when the user tries to confirm a mainnet action shortly after a
-  // network change; signing waits for explicit acknowledgement. (#480)
-  const [mainnetWarning, setMainnetWarning] = useState(false);
+  // Mainnet transactions wait for an explicit confirmation: once per session,
+  // and again right after a network switch. (#480, #759)
+  const {
+    prompt: mainnetPrompt,
+    request: confirmMainnetIfNeeded,
+    answer: answerMainnetPrompt,
+  } = useMainnetConfirmation(network, recentlyChangedNetwork);
 
   // Keyboard + screen-reader step transitions: focus the new step's heading and
   // announce the change. Implemented in useStepTransition. (#476)
@@ -422,12 +428,9 @@ export default function BridgePage() {
       setTxStatus("error");
       return;
     }
-    // Warn before a mainnet action initiated shortly after a network change:
-    // real funds are at stake and the switch may have been a mistake. (#480)
-    if (shouldWarnOnMainnetAction(network, recentlyChangedNetwork, mainnetWarning)) {
-      setMainnetWarning(true);
-      return;
-    }
+    // Real funds are at stake on mainnet: confirm once per session, and again
+    // right after a network switch, which may have been a mistake. (#480, #759)
+    if (!(await confirmMainnetIfNeeded())) return;
     await performConfirm();
   };
 
@@ -451,6 +454,9 @@ export default function BridgePage() {
           ? `Your wallet is on ${networkLabel}. Switch to Testnet or Mainnet to use the bridge.`
           : "Your wallet's network couldn't be read. Unlock the extension and reload before submitting."
       );
+    }
+    if (!(await confirmMainnetIfNeeded())) {
+      throw new Error("Mainnet transaction cancelled. Nothing was sent.");
     }
     await assertActiveAccountMatches(fromAddress);
     const { xdr } = await prepareBatchFunding(fromAddress, recipients, network);
@@ -495,6 +501,52 @@ export default function BridgePage() {
             <LiveRegion message={politeAnnouncement} />
             <LiveRegion politeness="assertive" message={assertiveAnnouncement} />
             <LiveRegion message={stepAnnouncement} />
+
+            {mainnetPrompt && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") answerMainnetPrompt(false);
+                }}
+              >
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="mainnet-confirm-title"
+                  aria-describedby="mainnet-confirm-body"
+                  className="w-full max-w-md rounded-xl border border-[var(--warning)]/30 bg-[var(--surface)] p-6 shadow-lg"
+                >
+                  <div role="alert" className="flex items-start gap-3 mb-6">
+                    <AlertCircle className="w-5 h-5 text-[var(--warning)] flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h2 id="mainnet-confirm-title" className="text-base font-semibold">
+                        {MAINNET_CONFIRMATION_MESSAGES[mainnetPrompt].title}
+                      </h2>
+                      <p id="mainnet-confirm-body" className="text-sm text-[var(--text-muted)] mt-1">
+                        {MAINNET_CONFIRMATION_MESSAGES[mainnetPrompt].body}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      autoFocus
+                      onClick={() => answerMainnetPrompt(false)}
+                      className="flex-1 px-4 py-2 min-h-[44px] rounded-xl border border-[var(--border)] font-medium hover:bg-[var(--surface-2)] transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => answerMainnetPrompt(true)}
+                      className="flex-1 px-4 py-2 min-h-[44px] rounded-xl bg-[var(--warning)] text-black font-medium hover:bg-[var(--warning)]/90 transition-colors"
+                    >
+                      Continue on Mainnet
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div
               role="tablist"
@@ -938,6 +990,7 @@ export default function BridgePage() {
                     disabled={
                       txStatus === "signing" ||
                       txStatus === "submitting" ||
+                      mainnetPrompt !== null ||
                       !isOnline ||
                       (simulation !== null && !simulation.ok)
                     }
