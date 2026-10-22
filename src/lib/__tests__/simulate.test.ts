@@ -98,19 +98,24 @@ describe("simulatePayment — successful predictions", () => {
     if (result.ok) {
       expect(result.feeStroops).toBe("200");
       expect(result.feeXlm).toBe("0.00002 XLM");
-      // 10 XLM minus a 0.00002 XLM fee.
-      expect(Number(result.netAmount)).toBeCloseTo(9.99998, 5);
+      // The fee is charged to the sender on top of the payment, not
+      // deducted from it — the recipient gets the full requested amount. (#923)
+      expect(result.netAmount).toBe("10");
       expect(result.grossAmount).toBe("10");
+      expect(result.feePaidBy).toBe("sender");
       expect(result.asset).toBe("XLM");
       expect(result.recipient).toBe(C_ADDRESS);
     }
   });
 
-  it("clamps the net amount at zero when the fee exceeds the amount", () => {
-    const result = simulatePayment({ ...request, amount: "0.0000001" }, FUNDED, 10_000);
+  it("does not deduct the fee from the net amount even for amounts with float-noise-prone decimals (#923)", () => {
+    // 0.3 - 0.00002 in plain float arithmetic produces 0.29998000000000004;
+    // netAmount must stay exactly "0.3" since the fee isn't deducted at all.
+    const result = simulatePayment({ ...request, amount: "0.3" }, FUNDED, 200);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(Number(result.netAmount)).toBe(0);
+      expect(result.netAmount).toBe("0.3");
+      expect(result.grossAmount).toBe("0.3");
     }
   });
 

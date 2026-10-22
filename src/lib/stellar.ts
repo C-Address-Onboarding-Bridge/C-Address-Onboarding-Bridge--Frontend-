@@ -1278,10 +1278,17 @@ export interface SimulationSuccess {
   feeStroops: string;
   /** Human-readable fee, e.g. "0.00002 XLM". */
   feeXlm: string;
-  /** Amount the recipient would receive after fees (XLM only). */
+  /**
+   * Amount the recipient receives. On Stellar a `payment` operation delivers
+   * exactly the requested amount — the network fee is charged to the
+   * *source* account separately, on top of the payment, so this always
+   * equals `grossAmount` (it is not fee-adjusted). (#923)
+   */
   netAmount: string;
   /** The gross amount requested. */
   grossAmount: string;
+  /** Who pays the network fee. Always "sender" on Stellar. (#923) */
+  feePaidBy: "sender";
   asset: string;
   recipient: string;
 }
@@ -1382,8 +1389,12 @@ export function simulatePayment(
       ok: true,
       feeStroops: String(feeStroops),
       feeXlm: formatFeeXlm(feeXlm),
-      netAmount: String(Math.max(0, Number(amount) - feeXlm)),
+      // The fee is charged to the source account on top of the payment, not
+      // deducted from it — a payment op for `amount` XLM delivers exactly
+      // `amount` XLM to the recipient. (#923)
+      netAmount: amount,
       grossAmount: amount,
+      feePaidBy: "sender",
       asset: assetCode,
       recipient: destinationAddress,
     };
@@ -1410,6 +1421,7 @@ export function simulatePayment(
     feeXlm: formatFeeXlm(feeXlm),
     netAmount: amount,
     grossAmount: amount,
+    feePaidBy: "sender",
     asset: assetCode,
     recipient: destinationAddress,
   };
