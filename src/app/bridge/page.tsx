@@ -500,11 +500,29 @@ export default function BridgePage() {
               role="tablist"
               aria-label="Funding mode"
               className="flex gap-1 p-1 mb-6 rounded-lg bg-[var(--surface-2)] w-fit"
+              onKeyDown={(e) => {
+                const tabs = (e.currentTarget as HTMLElement).querySelectorAll('[role="tab"]');
+                const currentIndex = Array.from(tabs).findIndex((tab) => tab === e.currentTarget.activeElement);
+                if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                  e.preventDefault();
+                  const nextTab = tabs[(currentIndex + 1) % tabs.length] as HTMLButtonElement;
+                  nextTab.focus();
+                  nextTab.click();
+                } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  const prevTab = tabs[(currentIndex - 1 + tabs.length) % tabs.length] as HTMLButtonElement;
+                  prevTab.focus();
+                  prevTab.click();
+                }
+              }}
             >
               <button
                 type="button"
                 role="tab"
+                id="tab-single"
                 aria-selected={flowMode === "single"}
+                aria-controls="panel-single"
+                tabIndex={flowMode === "single" ? 0 : -1}
                 data-testid="flow-mode-single"
                 onClick={() => setFlowMode("single")}
                 disabled={txStatus === "signing" || txStatus === "submitting"}
@@ -517,7 +535,10 @@ export default function BridgePage() {
               <button
                 type="button"
                 role="tab"
+                id="tab-batch"
                 aria-selected={flowMode === "batch"}
+                aria-controls="panel-batch"
+                tabIndex={flowMode === "batch" ? 0 : -1}
                 data-testid="flow-mode-batch"
                 onClick={() => setFlowMode("batch")}
                 disabled={txStatus === "signing" || txStatus === "submitting"}
@@ -530,7 +551,7 @@ export default function BridgePage() {
             </div>
 
             {flowMode === "batch" && (
-              <div className="space-y-6">
+              <div id="panel-batch" role="tabpanel" aria-labelledby="tab-batch" className="space-y-6">
                 <h2 className="text-xl font-semibold mb-4">Batch Fund C-Addresses</h2>
 
                 {!isOnline && (
@@ -568,7 +589,7 @@ export default function BridgePage() {
             )}
 
             {flowMode === "single" && (
-              <>
+              <div id="panel-single" role="tabpanel" aria-labelledby="tab-single">
             {step === "form" && (
               <div className="space-y-6">
                 <h2
@@ -1037,7 +1058,7 @@ export default function BridgePage() {
                 </button>
               </div>
             )}
-              </>
+              </div>
             )}
           </div>
         </div>
