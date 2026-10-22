@@ -99,12 +99,17 @@ function parseCircuitMap(value: unknown): HealthStatus['circuitBreakers'] {
 
 /**
  * Validates and maps a raw `GET /health` response into `HealthStatus`.
- * Never throws: an unrecognized or malformed shape degrades to `unhealthy`
- * with empty service/circuit maps rather than crashing the status banner —
- * a shape we can't parse is itself worth surfacing as unhealthy.
+ *
+ * Throws when the body is not an object at all, so `getHealthStatus` treats it
+ * like any other failed attempt (retry, then the unreachable status). A body
+ * that is an object but has an unrecognized shape degrades to `unhealthy` with
+ * empty service/circuit maps rather than crashing the status banner: a shape
+ * we can't parse is itself worth surfacing as unhealthy.
  */
-export function parseHealthResponse(data: unknown): HealthStatus | null {
-  if (!data || typeof data !== 'object') return null;
+export function parseHealthResponse(data: unknown): HealthStatus {
+  if (!data || typeof data !== 'object') {
+    throw new Error('Health check returned a non-object body');
+  }
   const raw = data as Record<string, unknown>;
   const status = raw.status === 'ok' || raw.status === 'healthy' ? 'healthy' : raw.status === 'degraded' ? 'degraded' : 'unhealthy';
   return {
@@ -120,8 +125,12 @@ export function parseHealthResponse(data: unknown): HealthStatus | null {
  * unreachable (network error or non-2xx response). Reporting `unhealthy`
  * here — rather than `null` — is what makes the service-status banner
  * appear during a total outage (#710).
+ *
+ * Shared with `useHealthStatus` so every fallback has the full `HealthStatus`
+ * shape (#842): consumers reading `services` or `circuitBreakers` never get
+ * `undefined`.
  */
-function unreachableHealthStatus(): HealthStatus {
+export function unreachableHealthStatus(): HealthStatus {
   return {
     status: 'unhealthy',
     timestamp: new Date().toISOString(),
@@ -130,6 +139,7 @@ function unreachableHealthStatus(): HealthStatus {
       soroban_rpc: 'down',
       api: 'down',
     },
+    circuitBreakers: {},
   };
 }
 
@@ -140,7 +150,7 @@ function unreachableHealthStatus(): HealthStatus {
  * the retry, resolves with an `unhealthy` status (rather than `null`) so
  * callers surface the outage banner instead of silently showing nothing.
  */
-export async function getHealthStatus(): Promise<HealthStatus | null> {
+export async function getHealthStatus(): Promise<HealthStatus> {
   const attempt = async (): Promise<HealthStatus> => {
     const response = await fetch(`${API_BASE_URL}/health`, {
       method: 'GET',
@@ -154,6 +164,10 @@ export async function getHealthStatus(): Promise<HealthStatus | null> {
     }
 
     return parseHealthResponse(await response.json());
+  };
+
+  try {
+    return await attempt();
   } catch (error) {
     console.error('Failed to fetch health status, retrying:', error);
   }
@@ -163,27 +177,6 @@ export async function getHealthStatus(): Promise<HealthStatus | null> {
   } catch (error) {
     console.error('Failed to fetch health status after retry:', error);
     return unreachableHealthStatus();
-  }
-}
-
-/**
- * Fetch referral statistics for an account. The endpoint is a placeholder
- * until the referral API contract is finalized; failures return null so the
- * page can offer its retry state instead of crashing.
- */
-export async function getReferralStats(
-  address: string,
-  network: StellarNetwork
-): Promise<ReferralStats | null> {
-  try {
-    const response = await fetch(
-      `${API_BASE_URL}/referrals/${encodeURIComponent(address)}?network=${encodeURIComponent(network)}`,
-      { method: "GET", headers: { "Content-Type": "application/json" } }
-    );
-    if (!response.ok) return null;
-    return (await response.json()) as ReferralStats;
-  } catch {
-    return null;
   }
 }
 
