@@ -1,137 +1,28 @@
 import { describe, it, expect } from "vitest";
+import { NextRequest } from "next/server";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { buildCsp, buildWidgetCsp, isWidgetPath, proxy } from "@/proxy";
 
 /**
- * Tests for the CSP nonce middleware behaviour (issue #457).
- *
- * We test the CSP string-building logic directly without running a full
- * Next.js middleware stack, since that would require a live Edge runtime.
+ * Tests the real CSP builders and proxy (formerly middleware) exported from
+ * src/proxy.ts (#866). Without a nonce the policy is `script-src 'self'`; the
+ * proxy passes a per-request nonce so inline bootstrap scripts are allowed (#876).
  */
 
-/**
- * Mirror the production connect-src construction from src/middleware.ts
- * (issue #700). The API URL, friendbot and any configured Soroban RPC
- * endpoints must be allowed so health/batch/locks calls, the faucet and
- * mainnet Soroban RPC are not blocked by the enforced policy.
- */
-function buildConnectSrc(env: Record<string, string | undefined>): string {
-  const sources = [
-    "'self'",
-    "https://horizon.stellar.org",
-    "https://horizon-testnet.stellar.org",
-    "https://soroban-testnet.stellar.org",
-    "https://friendbot.stellar.org",
-  ];
-
-  const apiUrl = env.NEXT_PUBLIC_API_URL;
-  if (apiUrl) {
-    try {
-      sources.push(new URL(apiUrl).origin);
-    } catch {
-      // ignore malformed URLs
-    }
-  }
-
-  const sorobanRpc = env.NEXT_PUBLIC_SOROBAN_RPC_URL;
-  if (sorobanRpc) {
-    try {
-      sources.push(new URL(sorobanRpc).origin);
-    } catch {
-      // ignore malformed URLs
-    }
-  }
-
-  return ["connect-src", ...Array.from(new Set(sources))].join(" ");
+function scriptSrc(csp: string): string | undefined {
+  return csp.split(";").map((d) => d.trim()).find((d) => d.startsWith("script-src"));
 }
 
-/** Mirror the production CSP construction from src/middleware.ts */
-function buildCsp(nonce: string, isDev: boolean): string {
-  return [
-    "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}'${isDev ? " 'unsafe-eval'" : ""}`,
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
-    "font-src 'self'",
-    buildConnectSrc({}),
-    "base-uri 'self'",
-    "form-action 'self'",
-    "frame-ancestors 'none'",
-    "object-src 'none'",
-    "upgrade-insecure-requests",
-  ].join("; ");
-}
-
-/**
- * Mirror the widget CSP construction from src/middleware.ts (issue #699).
- *
- * The embeddable widget must be frameable by third-party origins, so its
- * policy relaxes `frame-ancestors` to `*` while keeping the rest of the
- * hardening directives intact.
- */
-function buildWidgetCsp(nonce: string, isDev: boolean): string {
-  return [
-    "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}'${isDev ? " 'unsafe-eval'" : ""}`,
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
-    "font-src 'self'",
-    buildConnectSrc({}),
-    "base-uri 'self'",
-    "form-action 'self'",
-    "frame-ancestors *",
-    "object-src 'none'",
-    "upgrade-insecure-requests",
-  ].join("; ");
-}
-
-/** Mirror the path check used by src/middleware.ts to select the widget policy. */
-function isWidgetPath(pathname: string): boolean {
-  return pathname === "/widget" || pathname.startsWith("/widget/");
-}
-
-describe("CSP nonce middleware", () => {
-  it("production policy does not contain 'unsafe-inline' in script-src", () => {
-    const csp = buildCsp("abc123", false /* production */);
-    // Extract just the script-src directive to check for unsafe-inline
-    const scriptSrc = csp.split(";").find((d) => d.trim().startsWith("script-src"));
-    expect(scriptSrc).toBeDefined();
-    expect(scriptSrc).not.toContain("'unsafe-inline'");
-  });
-
-  it("production policy does not contain 'unsafe-eval' in script-src", () => {
-    const csp = buildCsp("abc123", false);
+describe("CSP policy", () => {
+  it("script-src is 'self' only, without unsafe-inline or unsafe-eval", () => {
+    const csp = buildCsp({});
+    expect(scriptSrc(csp)).toBe("script-src 'self'");
     expect(csp).not.toContain("'unsafe-eval'");
   });
 
-  it("development policy includes 'unsafe-eval' for HMR", () => {
-    const csp = buildCsp("abc123", true /* dev */);
-    expect(csp).toContain("'unsafe-eval'");
-  });
-
-  it("development policy does not contain 'unsafe-inline' in script-src", () => {
-    const csp = buildCsp("abc123", true);
-    const scriptSrc = csp.split(";").find((d) => d.trim().startsWith("script-src"));
-    expect(scriptSrc).not.toContain("'unsafe-inline'");
-  });
-
-  it("nonce is present in script-src", () => {
-    const nonce = "testNonce1234==";
-    const csp = buildCsp(nonce, false);
-    expect(csp).toContain(`'nonce-${nonce}'`);
-  });
-
-  it("different calls produce CSP strings referencing their respective nonces", () => {
-    const nonce1 = "nonceAAA=";
-    const nonce2 = "nonceBBB=";
-    const csp1 = buildCsp(nonce1, false);
-    const csp2 = buildCsp(nonce2, false);
-    expect(csp1).toContain(`'nonce-${nonce1}'`);
-    expect(csp2).toContain(`'nonce-${nonce2}'`);
-    expect(csp1).not.toContain(nonce2);
-    expect(csp2).not.toContain(nonce1);
-  });
-
-  it("policy includes required directives", () => {
-    const csp = buildCsp("abc123", false);
+  it("includes required directives", () => {
+    const csp = buildCsp({});
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("object-src 'none'");
@@ -142,77 +33,103 @@ describe("CSP nonce middleware", () => {
 
 describe("CSP connect-src (issue #700)", () => {
   it("allows the configured API origin", () => {
-    const connectSrc = buildConnectSrc({
-      NEXT_PUBLIC_API_URL: "https://api.example.com/v1",
+    expect(buildCsp({ NEXT_PUBLIC_API_URL: "https://api.example.com/v1" })).toContain(
+      "https://api.example.com",
+    );
+  });
+
+  it("allows friendbot and the default Horizon/Soroban hosts", () => {
+    const csp = buildCsp({});
+    expect(csp).toContain("https://friendbot.stellar.org");
+    expect(csp).toContain("https://horizon.stellar.org");
+    expect(csp).toContain("https://horizon-testnet.stellar.org");
+    expect(csp).toContain("https://soroban-testnet.stellar.org");
+  });
+
+  it("allows configured Soroban RPC origins", () => {
+    const csp = buildCsp({
+      NEXT_PUBLIC_SOROBAN_RPC_URL: "https://rpc.example.com",
+      NEXT_PUBLIC_SOROBAN_RPC_TESTNET_URL: "https://rpc-testnet.example.com",
+      NEXT_PUBLIC_SOROBAN_RPC_MAINNET_URL: "https://soroban-mainnet.stellar.org",
     });
-    expect(connectSrc).toContain("https://api.example.com");
+    expect(csp).toContain("https://rpc.example.com");
+    expect(csp).toContain("https://rpc-testnet.example.com");
+    expect(csp).toContain("https://soroban-mainnet.stellar.org");
   });
 
-  it("allows friendbot for the faucet", () => {
-    const connectSrc = buildConnectSrc({});
-    expect(connectSrc).toContain("https://friendbot.stellar.org");
-  });
-
-  it("allows a configured mainnet Soroban RPC origin", () => {
-    const connectSrc = buildConnectSrc({
-      NEXT_PUBLIC_SOROBAN_RPC_URL: "https://soroban-mainnet.stellar.org",
-    });
-    expect(connectSrc).toContain("https://soroban-mainnet.stellar.org");
-  });
-
-  it("keeps the default Horizon and testnet Soroban hosts", () => {
-    const connectSrc = buildConnectSrc({});
-    expect(connectSrc).toContain("https://horizon.stellar.org");
-    expect(connectSrc).toContain("https://horizon-testnet.stellar.org");
-    expect(connectSrc).toContain("https://soroban-testnet.stellar.org");
-  });
-
-  it("does not duplicate origins when the API matches a default host", () => {
-    const connectSrc = buildConnectSrc({
-      NEXT_PUBLIC_API_URL: "https://horizon.stellar.org",
-    });
-    const occurrences = connectSrc.split("https://horizon.stellar.org").length - 1;
-    expect(occurrences).toBe(1);
+  it("does not duplicate origins", () => {
+    const csp = buildCsp({ NEXT_PUBLIC_API_URL: "https://horizon.stellar.org" });
+    expect(csp.split("https://horizon.stellar.org").length - 1).toBe(1);
   });
 
   it("ignores malformed configured URLs", () => {
-    const connectSrc = buildConnectSrc({
+    const csp = buildCsp({
       NEXT_PUBLIC_API_URL: "not a url",
       NEXT_PUBLIC_SOROBAN_RPC_URL: "also bad",
     });
-    expect(connectSrc).toContain("connect-src 'self'");
-    expect(connectSrc).not.toContain("not a url");
-    expect(connectSrc).not.toContain("also bad");
+    expect(csp).not.toContain("not a url");
+    expect(csp).not.toContain("also bad");
   });
 });
 
 describe("CSP framing for /widget (issue #699)", () => {
-  it("widget policy allows framing via frame-ancestors *", () => {
-    const csp = buildWidgetCsp("abc123", false);
+  it("widget policy allows framing and keeps other directives", () => {
+    const csp = buildWidgetCsp({});
     expect(csp).toContain("frame-ancestors *");
     expect(csp).not.toContain("frame-ancestors 'none'");
-  });
-
-  it("non-widget routes keep the enforcing frame-ancestors 'none'", () => {
-    const csp = buildCsp("abc123", false);
-    expect(csp).toContain("frame-ancestors 'none'");
-    expect(csp).not.toContain("frame-ancestors *");
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("base-uri 'self'");
   });
 
   it("selects the widget policy only for /widget paths", () => {
     expect(isWidgetPath("/widget")).toBe(true);
     expect(isWidgetPath("/widget/embed")).toBe(true);
     expect(isWidgetPath("/")).toBe(false);
-    expect(isWidgetPath("/dashboard")).toBe(false);
     expect(isWidgetPath("/widgets")).toBe(false);
   });
 
-  it("widget policy keeps the remaining hardening directives", () => {
-    const csp = buildWidgetCsp("abc123", false);
-    expect(csp).toContain("default-src 'self'");
-    expect(csp).toContain("object-src 'none'");
-    expect(csp).toContain("base-uri 'self'");
-    expect(csp).toContain("form-action 'self'");
-    expect(csp).toContain("upgrade-insecure-requests");
+  it("proxy sets the right header per path", () => {
+    const app = proxy(new NextRequest("http://localhost/"));
+    const widget = proxy(new NextRequest("http://localhost/widget"));
+    expect(app.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
+    expect(widget.headers.get("Content-Security-Policy")).toContain("frame-ancestors *");
+  });
+});
+
+describe("CSP nonce (issue #876)", () => {
+  it("adds the nonce and strict-dynamic to script-src when given one", () => {
+    const csp = buildCsp({}, "abc123");
+    expect(scriptSrc(csp)).toBe("script-src 'self' 'nonce-abc123' 'strict-dynamic'");
+  });
+
+  it("proxy forwards a fresh nonce in the request and the CSP header", () => {
+    const a = proxy(new NextRequest("http://localhost/"));
+    const b = proxy(new NextRequest("http://localhost/"));
+    const nonce = (r: ReturnType<typeof proxy>) =>
+      /'nonce-([^']+)'/.exec(r.headers.get("Content-Security-Policy") ?? "")?.[1];
+    expect(nonce(a)).toBeTruthy();
+    expect(nonce(a)).not.toBe(nonce(b));
+  });
+});
+
+describe("single CSP source of truth (issue #879)", () => {
+  const nextConfigSource = readFileSync(
+    resolve(__dirname, "../../next.config.ts"),
+    "utf8",
+  );
+
+  it("next.config.ts does not emit its own CSP header", () => {
+    expect(nextConfigSource).not.toContain("Content-Security-Policy");
+    expect(nextConfigSource).not.toContain("cspHeader");
+  });
+
+  it("next.config.ts keeps X-Frame-Options for non-widget routes", () => {
+    expect(nextConfigSource).toContain("X-Frame-Options");
+  });
+
+  it("next.config.ts scopes the widget exclusion to /widget and /widget/:path*", () => {
+    expect(nextConfigSource).toContain('source: "/widget"');
+    expect(nextConfigSource).toContain('source: "/widget/:path*"');
+    expect(nextConfigSource).not.toContain("/((?!widget).*)");
   });
 });

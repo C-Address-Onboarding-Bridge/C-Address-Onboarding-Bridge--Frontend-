@@ -21,6 +21,10 @@ export default defineConfig({
       '@stellar/freighter-api': fileURLToPath(
         new URL('./node_modules/@creit.tech/stellar-wallets-kit/node_modules/@stellar/freighter-api', import.meta.url)
       ),
+      // @stellar/freighter-api is not installed (the app moved to
+      // @creit.tech/stellar-wallets-kit). Stub it so tests that indirectly
+      // import stellar.ts don't fail to collect. (#920 / pre-existing)
+      '@stellar/freighter-api': fileURLToPath(new URL('./src/__tests__/helpers/freighter-api-stub.ts', import.meta.url)),
     },
   },
   test: {
@@ -31,5 +35,14 @@ export default defineConfig({
     // Build output and dependencies never hold tests worth collecting; keeping
     // them out of the glob keeps collection off large directory trees.
     exclude: ['node_modules/**', '.next/**', 'public/**'],
+    server: {
+      deps: {
+        // api.ts (and the @/ modules it imports) are TypeScript source — they
+        // must go through the TS→JS transform pipeline rather than Vite's
+        // client-inject oxc pass, which treats them as pre-compiled JS and
+        // chokes on TS type syntax. Inlining forces the full transform. (#920)
+        inline: [/@\//],
+      },
+    },
   },
 });

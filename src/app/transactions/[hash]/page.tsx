@@ -65,12 +65,11 @@ export default function TransactionDetailPage({
   const hydrated = useHydrated();
   const [transportOverride, setTransportOverride] = useState<"polling" | null>(null);
   const liveTransport = transportOverride ?? (hydrated && typeof EventSource === "undefined" ? "polling" : "sse");
-  const requestKey = `${hash}:${network}:${tick}`;
+  const requestKey = `${hash}:${linkNetwork ?? walletNetwork}:${tick}`;
   const currentLoadState = loadedRequestKey === requestKey ? loadState : "loading";
 
   useEffect(() => {
     let cancelled = false;
-    setLoadState("loading");
     findTransactionByHash(hash, walletNetwork, linkNetwork)
       .then((result) => {
         if (cancelled) return;

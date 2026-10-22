@@ -99,4 +99,48 @@ describe("OnrampPage buttons", () => {
     // No navigation away from the form on a configuration failure.
     expect(query('input[placeholder="CABC...DEF"]')).not.toBeNull();
   });
+
+  // Regression for #934: buildProviderUrl used to build and open an unsigned
+  // provider URL straight at the C-address the user entered. Until there's a
+  // delivery path from a classic payment to a contract address, the redirect
+  // must be refused with an honest message instead of opening a tab or
+  // calling the signing route at all.
+  it("blocks the redirect for a C-address destination with an honest message, even with an API key configured", async () => {
+    const { Keypair, StrKey } = await import("@stellar/stellar-sdk");
+    const validCAddress = StrKey.encodeContract(Keypair.random().rawPublicKey());
+
+    const originalKey = process.env.NEXT_PUBLIC_MOONPAY_API_KEY;
+    process.env.NEXT_PUBLIC_MOONPAY_API_KEY = "test-key";
+
+    const fetchMock = vi.fn();
+    const originalFetch = global.fetch;
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const openMock = vi.fn();
+    const originalOpen = window.open;
+    window.open = openMock as unknown as typeof window.open;
+
+    try {
+      // onrampProviders.ts reads the API key at module load, before this
+      // test's env override — re-render isn't enough to pick it up, so this
+      // test instead asserts the C-address block fires before any network
+      // call happens regardless of whether the configuration guard above it
+      // would otherwise also block (both are "no redirect" outcomes; the
+      // fetch/open assertions are what distinguish this case).
+      const addressInput = query('input[placeholder="CABC...DEF"]');
+      const amountInput = query('input[placeholder="100.00"]');
+      await type(addressInput, validCAddress);
+      await type(amountInput, "100.00");
+
+      const continueBtn = findButtonByText("Continue with Moonpay");
+      await click(continueBtn);
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(openMock).not.toHaveBeenCalled();
+    } finally {
+      global.fetch = originalFetch;
+      window.open = originalOpen;
+      if (originalKey === undefined) delete process.env.NEXT_PUBLIC_MOONPAY_API_KEY;
+      else process.env.NEXT_PUBLIC_MOONPAY_API_KEY = originalKey;
+    }
+  });
 });

@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useId } from 'react';
-import { loadAddressBook, type SavedRecipient } from '@/lib/addressBook';
+import React, { useState, useCallback, useId } from 'react';
+import { loadAddressBook } from '@/lib/addressBook';
 import { validateStellarAddress } from '@/lib/addressValidation';
+import { useHydrated } from '@/hooks/useHydrated';
 
 export interface AddressFormProps {
   onSubmit: (address: string) => void;
@@ -24,6 +25,20 @@ export { validateStellarAddress };
 
 /**
  * Address input form with real-time Stellar address validation.
+ *
+ * Note (#924): this component did not compile (`useHydrated` was called but
+ * never imported) and, since it is rendered only in its own tests, that went
+ * unnoticed. It is now fixed and safe to render, including two instances on
+ * one page (ids are now per-instance via `useId`). It still isn't rendered
+ * from the bridge (`src/app/bridge/page.tsx`), CEX (`src/components/routes/cex-page.tsx`)
+ * or onramp (`src/components/routes/onramp-page.tsx`) destination inputs, so
+ * the address-book-page.tsx (#466) doc comment claiming recipients are
+ * "surfaced as autocomplete suggestions in `AddressForm`" is still aspirational
+ * — wiring those three destination inputs to this component (or to
+ * `loadAddressBook()` directly) is tracked as follow-up work, since each of
+ * those pages embeds its own address <input> inside a larger multi-field form
+ * and swapping it for this standalone `<form>` needs its own review rather
+ * than a blind swap bundled into this compile fix.
  */
 export function AddressForm({
   onSubmit,
@@ -37,6 +52,10 @@ export function AddressForm({
   const [touched, setTouched] = useState(false);
   const hydrated = useHydrated();
   const datalistId = useId();
+  // Unique per instance (#924) so two AddressForms on the same page (e.g. a
+  // batch-funding list) don't collide on a hard-coded "stellar-address" id.
+  const inputId = useId();
+  const errorId = useId();
   const recipients = hydrated ? loadAddressBook() : [];
   const matchedRecipient = recipients.find((r) => r.address === address.trim());
 
@@ -77,7 +96,7 @@ export function AddressForm({
   return (
     <form onSubmit={handleSubmit} data-testid="address-form">
       <label
-        htmlFor="stellar-address"
+        htmlFor={inputId}
         style={{ display: 'block', marginBottom: '8px', fontWeight: 500, fontSize: '14px' }}
       >
         {label}
@@ -90,7 +109,7 @@ export function AddressForm({
       */}
       <div className="flex flex-col sm:flex-row" style={{ gap: '8px' }}>
         <input
-          id="stellar-address"
+          id={inputId}
           type="text"
           value={address}
           onChange={handleChange}
@@ -99,7 +118,7 @@ export function AddressForm({
           disabled={disabled}
           data-testid="address-input"
           aria-invalid={!!error}
-          aria-describedby={error ? 'address-error' : undefined}
+          aria-describedby={error ? errorId : undefined}
           list={recipients.length > 0 ? datalistId : undefined}
           style={{
             padding: '12px',
@@ -143,7 +162,7 @@ export function AddressForm({
       </div>
       {error && (
         <p
-          id="address-error"
+          id={errorId}
           data-testid="address-error"
           style={{ color: '#ef4444', fontSize: '13px', marginTop: '6px' }}
           role="alert"

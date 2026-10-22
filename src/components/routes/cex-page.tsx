@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, Copy, Check, ExternalLink, Wallet, X, AlertTriangle, HelpCircle } from "lucide-react";
+import { Building2, Copy, Check, Clock, ExternalLink, Wallet, X, AlertTriangle, HelpCircle } from "lucide-react";
 import { CEX_LIST, type CexConfig } from "@/lib/types";
 import { isCAddress } from "@/lib/stellar";
 import { buildCexDepositMemo, buildCexDepositUri } from "@/lib/cexDeposit";
@@ -195,14 +195,17 @@ export default function CexPage() {
             <LiveRegion message={depositCopyAnnouncement} />
             <LiveRegion message={memoCopyAnnouncement} />
 
-            {/* Bridge deposit address — coming soon (#299) */}
-            <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface-2)] p-4 mb-4 flex items-start gap-3">
-              <Clock className="w-5 h-5 text-[var(--text-muted)] flex-shrink-0 mt-0.5" aria-hidden="true" />
-              <div>
-                <p className="text-sm font-medium mb-1">{t("cex.bridgeComingSoon")}</p>
-                <p className="text-xs text-[var(--text-muted)]">
-                  {t("cex.bridgeComingSoonBody")}
-                </p>
+            {!CEX_DEPOSIT_ADDRESS ? (
+              // Honest "not configured" state rather than a fabricated address:
+              // the operator hasn't provisioned a bridge deposit G-address yet (#680).
+              <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface-2)] p-4 mb-4 flex items-start gap-3">
+                <Clock className="w-5 h-5 text-[var(--text-muted)] flex-shrink-0 mt-0.5" aria-hidden="true" />
+                <div>
+                  <p className="text-sm font-medium mb-1">{t("cex.bridgeComingSoon")}</p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {t("cex.bridgeComingSoonBody")}
+                  </p>
+                </div>
               </div>
             ) : !addressValid ? (
               <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface-2)] p-4 mb-4 text-xs text-[var(--text-muted)]">
@@ -320,15 +323,6 @@ export default function CexPage() {
                   )}
                 </div>
 
-                <a
-                  href={withdrawalUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-sm text-[var(--primary)] hover:underline"
-                >
-                  {t("cex.openExchange", { name: selectedCex.name })}
-                  <ExternalLink className="w-4 h-4" />
-                </a>
               </div>
             ) : (
               <p className="text-sm text-[var(--text-muted)]">{t("cex.enterAddressPrompt")}</p>
@@ -338,6 +332,34 @@ export default function CexPage() {
 
         {/* Sidebar */}
         <div className="space-y-6">
+          {/* Restored after #734 dropped it: the selected exchange's limits and
+              its withdrawal page are useful before an address is entered. */}
+          <div className="card p-6">
+            <h2 className="font-semibold mb-3">{t("cex.exchangeDetailsTitle")}</h2>
+            <dl className="space-y-2 text-sm mb-4">
+              <div className="flex justify-between">
+                <dt className="text-[var(--text-muted)]">{t("cex.exchangeLabel")}</dt>
+                <dd>{selectedCex.name}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-[var(--text-muted)]">{t("cex.minWithdrawalLabel")}</dt>
+                <dd>{selectedCex.minWithdrawal}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-[var(--text-muted)]">{t("cex.feeLabel")}</dt>
+                <dd>{selectedCex.fee}</dd>
+              </div>
+            </dl>
+            <a
+              href={withdrawalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-[var(--border)] text-sm font-medium hover:bg-[var(--surface-2)] transition-colors"
+            >
+              <ExternalLink className="w-4 h-4" aria-hidden="true" />
+              {t("cex.openExchange", { name: selectedCex.name })}
+            </a>
+          </div>
           <div className="card p-6">
             <h2 className="font-semibold mb-3">{t("cex.whyTitle")}</h2>
             <ul className="space-y-2 text-sm text-[var(--text-muted)]">

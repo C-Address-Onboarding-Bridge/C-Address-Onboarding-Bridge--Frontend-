@@ -52,7 +52,7 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
   // The /locks routes this panel polls and claims against don't exist on the
   // backend yet, and claiming sent nothing proving the caller controls the
   // claimant account — hidden until both are resolved. (#672)
-  const enabled = useFeatureFlag("locked_transfers");
+  const flagEnabled = useFeatureFlag("locked_transfers");
   const [locks, setLocks] = useState<LockRecord[]>([]);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [errorState, setError] = useState<string | null>(null);
@@ -61,15 +61,15 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
   const [now, setNow] = useState(() => Date.now());
   const claimingRef = useRef<string | null>(null);
   const targetKey = `${address ?? ""}:${network}`;
-  const enabled = Boolean(address && isNetworkSupported);
-  const loading = enabled && loadedKey !== targetKey;
+  const canPoll = Boolean(address && isNetworkSupported);
+  const loading = canPoll && loadedKey !== targetKey;
   const error = loadedKey === targetKey ? errorState : null;
-  const visibleLocks = enabled && loadedKey === targetKey ? locks : [];
+  const visibleLocks = canPoll && loadedKey === targetKey ? locks : [];
 
   const refresh = useMemo(
-    () => async (isInitial: boolean) => {
-      if (!enabled || !address || !isNetworkSupported) return;
-      if (isInitial) setLoading(true);
+    () => async (isInitial = false) => {
+      if (!flagEnabled || !canPoll || !address || !isNetworkSupported) return;
+      void isInitial; // loading is derived — no manual setLoading needed
       try {
         const result = await listIncomingLocks(address, network);
         setLocks(sortLocksByUnlockTime(result));
@@ -83,13 +83,13 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
         setLoadedKey(targetKey);
       }
     },
-    [enabled, address, network, isNetworkSupported]
+    [flagEnabled, canPoll, address, network, isNetworkSupported]
   );
 
   useEffect(() => {
-    if (!enabled || !address || !isNetworkSupported) {
-      setLocks([]);
-      setLoading(false);
+    if (!flagEnabled || !canPoll || !address || !isNetworkSupported) {
+      // visibleLocks is derived as [] when canPoll is false — no setState
+      // needed here; calling it would trigger a cascading render. (#922)
       return;
     }
     let cancelled = false;
@@ -112,7 +112,7 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
       clearInterval(interval);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [address, network, isNetworkSupported, refresh]);
+  }, [flagEnabled, canPoll, address, network, isNetworkSupported, refresh]);
 
   // Countdown tick: only runs while at least one lock is still pending and
   // unmatured, so the panel doesn't re-render every second once everything
@@ -162,7 +162,7 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
     }
   };
 
-  if (!enabled || !address) return null;
+  if (!flagEnabled || !address) return null;
 
   const announcement = feedback
     ? feedback.ok
