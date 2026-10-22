@@ -558,3 +558,71 @@ export async function submitTransaction(
   }
   return (await response.json()) as BridgeTransactionData;
 }
+
+/* -------------------------------------------------------------------------- */
+/* #932 — Date-ranged transaction export (paginated)                          */
+/* -------------------------------------------------------------------------- */
+
+/** Export file format offered by the date-ranged export control (#470). */
+export type ExportFormat = "csv" | "json";
+
+export interface TransactionExportPageParams {
+  address: string;
+  network: StellarNetwork;
+  /** Range start, inclusive, as a Unix epoch ms timestamp. */
+  from: number;
+  /** Range end, inclusive, as a Unix epoch ms timestamp. */
+  to: number;
+  /** Opaque pagination cursor from the previous page's response; omitted for the first page. */
+  cursor?: string;
+}
+
+export interface TransactionExportPage {
+  rows: BridgeTransactionData[];
+  /** Cursor to pass on the next call, or null/undefined once the last page has been returned. */
+  nextCursor?: string | null;
+  /** Total row count for the whole range, when the backend can report it up front. */
+  totalCount: number | null;
+}
+
+/**
+ * Fetches one page of transactions for the date-ranged export control
+ * (#470), walking a paginated endpoint via `cursor` rather than requesting
+ * the whole range at once.
+ *
+ * PLACEHOLDER ENDPOINT: no dedicated export route exists in this repo yet.
+ * `GET /api/v1/transactions/export` with `address`/`network`/`from`/`to`/
+ * `cursor` query params, returning `{ rows, nextCursor, totalCount }`, is a
+ * best guess that must be reconciled against the real API once it's
+ * documented. Until then this throws a clear error on any non-2xx response
+ * (including 404, the expected result against today's backend) rather than
+ * silently resolving with no rows, since `TransactionExportControl` already
+ * distinguishes "the request failed" from "the range is genuinely empty".
+ */
+export async function fetchTransactionExportPage(
+  params: TransactionExportPageParams
+): Promise<TransactionExportPage> {
+  const query = new URLSearchParams({
+    address: params.address,
+    network: params.network,
+    from: String(params.from),
+    to: String(params.to),
+  });
+  if (params.cursor) query.set("cursor", params.cursor);
+
+  const response = await fetch(`${API_BASE_URL}/api/v1/transactions/export?${query.toString()}`);
+
+  if (!response.ok) {
+    throw new Error(await extractApiErrorMessage(response, `Transaction export failed (${response.status})`));
+  }
+
+  const body = (await response.json()) as Partial<TransactionExportPage>;
+  if (!Array.isArray(body.rows)) {
+    throw new Error("Transaction export response was missing its rows.");
+  }
+  return {
+    rows: body.rows,
+    nextCursor: body.nextCursor ?? null,
+    totalCount: typeof body.totalCount === "number" ? body.totalCount : null,
+  };
+}
