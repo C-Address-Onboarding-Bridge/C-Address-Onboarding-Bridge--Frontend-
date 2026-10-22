@@ -485,6 +485,8 @@ interface HorizonPayment {
    */
   transaction_successful?: boolean;
   created_at?: string;
+  /** Opaque pagination cursor, used by fetchTransactionsForRange to page forward. (#938) */
+  paging_token?: string;
   transaction_hash?: string;
   funder?: string;
   account?: string;
@@ -707,6 +709,62 @@ export async function fetchRecentTransactions(
   return (payments.records as HorizonPayment[])
     .map(mapHorizonPayment)
     .filter((tx): tx is BridgeTransactionData => tx !== null);
+}
+
+/** Hard cap on pages fetched by fetchTransactionsForRange, regardless of range. */
+const MAX_RANGE_PAGES = 20;
+const RANGE_PAGE_SIZE = 50;
+
+/**
+ * Fetches enough recent payment history to cover a given day range, paging
+ * by cursor rather than relying on a single fixed-size page. (#938)
+ *
+ * The dashboard's range-selectable analytics (7/30/90 days) previously fed
+ * off a single `fetchRecentTransactions(..., 10)` call: any account with
+ * more than 10 payments in the window saw truncated counts/volume, and
+ * switching ranges changed nothing because every bucket older than the
+ * 10th payment was zero. This pages forward (oldest-ward) until either a
+ * page's oldest record is older than the requested range, a page comes
+ * back short (end of history), or MAX_RANGE_PAGES is hit — a sane cap so a
+ * very active account can't trigger unbounded Horizon requests.
+ */
+export async function fetchTransactionsForRange(
+  address: string,
+  network: StellarNetwork,
+  rangeDays: number
+): Promise<BridgeTransactionData[]> {
+  if (!isValidStellarAddress(address)) {
+    return [];
+  }
+  const cutoff = Date.now() - Math.max(rangeDays, 0) * 24 * 60 * 60 * 1000;
+  const server = await getHorizonServer(network);
+
+  const all: BridgeTransactionData[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < MAX_RANGE_PAGES; page++) {
+    let call = server.payments().forAccount(address).limit(RANGE_PAGE_SIZE).order("desc");
+    if (cursor) call = call.cursor(cursor);
+    // Errors propagate so an outage is shown as an error, not an empty
+    // history (consistent with fetchRecentTransactions, #720).
+    const result = await call.call();
+    const records = result.records as HorizonPayment[];
+    if (records.length === 0) break;
+
+    for (const record of records) {
+      const tx = mapHorizonPayment(record);
+      if (tx) all.push(tx);
+    }
+
+    const oldest = records[records.length - 1];
+    cursor = oldest.paging_token;
+    const oldestTimestamp = new Date(oldest.created_at || Date.now()).getTime();
+
+    if (oldestTimestamp < cutoff) break; // Paged far enough back
+    if (records.length < RANGE_PAGE_SIZE) break; // End of history
+  }
+
+  return all;
 }
 
 /**

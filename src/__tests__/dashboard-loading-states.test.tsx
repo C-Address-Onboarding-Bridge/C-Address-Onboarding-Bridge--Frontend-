@@ -18,6 +18,9 @@ vi.mock("@/contexts/FeatureFlagContext", () => ({
 const ADDRESS = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5V3VQ";
 
 const getAccountBalances = vi.fn();
+// Named for the dashboard's call site (fetchTransactionsForRange, #938) —
+// kept as `fetchRecentTransactions` below purely so the rest of this file's
+// many call sites didn't all need renaming.
 const fetchRecentTransactions = vi.fn();
 
 vi.mock("@/lib/stellar", async (importOriginal) => {
@@ -25,7 +28,7 @@ vi.mock("@/lib/stellar", async (importOriginal) => {
   return {
     ...actual,
     getAccountBalances: (...args: unknown[]) => getAccountBalances(...args),
-    fetchRecentTransactions: (...args: unknown[]) => fetchRecentTransactions(...args),
+    fetchTransactionsForRange: (...args: unknown[]) => fetchRecentTransactions(...args),
   };
 });
 
