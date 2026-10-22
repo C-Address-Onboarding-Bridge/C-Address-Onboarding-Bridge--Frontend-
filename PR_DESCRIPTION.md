@@ -1,18 +1,19 @@
 ## Summary
 
-- Add focused tests for BatchFundingForm review totals, fee estimates, skipped rows, and returning to edit.
-- Cover batch parser edge cases for mixed line endings, original line numbers, and amount precision.
-- Test TelemetryConsentPrompt visibility and consent actions.
-- Test ErrorBoundary recovery, custom fallbacks, error reporting, and in-flight transaction links.
+- Add focused Vitest and Testing Library coverage for `StatusBanner` (#752).
+- Add focused Vitest and Testing Library coverage for `OfflineBanner` (#749).
+
+## Issue notes
+
+- `OnboardingModal` already has an existing focused test suite; no additional changes were needed for #750.
+- `src/components/qr-code.tsx`, the target named by #751, is absent from this checkout, so that issue is not addressed by this PR.
 
 ## Validation
 
-- Focused issue tests: 41 passed.
-- Lint: passed with existing warnings.
-- Full test suite, typecheck, and production build are blocked by unrelated pre-existing failures.
-- E2E command completes, but all 21 specs are skipped by the current setup.
+- Focused tests for both added suites: 10 passed.
+- ESLint passed for both added test files.
+- The full test suite has pre-existing failures (329 failed tests); project typecheck reports existing readonly `NODE_ENV` errors in `src/lib/__tests__/featureFlags.test.ts`.
+- GitHub CI was not run for this unpublished branch.
 
-Closes #745
-Closes #746
-Closes #747
-Closes #748
+Closes #749
+Closes #752
