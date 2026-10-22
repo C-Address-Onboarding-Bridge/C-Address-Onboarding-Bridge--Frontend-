@@ -77,6 +77,33 @@ describe("FundingSchedulesPage (#557)", () => {
     expect(await screen.findByText("Rent Updated")).toBeInTheDocument();
   });
 
+  it("gives the inline edit controls accessible names instead of 'edit text, blank' (#930)", async () => {
+    const saved = createFundingSchedule("Rent", C_ADDRESS, "100", "USDC", "weekly")!;
+    render(<FundingSchedulesPage />);
+    await screen.findByText("Rent");
+
+    fireEvent.click(screen.getByTestId(`edit-button-${saved.id}`));
+
+    expect(screen.getByLabelText("Label for Rent")).toBe(screen.getByTestId(`edit-label-input-${saved.id}`));
+    expect(screen.getByLabelText("Address for Rent")).toBe(screen.getByTestId(`edit-address-input-${saved.id}`));
+    expect(screen.getByLabelText("Amount for Rent")).toBe(screen.getByTestId(`edit-amount-input-${saved.id}`));
+    expect(screen.getByLabelText("Asset for Rent")).toBe(screen.getByTestId(`edit-asset-select-${saved.id}`));
+    expect(screen.getByLabelText("Frequency for Rent")).toBe(screen.getByTestId(`edit-frequency-select-${saved.id}`));
+  });
+
+  it("moves focus to the first edit field, and back to the Edit button on cancel (#930)", async () => {
+    const saved = createFundingSchedule("Rent", C_ADDRESS, "100", "USDC", "weekly")!;
+    render(<FundingSchedulesPage />);
+    await screen.findByText("Rent");
+
+    const editButton = screen.getByTestId(`edit-button-${saved.id}`);
+    fireEvent.click(editButton);
+    expect(screen.getByTestId(`edit-label-input-${saved.id}`)).toHaveFocus();
+
+    fireEvent.click(screen.getByTestId(`cancel-edit-${saved.id}`));
+    expect(editButton).toHaveFocus();
+  });
+
   it("cancels an edit without saving changes", async () => {
     createFundingSchedule("Rent", C_ADDRESS, "100", "USDC", "weekly");
     render(<FundingSchedulesPage />);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BookUser, Download, Pencil, Trash2, Upload, X } from "lucide-react";
 import { truncateAddress } from "@/components/AddressForm";
 import LiveRegion from "@/components/live-region";
@@ -46,6 +46,24 @@ export default function AddressBookPage() {
   const [notice, setNotice] = useState("");
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus management for the inline edit form (#930): the first field gets
+  // focus when editing starts, and the Edit button that opened it gets focus
+  // back on Save or Cancel, so keyboard users don't lose their place when the
+  // row swaps between its display and edit layouts.
+  const editLabelInputRef = useRef<HTMLInputElement>(null);
+  const editButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const lastEditedId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (editingId) {
+      editLabelInputRef.current?.focus();
+      lastEditedId.current = editingId;
+    } else if (lastEditedId.current) {
+      editButtonRefs.current[lastEditedId.current]?.focus();
+      lastEditedId.current = null;
+    }
+  }, [editingId]);
 
   const refresh = () => setStoredRecipients(loadAddressBook());
 
@@ -289,9 +307,11 @@ export default function AddressBookPage() {
                 <li key={recipient.id} className="p-3 rounded-lg bg-[var(--surface-2)]">
                   <form onSubmit={handleSaveEdit} className="space-y-2">
                     <input
+                      ref={editLabelInputRef}
                       type="text"
                       value={editLabel}
                       onChange={(e) => setEditLabel(e.target.value)}
+                      aria-label={`Label for ${recipient.label}`}
                       data-testid={`edit-label-input-${recipient.id}`}
                       className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-sm"
                     />
@@ -299,6 +319,7 @@ export default function AddressBookPage() {
                       type="text"
                       value={editAddress}
                       onChange={(e) => setEditAddress(e.target.value)}
+                      aria-label={`Address for ${recipient.label}`}
                       data-testid={`edit-address-input-${recipient.id}`}
                       className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-sm font-mono"
                     />
@@ -341,6 +362,9 @@ export default function AddressBookPage() {
                   </div>
                   <div className="flex gap-1 shrink-0">
                     <button
+                      ref={(el) => {
+                        editButtonRefs.current[recipient.id] = el;
+                      }}
                       type="button"
                       onClick={() => startEdit(recipient)}
                       aria-label={`Edit ${recipient.label}`}
