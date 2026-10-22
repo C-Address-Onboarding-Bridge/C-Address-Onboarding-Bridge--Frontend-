@@ -15,6 +15,12 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // @stellar/freighter-api is a transitive dep of @creit.tech/stellar-wallets-kit
+      // and may not be hoisted to the top-level node_modules. Point Vite at the
+      // nested copy so imports from src/lib/stellar.ts resolve in test runs.
+      '@stellar/freighter-api': fileURLToPath(
+        new URL('./node_modules/@creit.tech/stellar-wallets-kit/node_modules/@stellar/freighter-api', import.meta.url)
+      ),
       // @stellar/freighter-api is not installed (the app moved to
       // @creit.tech/stellar-wallets-kit). Stub it so tests that indirectly
       // import stellar.ts don't fail to collect. (#920 / pre-existing)
