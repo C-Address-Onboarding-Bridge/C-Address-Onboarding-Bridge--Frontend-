@@ -490,20 +490,16 @@ export async function claimLock(
  *
  * Returns null both when the account has no tier data yet and when the
  * request itself fails — callers treat "no data" as "hide the tier display"
- * either way
+ * either way.
  */
 export async function getFeeTierPreview(
   address: string,
   network: StellarNetwork
 ): Promise<FeeTierStatus | null> {
   try {
-    const response = await fetch(
-      `/api/backend/referrals/stats?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
-    );
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as FeeTierStatus;
+    const volume = await getRebateVolume(address, network);
+    if (volume === null) return null;
+    return buildFeeTierStatus(volume);
   } catch {
     return null;
   }

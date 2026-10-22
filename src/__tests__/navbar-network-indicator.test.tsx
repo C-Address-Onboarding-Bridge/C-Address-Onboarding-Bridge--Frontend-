@@ -169,21 +169,20 @@ describe("Navbar network switcher (#480)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Network: Testnet\. Change network/i }));
 
     expect(screen.getByRole("menu", { name: /switch network/i })).not.toBeNull();
-    expect(screen.getByRole("menuitem", { name: /Mainnet/ })).not.toBeNull();
-    expect(screen.getByRole("menuitem", { name: /Testnet/ })).not.toBeNull();
+    expect(screen.getByRole("menuitemradio", { name: /Mainnet/ })).not.toBeNull();
+    expect(screen.getByRole("menuitemradio", { name: /Testnet/ })).not.toBeNull();
   });
 
-  it("marks the current network as Current and disables it", async () => {
+  it("marks the current network as aria-checked and shows Current label", async () => {
     await act(async () => {
       render(<Navbar />);
     });
     fireEvent.click(screen.getByRole("button", { name: /Network: Testnet\. Change network/i }));
 
-    const testnet = screen.getByRole("menuitem", { name: /Testnet/ });
-    expect(testnet.getAttribute("aria-disabled")).toBeNull(); // disabled via attribute
-    expect(testnet.hasAttribute("disabled")).toBe(true);
+    const testnet = screen.getByRole("menuitemradio", { name: /Testnet/ });
+    expect(testnet.getAttribute("aria-checked")).toBe("true");
     expect(testnet.textContent).toContain("Current");
-    expect(screen.getByRole("menuitem", { name: /Mainnet/ }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("menuitemradio", { name: /Mainnet/ }).getAttribute("aria-checked")).toBe("false");
   });
 
   it("requests the switch through the wallet when another network is chosen", async () => {
@@ -193,7 +192,7 @@ describe("Navbar network switcher (#480)", () => {
       render(<Navbar />);
     });
     fireEvent.click(screen.getByRole("button", { name: /Network: Mainnet\. Change network/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Testnet/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Testnet/ }));
 
     expect(mockSwitchNetwork).toHaveBeenCalledWith("TESTNET");
   });
@@ -206,7 +205,7 @@ describe("Navbar network switcher (#480)", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /Network: Mainnet\. Change network/i }));
     await act(async () => {
-      fireEvent.click(screen.getByRole("menuitem", { name: /Testnet/ }));
+      fireEvent.click(screen.getByRole("menuitemradio", { name: /Testnet/ }));
     });
 
     expect(screen.getByRole("status").textContent).toMatch(/Change the network in your wallet/i);
@@ -220,9 +219,123 @@ describe("Navbar network switcher (#480)", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /Network: Mainnet\. Change network/i }));
     await act(async () => {
-      fireEvent.click(screen.getByRole("menuitem", { name: /Testnet/ }));
+      fireEvent.click(screen.getByRole("menuitemradio", { name: /Testnet/ }));
     });
 
     expect(screen.getByRole("status").textContent).toMatch(/cancelled in the wallet/i);
+  });
+});
+
+describe("Navbar network switcher keyboard a11y (#904)", () => {
+  beforeEach(() => {
+    mockSwitchNetwork.mockReset();
+    setNetworkState({});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("closes the menu and returns focus to trigger on Escape", async () => {
+    await act(async () => {
+      render(<Navbar />);
+    });
+    const trigger = screen.getByRole("button", { name: /Network: Testnet\. Change network/i });
+    fireEvent.click(trigger);
+    expect(screen.queryByRole("menu", { name: /switch network/i })).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+
+    expect(screen.queryByRole("menu", { name: /switch network/i })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("closes the menu on outside mousedown", async () => {
+    await act(async () => {
+      render(<Navbar />);
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Network: Testnet\. Change network/i }));
+    expect(screen.queryByRole("menu", { name: /switch network/i })).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.mouseDown(document.body);
+    });
+
+    expect(screen.queryByRole("menu", { name: /switch network/i })).toBeNull();
+  });
+
+  it("moves focus to next item on ArrowDown and wraps around", async () => {
+    await act(async () => {
+      render(<Navbar />);
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Network: Testnet\. Change network/i }));
+
+    const items = screen.getAllByRole("menuitemradio");
+    // First enabled item gets focus on open (via requestAnimationFrame — trigger manually)
+    items[0].focus();
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+    });
+    expect(document.activeElement).toBe(items[1]);
+
+    // Wrap from last to first
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+    });
+    expect(document.activeElement).toBe(items[0]);
+  });
+
+  it("moves focus to previous item on ArrowUp and wraps around", async () => {
+    await act(async () => {
+      render(<Navbar />);
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Network: Testnet\. Change network/i }));
+
+    const items = screen.getAllByRole("menuitemradio");
+    items[0].focus();
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowUp" });
+    });
+    // Wraps to last
+    expect(document.activeElement).toBe(items[items.length - 1]);
+  });
+
+  it("moves focus to first item on Home and last item on End", async () => {
+    await act(async () => {
+      render(<Navbar />);
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Network: Testnet\. Change network/i }));
+
+    const items = screen.getAllByRole("menuitemradio");
+    items[1].focus();
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Home" });
+    });
+    expect(document.activeElement).toBe(items[0]);
+
+    items[0].focus();
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "End" });
+    });
+    expect(document.activeElement).toBe(items[items.length - 1]);
+  });
+
+  it("uses menuitemradio role with aria-checked on each item", async () => {
+    setNetworkState({ networkStatus: "PUBLIC", network: "PUBLIC", walletNetworkName: "PUBLIC" });
+    await act(async () => {
+      render(<Navbar />);
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Network: Mainnet\. Change network/i }));
+
+    const mainnet = screen.getByRole("menuitemradio", { name: /Mainnet/ });
+    const testnet = screen.getByRole("menuitemradio", { name: /Testnet/ });
+    expect(mainnet.getAttribute("aria-checked")).toBe("true");
+    expect(testnet.getAttribute("aria-checked")).toBe("false");
   });
 });

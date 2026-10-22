@@ -14,6 +14,9 @@
 /coverage
 /playwright-report/
 /test-results/
+# Vitest / Jest snapshot files
+**/__snapshots__/
+*.snap
 
 # next.js
 /.next/
@@ -41,3 +44,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# PR description scratch files (branch bookkeeping, not documentation)
+pr-description*.md
+docs-pr-description*.md
