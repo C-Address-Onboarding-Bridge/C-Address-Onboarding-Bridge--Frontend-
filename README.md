@@ -157,3 +157,6 @@ MIT
 
 <!-- handsoff-issue-463 -->
 - #463: feat: multi-asset portfolio view on the dashboard
+
+<!-- handsoff-issue-880 -->
+- #880: bug: bridge form persistence for mobile wallet hand-offs (#487) is never used

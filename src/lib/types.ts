@@ -150,6 +150,11 @@ export const HORIZON_URL = {
   TESTNET: process.env.NEXT_PUBLIC_HORIZON_URL_TESTNET ?? "https://horizon-testnet.stellar.org",
 } as const;
 
+// Optional transaction-status service (stellar.ts). When set, its origin must
+// be allowed by the CSP connect-src or status polling is blocked. (#882)
+export const TRANSACTION_STATUS_URL =
+  process.env.NEXT_PUBLIC_TRANSACTION_STATUS_URL ?? "";
+
 /**
  * Returns a descriptive configuration error when a required URL is empty, or
  * `null` when the value is usable. Callers surface the message instead of
@@ -217,6 +222,6 @@ export const CEX_LIST = [
     supportedNetworks: ["Stellar"],
     minWithdrawal: "15 USDC",
     fee: "0.15 USDC",
-    withdrawalUrl: "https://www.kraken.com/withdraw",
-  },
-] as const satisfies readonly CexConfig[];
+    withdrawalUrl: "https://www.kraken.com/wi
+
+/* … truncated 57 chars — edit only what you need near the top … */

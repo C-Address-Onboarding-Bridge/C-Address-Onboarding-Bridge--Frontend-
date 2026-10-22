@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { NextRequest } from "next/server";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { buildCsp, buildWidgetCsp, isWidgetPath, proxy } from "@/proxy";
 
 /**
@@ -107,5 +109,27 @@ describe("CSP nonce (issue #876)", () => {
       /'nonce-([^']+)'/.exec(r.headers.get("Content-Security-Policy") ?? "")?.[1];
     expect(nonce(a)).toBeTruthy();
     expect(nonce(a)).not.toBe(nonce(b));
+  });
+});
+
+describe("single CSP source of truth (issue #879)", () => {
+  const nextConfigSource = readFileSync(
+    resolve(__dirname, "../../next.config.ts"),
+    "utf8",
+  );
+
+  it("next.config.ts does not emit its own CSP header", () => {
+    expect(nextConfigSource).not.toContain("Content-Security-Policy");
+    expect(nextConfigSource).not.toContain("cspHeader");
+  });
+
+  it("next.config.ts keeps X-Frame-Options for non-widget routes", () => {
+    expect(nextConfigSource).toContain("X-Frame-Options");
+  });
+
+  it("next.config.ts scopes the widget exclusion to /widget and /widget/:path*", () => {
+    expect(nextConfigSource).toContain('source: "/widget"');
+    expect(nextConfigSource).toContain('source: "/widget/:path*"');
+    expect(nextConfigSource).not.toContain("/((?!widget).*)");
   });
 });
