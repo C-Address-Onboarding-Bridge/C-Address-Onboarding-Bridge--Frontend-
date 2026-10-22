@@ -82,7 +82,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // Read the per-request CSP nonce set by the proxy (#698). The enforcing
   // Content-Security-Policy uses `script-src 'self' 'nonce-…'`, so every inline
   // script must carry the matching nonce or the browser blocks it.
-  const nonce = headers().get("x-nonce") ?? undefined;
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
 
   const structuredData = {
     "@context": "https://schema.org",
