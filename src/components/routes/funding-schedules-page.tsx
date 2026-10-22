@@ -24,6 +24,9 @@ import {
 import { useHydrated } from "@/hooks/useHydrated";
 import { FUNDING_LINK_ASSETS } from "@/lib/fundingLink";
 import { ROUTES } from "@/lib/routes";
+import { APP_NETWORK } from "@/lib/types";
+
+const SCHEDULE_NETWORKS: Array<"TESTNET" | "PUBLIC"> = ["TESTNET", "PUBLIC"];
 
 /**
  * Recurring funding schedules page (#557).
@@ -39,13 +42,19 @@ export default function FundingSchedulesPage() {
   const [storedSchedules, setStoredSchedules] = useState<FundingSchedule[]>([]);
   const hydrated = useHydrated();
   const schedules = hydrated ? loadFundingSchedules() : storedSchedules;
-
+  // This page is deliberately not wallet-gated (see module doc above), so it
+  // reads APP_NETWORK — the app's configured default network — rather than
+  // the wallet context, which may not even be mounted here. A new or edited
+  // schedule now defaults to that instead of hard-coding TESTNET, so a
+  // mainnet-configured deployment doesn't hand out testnet reminders whose
+  // "Open funding link" points at the wrong chain for a real-money
+  // reminder. (#926)
   const [newLabel, setNewLabel] = useState("");
   const [newAddress, setNewAddress] = useState("");
   const [newAmount, setNewAmount] = useState("");
   const [newAsset, setNewAsset] = useState<string>(FUNDING_LINK_ASSETS[0]);
   const [newFrequency, setNewFrequency] = useState<string>(FUNDING_FREQUENCIES[0]);
-  const [newNetwork, setNewNetwork] = useState<"TESTNET" | "PUBLIC">("TESTNET");
+  const [newNetwork, setNewNetwork] = useState<"TESTNET" | "PUBLIC">(APP_NETWORK);
   const [addError, setAddError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -104,7 +113,7 @@ export default function FundingSchedulesPage() {
     setNewLabel("");
     setNewAddress("");
     setNewAmount("");
-    setNewNetwork("TESTNET");
+    setNewNetwork(APP_NETWORK);
     refresh();
     setNotice(`Saved "${created.label}".`);
   };
@@ -297,6 +306,24 @@ export default function FundingSchedulesPage() {
                 ))}
               </select>
             </div>
+            <div>
+              <label htmlFor="schedule-network" className="block text-sm font-medium mb-1.5">
+                Network
+              </label>
+              <select
+                id="schedule-network"
+                value={newNetwork}
+                onChange={(e) => setNewNetwork(e.target.value as "TESTNET" | "PUBLIC")}
+                data-testid="schedule-network-select"
+                className="w-full px-4 py-2.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
+              >
+                {SCHEDULE_NETWORKS.map((net) => (
+                  <option key={net} value={net}>
+                    {net}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           {addError && (
             <p role="alert" data-testid="add-schedule-error" className="text-xs text-[var(--error)]">
@@ -380,6 +407,19 @@ export default function FundingSchedulesPage() {
                         ))}
                       </select>
                     </div>
+                    <select
+                      value={editNetwork}
+                      onChange={(e) => setEditNetwork(e.target.value as "TESTNET" | "PUBLIC")}
+                      aria-label={`Network for ${schedule.label}`}
+                      data-testid={`edit-network-select-${schedule.id}`}
+                      className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-sm"
+                    >
+                      {SCHEDULE_NETWORKS.map((net) => (
+                        <option key={net} value={net}>
+                          {net}
+                        </option>
+                      ))}
+                    </select>
                     {editError && (
                       <p role="alert" data-testid="edit-schedule-error" className="text-xs text-[var(--error)]">
                         {editError}
@@ -425,6 +465,8 @@ export default function FundingSchedulesPage() {
                       <p className="text-xs text-[var(--text-muted)] mt-0.5">
                         {schedule.amount} {schedule.asset} · {formatFrequency(schedule.frequency)} · Next:{" "}
                         {new Date(schedule.nextRunAt).toLocaleDateString()}
+                        {" · "}
+                        <span data-testid={`schedule-network-${schedule.id}`}>{schedule.network}</span>
                       </p>
                     </div>
                     <div className="flex gap-1 shrink-0">

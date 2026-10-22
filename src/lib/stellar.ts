@@ -466,6 +466,18 @@ export interface AccountBalances {
   balances: { asset: string; amount: string; asset_issuer?: string }[];
   /** True when the account does not exist on-chain (unfunded). (#293) */
   unfunded?: boolean;
+  /**
+   * Horizon's `subentry_count`: trustlines, offers, signers and data entries,
+   * each of which raises the account's minimum XLM reserve by one base
+   * reserve (0.5 XLM). Defaults to 0 for callers (and test fixtures) that
+   * don't fetch it, which is only accurate for a plain unfunded/no-trustline
+   * account. (#925)
+   */
+  subentryCount?: number;
+  /** Sponsored-reserve entries this account sponsors for others; each adds one base reserve. (#925) */
+  numSponsoring?: number;
+  /** Entries this account's own reserve requirement is sponsored away from; each removes one base reserve. (#925) */
+  numSponsored?: number;
 }
 
 interface HorizonBalance {
@@ -473,6 +485,8 @@ interface HorizonBalance {
   asset_code?: string;
   asset_issuer?: string;
   balance: string;
+  /** Present on every balance entry; "0" when nothing is offered for sale. (#925) */
+  selling_liabilities?: string;
 }
 
 /**
@@ -643,17 +657,25 @@ async function loadAccountBalances(
   address: string,
   network: StellarNetwork
 ): Promise<AccountBalances> {
-  const account = await fetchHorizonJson<{ balances?: HorizonBalance[] }>(
-    network,
-    `/accounts/${encodeURIComponent(address)}`
-  );
+  const account = await fetchHorizonJson<{
+    balances?: HorizonBalance[];
+    subentry_count?: number;
+    num_sponsoring?: number;
+    num_sponsored?: number;
+  }>(network, `/accounts/${encodeURIComponent(address)}`);
   const balances = (account.balances ?? []).map((b) => ({
     asset: b.asset_type === "native" ? "XLM" : (b.asset_code || "unknown"),
     amount: b.balance,
     ...(b.asset_issuer ? { asset_issuer: b.asset_issuer } : {}),
   }));
   const total = balances.find((b) => b.asset === "XLM")?.amount || "0";
-  return { total, balances };
+  return {
+    total,
+    balances,
+    subentryCount: account.subentry_count ?? 0,
+    numSponsoring: account.num_sponsoring ?? 0,
+    numSponsored: account.num_sponsored ?? 0,
+  };
 }
 
 /**
@@ -1435,8 +1457,52 @@ export function getExplorerUrl(
   return `${base}/${type}/${safeId}`;
 }
 
-export function getAccountMinimumBalance(): string {
-  return "1.0";
+/** One base reserve, in stroops: 0.5 XLM. (#925) */
+const BASE_RESERVE_STROOPS = 5_000_000n;
+
+/**
+ * Converts a Stellar amount string (up to 7 decimal places) to stroops as a
+ * `bigint`, avoiding the float rounding a plain `Number` conversion produces
+ * (e.g. `0.3 - 0.00002` in floats is `0.29998000000000004`). (#925)
+ */
+function toStroopsBigInt(amount: string): bigint {
+  const [whole, frac = ""] = amount.split(".");
+  const fracPadded = (frac + "0000000").slice(0, 7);
+  return BigInt(whole || "0") * 10_000_000n + BigInt(fracPadded || "0");
+}
+
+/**
+ * The account's current minimum XLM reserve, in stroops: on Stellar this is
+ * `(2 + subentry_count + num_sponsoring - num_sponsored) × base_reserve`
+ * (0.5 XLM per unit), not a flat 1 XLM — an account with a single trustline
+ * (e.g. this app's USDC support) already needs 1.5 XLM. (#925)
+ */
+function minimumReserveStroops(balances: AccountBalances): bigint {
+  const units =
+    2n +
+    BigInt(balances.subentryCount ?? 0) +
+    BigInt(balances.numSponsoring ?? 0) -
+    BigInt(balances.numSponsored ?? 0);
+  // Never negative: sponsorship bookkeeping shouldn't be able to push the
+  // reserve below the 2-unit floor every account carries.
+  return (units < 2n ? 2n : units) * BASE_RESERVE_STROOPS;
+}
+
+/**
+ * Human-readable (XLM) minimum balance for display.
+ *
+ * Without `balances` this falls back to the old flat "1.0" estimate — kept
+ * only for callers that don't have fresh account state to hand; prefer
+ * passing `balances` (from {@link getAccountBalances}) for an accurate
+ * figure, since the real reserve depends on subentry/sponsorship counts that
+ * aren't knowable otherwise. (#925)
+ */
+export function getAccountMinimumBalance(balances?: AccountBalances): string {
+  if (!balances) return "1.0";
+  const stroops = minimumReserveStroops(balances);
+  const whole = stroops / 10_000_000n;
+  const frac = stroops % 10_000_000n;
+  return frac === 0n ? `${whole}.0` : `${whole}.${frac.toString().padStart(7, "0").replace(/0+$/, "")}`;
 }
 
 /** Percentiles of recently charged fees a bid may be taken from. (#758) */
@@ -1635,10 +1701,17 @@ export interface SimulationSuccess {
   feeStroops: string;
   /** Human-readable fee, e.g. "0.00002 XLM". */
   feeXlm: string;
-  /** Amount the recipient would receive after fees (XLM only). */
+  /**
+   * Amount the recipient receives. On Stellar a `payment` operation delivers
+   * exactly the requested amount — the network fee is charged to the
+   * *source* account separately, on top of the payment, so this always
+   * equals `grossAmount` (it is not fee-adjusted). (#923)
+   */
   netAmount: string;
   /** The gross amount requested. */
   grossAmount: string;
+  /** Who pays the network fee. Always "sender" on Stellar. (#923) */
+  feePaidBy: "sender";
   asset: string;
   recipient: string;
 }
@@ -1688,9 +1761,16 @@ function formatFeeXlm(xlm: number): string {
  * the current fee bid, it returns either the fee/net-amount/recipient preview
  * or the specific reason the payment would fail.
  *
- * Fees are paid in XLM. For XLM payments the fee is deducted from the sent
- * amount (net < gross); for other assets the recipient receives the full
- * amount and the fee is charged against the XLM balance instead.
+ * Fees are paid in XLM and always charged to the source account on top of
+ * the payment (never deducted from the sent amount — see #923), so the fee
+ * must be covered by spendable XLM regardless of which asset is sent.
+ *
+ * Spendable-balance checks are done in stroops as `bigint` (#925): the
+ * minimum reserve is computed from the account's real subentry/sponsorship
+ * counts rather than a flat 1 XLM, open sell offers (`sellingLiabilities`)
+ * are excluded from what's spendable, and the fee is required on top of the
+ * amount — for XLM against `total - reserve - sellingLiabilities`, and for
+ * other assets against the XLM side separately from the token's own balance.
  */
 export function simulatePayment(
   input: SimulatePaymentInput,
@@ -1724,11 +1804,20 @@ export function simulatePayment(
   }
 
   const feeXlm = feeStroops / STROOPS_PER_XLM;
+  const feeStroopsBig = BigInt(feeStroops);
+  const reserveStroops = minimumReserveStroops(balances);
+  const xlmEntry = balances.balances.find((b) => b.asset === "XLM");
+  const xlmSellingLiabStroops = toStroopsBigInt(xlmEntry?.sellingLiabilities ?? "0");
+  const totalStroops = toStroopsBigInt(balances.total || "0");
+  // What's actually free to spend: total minus the reserve minus whatever is
+  // tied up in open sell offers. (#925)
+  const xlmSpendableStroops = totalStroops - reserveStroops - xlmSellingLiabStroops;
 
   if (assetCode === "XLM") {
-    const total = Number(balances.total || "0");
-    const spendable = total - Number(getAccountMinimumBalance());
-    if (Number(amount) > spendable) {
+    const amountStroops = toStroopsBigInt(amount);
+    // The fee is charged on top of the amount, not carved out of it, so both
+    // must fit in what's spendable. (#923, #925)
+    if (amountStroops + feeStroopsBig > xlmSpendableStroops) {
       return {
         ok: false,
         reason: "insufficient_balance",
@@ -1739,8 +1828,12 @@ export function simulatePayment(
       ok: true,
       feeStroops: String(feeStroops),
       feeXlm: formatFeeXlm(feeXlm),
-      netAmount: String(Math.max(0, Number(amount) - feeXlm)),
+      // The fee is charged to the source account on top of the payment, not
+      // deducted from it — a payment op for `amount` XLM delivers exactly
+      // `amount` XLM to the recipient. (#923)
+      netAmount: amount,
       grossAmount: amount,
+      feePaidBy: "sender",
       asset: assetCode,
       recipient: destinationAddress,
     };
@@ -1754,7 +1847,19 @@ export function simulatePayment(
       message: SIMULATION_FAILURE_MESSAGES.missing_trustline,
     };
   }
-  if (Number(amount) > Number(balance.amount)) {
+  // The token's own balance, net of whatever it has tied up in sell offers.
+  const tokenAvailableStroops = toStroopsBigInt(balance.amount) - toStroopsBigInt(balance.sellingLiabilities ?? "0");
+  if (toStroopsBigInt(amount) > tokenAvailableStroops) {
+    return {
+      ok: false,
+      reason: "insufficient_balance",
+      message: SIMULATION_FAILURE_MESSAGES.insufficient_balance,
+    };
+  }
+  // The fee is still paid in XLM even when the payment is in another asset,
+  // so the source's XLM side must separately cover it above its reserve.
+  // (#925)
+  if (feeStroopsBig > xlmSpendableStroops) {
     return {
       ok: false,
       reason: "insufficient_balance",
@@ -1767,6 +1872,7 @@ export function simulatePayment(
     feeXlm: formatFeeXlm(feeXlm),
     netAmount: amount,
     grossAmount: amount,
+    feePaidBy: "sender",
     asset: assetCode,
     recipient: destinationAddress,
   };

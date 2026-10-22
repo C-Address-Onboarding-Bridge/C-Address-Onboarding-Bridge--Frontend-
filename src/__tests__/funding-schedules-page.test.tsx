@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { Keypair, StrKey } from "@stellar/stellar-sdk";
 import FundingSchedulesPage from "@/components/routes/funding-schedules-page";
-import { createFundingSchedule } from "@/lib/fundingSchedules";
+import { createFundingSchedule, loadFundingSchedules } from "@/lib/fundingSchedules";
 
 /**
  * Unit tests for the Funding Schedules page (#557).
@@ -49,6 +49,26 @@ describe("FundingSchedulesPage (#557)", () => {
 
     expect(await screen.findByText("Rent")).toBeInTheDocument();
     expect(screen.getByTestId("schedule-label-input")).toHaveValue("");
+  });
+
+  it("saves a schedule created with the Network select set to PUBLIC as PUBLIC, not TESTNET (#926)", async () => {
+    render(<FundingSchedulesPage />);
+
+    fireEvent.change(screen.getByTestId("schedule-label-input"), { target: { value: "Mainnet top-up" } });
+    fireEvent.change(screen.getByTestId("schedule-address-input"), { target: { value: C_ADDRESS } });
+    fireEvent.change(screen.getByTestId("schedule-amount-input"), { target: { value: "100" } });
+    fireEvent.change(screen.getByTestId("schedule-network-select"), { target: { value: "PUBLIC" } });
+    fireEvent.click(screen.getByTestId("add-schedule-button"));
+
+    expect(await screen.findByText("Mainnet top-up")).toBeInTheDocument();
+    const [saved] = loadFundingSchedules();
+    expect(saved.network).toBe("PUBLIC");
+    expect(screen.getByText("PUBLIC")).toBeInTheDocument();
+
+    // The network select resets to the app default (TESTNET in tests, since
+    // NEXT_PUBLIC_STELLAR_NETWORK is unset) after a successful save, so the
+    // next schedule isn't silently created on the previous selection.
+    expect(screen.getByTestId("schedule-network-select")).toHaveValue("TESTNET");
   });
 
   it("rejects a G-address and shows why, without saving", async () => {
