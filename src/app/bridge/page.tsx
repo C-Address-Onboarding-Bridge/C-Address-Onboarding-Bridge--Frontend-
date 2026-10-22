@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ArrowRightLeft, Wallet, Send, ArrowRight, Check, AlertCircle, Loader2, ExternalLink, HelpCircle, Lock as LockIcon } from "lucide-react";
 import { useWallet } from "@/components/wallet-provider";
 import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel, getEstimatedFeeXLM, toSafeErrorMessage, assertActiveAccountMatches, signPreparedTransaction } from "@/lib/stellar";
@@ -19,6 +20,7 @@ import type { FeeTierStatus } from "@/lib/feeTiers";
 import FeeTierDisplay from "@/components/fee-tier-display";
 import { addNotification } from "@/lib/notifications";
 import { setInFlightTransaction, clearInFlightTransaction } from "@/components/error-boundary";
+import { parseFundingLink, hasFundingLinkParams } from "@/lib/fundingLink";
 
 type FlowMode = "single" | "batch";
 type Step = "form" | "review" | "confirm";
@@ -107,6 +109,7 @@ function normalizeAmountInput(value: string, decimals: number): string {
 }
 
 export default function BridgePage() {
+  const searchParams = useSearchParams();
   const {
     isConnected,
     address,
@@ -133,6 +136,7 @@ export default function BridgePage() {
   const [toAddress, setToAddress] = useState("");
   const [rawAmount, setRawAmount] = useState("");
   const [asset, setAsset] = useState("XLM");
+  const [fundingLinkNetwork, setFundingLinkNetwork] = useState<"TESTNET" | "PUBLIC" | null>(null);
   // Locking is an optional add-on to the same form, not a separate flow: the
   // address/amount/asset fields above are shared, and only the submit path
   // branches (createLock vs. bridgeViaContract). See src/lib/locks.ts and
@@ -286,6 +290,24 @@ export default function BridgePage() {
     };
   }, [address, network, isNetworkSupported, feeTierKey]);
 
+  // Parse funding-link query params (target, amount, asset, network) and pre-fill the form.
+  // If the wallet is on a different network than the link specifies, store the mismatch
+  // so we can warn the user. (#895)
+  useEffect(() => {
+    if (hasFundingLinkParams(searchParams)) {
+      const result = parseFundingLink(searchParams);
+      if (result.ok) {
+        setToAddress(result.params.target);
+        if (result.params.amount) setRawAmount(result.params.amount);
+        if (result.params.asset) setAsset(result.params.asset);
+        setFundingLinkNetwork(result.params.network);
+      }
+    }
+  }, [searchParams]);
+
+  // Warn if the wallet is on a different network than the funding link specified.
+  const networkMismatch = fundingLinkNetwork && fundingLinkNetwork !== network;
+
   const handleSubmit = async () => {
     if (!canProceed) return;
     setTxError(null);
@@ -413,6 +435,7 @@ export default function BridgePage() {
       const message = toSafeErrorMessage(e, "Transaction failed. Please try again.");
       setTxError(message);
       setTxStatus("error");
+      setStep("confirm");
       addNotification(
         {
           kind: "failure",
@@ -736,6 +759,11 @@ export default function BridgePage() {
                   {balanceError && isConnected && isNetworkSupported && (
                     <p className="text-xs text-[var(--error)] mt-1" role="alert">
                       {balanceError}
+                    </p>
+                  )}
+                  {networkMismatch && isConnected && (
+                    <p className="text-xs text-[var(--warning)] mt-1" role="alert">
+                      ⚠️ This funding link is for {fundingLinkNetwork}. Your wallet is on {network}. Ensure the address and amounts are correct before sending.
                     </p>
                   )}
                 </div>
