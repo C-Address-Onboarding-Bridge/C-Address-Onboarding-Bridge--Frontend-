@@ -16,7 +16,15 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
 });
 
+// Same source as src/app/sitemap.ts and src/app/robots.ts (#727) — keeps the
+// three in sync instead of each hard-coding its own placeholder domain. (#942)
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+
 export const metadata: Metadata = {
+  // Lets every relative URL below (and in child layouts' metadata) resolve
+  // against the real deployment origin instead of staying relative to
+  // nothing / defaulting to example.com. (#942)
+  metadataBase: new URL(SITE_URL),
   title: "C-Address Bridge | Soroban Onboarding Protocol",
   description:
     "Fund any Soroban smart account (C-address) directly — from a CEX withdrawal, a credit card, or an existing G-address.",
@@ -33,12 +41,12 @@ export const metadata: Metadata = {
     title: "C-Address Bridge",
     description:
       "Fund any Soroban smart account (C-address) directly from a CEX withdrawal, a credit card, or an existing G-address.",
-    url: "https://c-address-bridge.example.com",
+    url: "/",
     type: "website",
     siteName: "C-Address Bridge",
     images: [
       {
-        url: "https://c-address-bridge.example.com/og-image.png",
+        url: "/og-image.png",
         width: 1200,
         height: 630,
         alt: "C-Address Bridge - Fund Soroban Smart Accounts",
@@ -50,7 +58,7 @@ export const metadata: Metadata = {
     title: "C-Address Bridge",
     description:
       "Fund Soroban smart accounts directly from CEX, credit card, or G-address.",
-    images: ["https://c-address-bridge.example.com/og-image.png"],
+    images: ["/og-image.png"],
     creator: "@stellar",
   },
   robots: {
@@ -60,8 +68,13 @@ export const metadata: Metadata = {
     "max-snippet": -1,
     "max-video-preview": -1,
   },
+  // Only the homepage's own canonical lives here. Child layouts for other
+  // indexable routes (/bridge, /cex, /onramp, /confirm/[hash]) each set
+  // their own `alternates.canonical` — Next merges metadata by key, so
+  // leaving a root-level canonical in place would otherwise apply the
+  // homepage's URL to every route that doesn't override it. (#942)
   alternates: {
-    canonical: "https://c-address-bridge.example.com",
+    canonical: "/",
   },
 };
 
@@ -77,7 +90,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     name: "C-Address Bridge",
     description:
       "Fund any Soroban smart account (C-address) directly from a CEX withdrawal, a credit card, or an existing G-address.",
-    url: "https://c-address-bridge.example.com",
+    url: SITE_URL,
     applicationCategory: "FinanceApplication",
     operatingSystem: "Web",
     offers: {
