@@ -366,4 +366,7 @@ export default function AddressBookPage() {
         )}
       </section>
 
-/* … truncated 5842 chars — edit only what you need near the top … */
+      <LiveRegion message={notice} />
+    </div>
+  );
+}

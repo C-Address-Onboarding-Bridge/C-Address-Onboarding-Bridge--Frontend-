@@ -13,7 +13,7 @@ import {
   Address,
   scValToNative,
 } from "@stellar/stellar-sdk";
-import { getNetwork as getFreighterNetwork } from "@stellar/freighter-api";
+import { isValidContract, isValidEd25519PublicKey } from "./strkey";
 import {
   BRIDGE_CONTRACT_ID,
   HORIZON_URL,
@@ -26,7 +26,6 @@ import {
   isSupportedNetwork,
 } from "./types";
 import { withSequenceRetry } from "./sequenceManager";
-import { getNetwork as getFreighterNetwork } from "@stellar/freighter-api";
 
 export type { AppNetwork, WalletNetworkState, BridgeTransactionData } from "./types";
 
@@ -236,15 +235,12 @@ export async function switchWalletNetwork(target: StellarNetwork): Promise<Switc
     return "cancelled";
   }
 
-  // Confirm via freighter-api directly rather than the multi-wallet
-  // getWalletNetwork()/StellarWalletsKit abstraction: switchWalletNetwork is
-  // already Freighter-specific (it only runs when window.freighter.setNetwork
-  // exists), and the kit singleton has no bearing on whether *this* request
-  // landed.
+  // Confirm through the wallet kit (getWalletNetwork), the same path every
+  // other network read uses. @stellar/freighter-api is no longer a dependency
+  // (#722, #846); the kit's Freighter module reports the same network.
   const deadline = Date.now() + SWITCH_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const result = await getFreighterNetwork();
-    if (!result.error && String(result.network ?? "").toUpperCase() === target) {
+    if ((await getWalletNetwork()).status === target) {
       return "switched";
     }
     await new Promise((resolve) => setTimeout(resolve, SWITCH_POLL_INTERVAL_MS));

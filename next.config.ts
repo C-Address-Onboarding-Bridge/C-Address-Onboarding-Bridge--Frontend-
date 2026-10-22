@@ -139,7 +139,6 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: [
       "@stellar/stellar-sdk",
-      "@stellar/freighter-api",
       "lucide-react",
     ],
   },
