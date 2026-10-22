@@ -505,10 +505,14 @@ export async function getFeeTierPreview(
 /**
  * Referral stats (#469).
  *
- * PLACEHOLDER INTERFACE: see `src/lib/referrals.ts` for why — no contract
- * source or referral API route exists anywhere in this repo to build against
- * yet. The route (`GET /referrals?address=&network=`) and response shape are
- * a best-guess and must be reconciled against the real API once it lands.
+ * Goes through the same-origin proxy route
+ * (`src/app/api/backend/referrals/stats/route.ts`), which attaches the
+ * backend's X-API-Key server-side and forwards to `GET /referrals/stats`.
+ * Calling `API_BASE_URL` from the browser would have no key and always fail
+ * (#843).
+ *
+ * PLACEHOLDER INTERFACE: see `src/lib/referrals.ts` for why — the response
+ * shape is a best guess and must be reconciled against the real API.
  *
  * Returns null both when the account has no referral data yet and when the
  * request itself fails — callers treat "no data" as "hide the referral
@@ -520,7 +524,7 @@ export async function getReferralStats(
 ): Promise<ReferralStats | null> {
   try {
     const response = await fetch(
-      `${API_BASE_URL}/referrals?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
+      `/api/backend/referrals/stats?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
     );
     if (!response.ok) {
       return null;
