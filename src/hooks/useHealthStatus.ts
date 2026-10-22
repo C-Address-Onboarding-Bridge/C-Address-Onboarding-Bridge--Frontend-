@@ -1,13 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { getHealthStatus, unreachableHealthStatus, type HealthStatus } from '@/lib/api';
 
-/**
- * Hook to poll the API health status (#498).
- *
- * Returns the latest health status and polling state.
- * Automatically stops polling when the component unmounts.
- * Polling is paused while the tab is hidden and refreshed on visibility (#712).
- */
+const POLL_INTERVAL = 30_000;
+const INITIAL_DELAY = 2_000;
+const RETAIN_TIME = 5_000;
 
 interface UseHealthStatusOptions {
   pollInterval?: number;
@@ -26,14 +22,19 @@ export function useHealthStatus(options: UseHealthStatusOptions = {}) {
     retainTime = DEFAULT_RETAIN_TIME,
   } = options;
 
-  const [health, setHealth] = useState<HealthStatus | null>(null);
+export function useHealthStatus(
+  pollInterval: number = POLL_INTERVAL,
+  initialDelay: number = INITIAL_DELAY,
+  retainTime: number = RETAIN_TIME,
+): UseHealthStatusResult {
+  const [status, setStatus] = useState<HealthStatus | null>(null);
   const [isDegraded, setIsDegraded] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const retainTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const initialDelayRef = useRef<NodeJS.Timeout | null>(null);
+  const isDegradedRef = useRef(false);
+  const retainTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // checkHealth reads the latest isDegraded through a ref rather than closing
   // over it (#753). With isDegraded in its dependencies, every degraded/healthy
@@ -51,14 +52,17 @@ export function useHealthStatus(options: UseHealthStatusOptions = {}) {
   const recoveringRef = useRef(false);
 
   const checkHealth = useCallback(async () => {
-    setIsLoading(true);
     try {
-      const status = await getHealthStatus();
-      setHealth(status);
+      const result = await getHealthStatus();
+      setStatus(result);
       setError(null);
 
-      // Only show degraded banner if service is actually degraded
-      if (status && (status.status === 'degraded' || status.status === 'unhealthy')) {
+      if (result.status === 'unhealthy') {
+        if (retainTimeoutRef.current) {
+          clearTimeout(retainTimeoutRef.current);
+          retainTimeoutRef.current = null;
+        }
+        isDegradedRef.current = true;
         setIsDegraded(true);
         recoveringRef.current = false;
 
@@ -111,43 +115,43 @@ export function useHealthStatus(options: UseHealthStatusOptions = {}) {
           clearTimeout(retainTimeoutRef.current);
         }
       }
+      isDegradedRef.current = true;
+      setIsDegraded(true);
     } finally {
       setIsLoading(false);
     }
   }, [retainTime]);
 
   useEffect(() => {
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
     const startPolling = () => {
-      if (pollIntervalRef.current) {
-        return;
-      }
-      pollIntervalRef.current = setInterval(checkHealth, pollInterval);
+      if (intervalId) return;
+      intervalId = setInterval(() => {
+        void checkHealth();
+      }, pollInterval);
     };
 
     const stopPolling = () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
       }
     };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        // Pause polling while the tab is hidden (#712).
-        stopPolling();
-      } else {
-        // Refresh immediately when the tab becomes visible again (#712).
-        checkHealth();
+      if (document.visibilityState === 'visible') {
+        void checkHealth();
         startPolling();
+      } else {
+        stopPolling();
       }
     };
 
-    // Start polling after initial delay
     initialDelayRef.current = setTimeout(() => {
-      checkHealth();
-
-      // Then poll at regular intervals, unless the tab is already hidden
-      if (document.visibilityState !== 'hidden') {
+      initialDelayRef.current = null;
+      void checkHealth();
+      if (document.visibilityState === 'visible') {
         startPolling();
       }
     }, initialDelay);
@@ -156,21 +160,17 @@ export function useHealthStatus(options: UseHealthStatusOptions = {}) {
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      stopPolling();
       if (initialDelayRef.current) {
         clearTimeout(initialDelayRef.current);
+        initialDelayRef.current = null;
       }
-      stopPolling();
       if (retainTimeoutRef.current) {
         clearTimeout(retainTimeoutRef.current);
+        retainTimeoutRef.current = null;
       }
     };
   }, [checkHealth, pollInterval, initialDelay]);
 
-  return {
-    health,
-    isDegraded,
-    isLoading,
-    error,
-    refetch: checkHealth,
-  };
+  return { status, isDegraded, isLoading, error, refresh: checkHealth };
 }
