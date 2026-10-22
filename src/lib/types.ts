@@ -150,6 +150,11 @@ export const HORIZON_URL = {
   TESTNET: process.env.NEXT_PUBLIC_HORIZON_URL_TESTNET ?? "https://horizon-testnet.stellar.org",
 } as const;
 
+// Optional transaction-status service (stellar.ts). When set, its origin must
+// be allowed by the CSP connect-src or status polling is blocked. (#882)
+export const TRANSACTION_STATUS_URL =
+  process.env.NEXT_PUBLIC_TRANSACTION_STATUS_URL ?? "";
+
 /**
  * Returns a descriptive configuration error when a required URL is empty, or
  * `null` when the value is usable. Callers surface the message instead of
@@ -166,15 +171,11 @@ export const BRIDGE_CONTRACT_ID = process.env.NEXT_PUBLIC_BRIDGE_CONTRACT_ID || 
 
 /**
  * Maximum number of recipients accepted in a single batch_fund_c_address
- * call (#465).
- *
- * TODO: this is a placeholder. This repo does not vendor the batch contract
- * source or the batch API client, and no existing constant defines the real
- * cap — replace this with the actual contract/API limit once it's available,
- * and update the UI copy that references it (currently derived from this
- * constant, so no other change should be needed).
+ * call (#465). Mirrors `MAX_BATCH_SIZE` in the bridge contract and the
+ * `/fund/batch` request schema in the backend API (both 100). The UI copy
+ * is derived from this constant. (#730)
  */
-export const MAX_BATCH_RECIPIENTS = 25;
+export const MAX_BATCH_RECIPIENTS = 100;
 
 /**
  * The Stellar network the app connects to. Driven by the `NEXT_PUBLIC_STELLAR_NETWORK`
@@ -221,6 +222,6 @@ export const CEX_LIST = [
     supportedNetworks: ["Stellar"],
     minWithdrawal: "15 USDC",
     fee: "0.15 USDC",
-    withdrawalUrl: "https://www.kraken.com/withdraw",
-  },
-] as const satisfies readonly CexConfig[];
+    withdrawalUrl: "https://www.kraken.com/wi
+
+/* … truncated 57 chars — edit only what you need near the top … */

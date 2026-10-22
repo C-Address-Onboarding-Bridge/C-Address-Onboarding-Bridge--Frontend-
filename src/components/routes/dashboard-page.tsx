@@ -8,7 +8,7 @@ import TransactionHistory from "@/components/transaction-history";
 import ClaimsPanel from "@/components/claims-panel";
 import LiveRegion from "@/components/live-region";
 import Link from "next/link";
-import { getAccountBalances, fetchRecentTransactions, getExplorerUrl, formatNetworkLabel, toSafeErrorMessage, requestTestXLM } from "@/lib/stellar";
+import { getAccountBalances, fetchTransactionsForRange, getExplorerUrl, formatNetworkLabel, toSafeErrorMessage, requestTestXLM } from "@/lib/stellar";
 import type { BridgeTransactionData } from "@/lib/stellar";
 import { getFeeTierPreview } from "@/lib/api";
 import type { FeeTierStatus } from "@/lib/feeTiers";
@@ -310,9 +310,15 @@ export default function DashboardPage() {
         if (!cancelled) setFeeTierStatus(tierResult);
       });
       try {
+        // Fetches enough history to cover the longest selectable analytics
+        // range (90 days), paging past Horizon's page size instead of a
+        // single fixed-size call for 10 records — the latter truncated
+        // both the 30D/90D analytics buckets and the "Transactions" stat
+        // on any account with more than 10 payments in range. (#938,
+        // previously reported in #714)
         const [balResult, txResult] = await Promise.all([
           getAccountBalances(address, network),
-          fetchRecentTransactions(address, network, 10),
+          fetchTransactionsForRange(address, network, 90),
         ]);
         if (cancelled) return;
         setBalance(balResult.total);
@@ -379,7 +385,7 @@ export default function DashboardPage() {
     setFaucetLoading(true);
     setFaucetMessage(null);
     setFaucetError(null);
-    const result = await requestTestXLM(address);
+    const result = await requestTestXLM(address, network);
     if (result.success) {
       setFaucetMessage(result.message ?? "Test XLM requested.");
     } else {
@@ -518,7 +524,7 @@ export default function DashboardPage() {
           ) : (
             <>
               <div className="text-2xl font-bold mb-1">
-                {shownBalance !== null ? parseFloat(shownBalance).toFixed(2) : "—"}
+                {shownBalance !== null ? parseFloat(shownBalance).toFixed(7) : "—"}
               </div>
               <div className="text-xs text-[var(--text-muted)]">XLM</div>
               {network === "TESTNET" && !showLoading && (shownBalance === null || parseFloat(shownBalance) === 0) && (
@@ -550,7 +556,11 @@ export default function DashboardPage() {
         </div>
 
         <div className="card p-5">
-          <div className="text-xs text-[var(--text-muted)] mb-1">Transactions</div>
+          {/* Labelled with its actual window rather than a bare "Transactions"
+              total — shownTransactions is bounded by fetchTransactionsForRange's
+              90-day/MAX_RANGE_PAGES cap, so it is a recent count, not an
+              all-time total. (#938) */}
+          <div className="text-xs text-[var(--text-muted)] mb-1">Transactions (90D)</div>
           {showLoading ? (
             <StatSkeleton visible={showStatSkeleton} label="Loading transaction count…" />
           ) : (
