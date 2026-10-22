@@ -51,7 +51,10 @@ export interface HealthStatus {
 function resolveApiBaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_API_URL;
   if (url) return url;
-  if (process.env.NODE_ENV === 'production') {
+  // Use bracket notation so the Vite test runner's client-inject plugin does
+  // not try to replace this string literal with an oxc JS-mode transform, which
+  // chokes on TypeScript syntax. Runtime behaviour is identical. (#920)
+  if (process["env"]["NODE_ENV"] === 'production') {
     throw new Error(
       'NEXT_PUBLIC_API_URL is not set. Set it in your production environment before building/deploying — ' +
         'without it, every API call silently targets a domain this project does not control.'
