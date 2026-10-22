@@ -129,6 +129,74 @@ describe("simulatePayment — successful predictions", () => {
   });
 });
 
+describe("simulatePayment — reserve, subentry and liability accuracy (#925)", () => {
+  it("rejects 'send max' XLM on a one-trustline account that only reserves the flat 1 XLM", () => {
+    // One trustline raises the real reserve to 1.5 XLM (2 base units for the
+    // account + 1 for the trustline, at 0.5 XLM each). An account with 10
+    // XLM total and one trustline has 8.5 XLM spendable, not 9 — sending the
+    // naive (flat-1.0-reserve) max of 9 must be rejected.
+    const oneTrustlineAccount: AccountBalances = {
+      total: "10",
+      balances: [
+        { asset: "XLM", amount: "10" },
+        { asset: "USDC", amount: "5" },
+      ],
+      subentryCount: 1,
+    };
+    const result = simulatePayment({ ...request, amount: "9" }, oneTrustlineAccount, 200);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("insufficient_balance");
+    }
+  });
+
+  it("accepts the real spendable amount (total - 1.5 XLM reserve - fee) on a one-trustline account", () => {
+    const oneTrustlineAccount: AccountBalances = {
+      total: "10",
+      balances: [
+        { asset: "XLM", amount: "10" },
+        { asset: "USDC", amount: "5" },
+      ],
+      subentryCount: 1,
+    };
+    // 10 - 1.5 reserve - 0.00002 fee = 8.49998 spendable.
+    const result = simulatePayment({ ...request, amount: "8.49998" }, oneTrustlineAccount, 200);
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects a non-XLM payment when the account's 1 XLM total can't also cover the fee above the reserve", () => {
+    // 1 XLM total with one trustline leaves 1 - 1.5 = negative spendable XLM,
+    // so even though the USDC balance itself is sufficient, the fee (paid in
+    // XLM) can't be covered and the payment must be rejected.
+    const thinXlmAccount: AccountBalances = {
+      total: "1",
+      balances: [
+        { asset: "XLM", amount: "1" },
+        { asset: "USDC", amount: "50" },
+      ],
+      subentryCount: 1,
+    };
+    const result = simulatePayment({ ...request, assetCode: "USDC", amount: "10" }, thinXlmAccount, 200);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("insufficient_balance");
+    }
+  });
+
+  it("excludes XLM tied up in open sell offers from the spendable amount", () => {
+    const withOffer: AccountBalances = {
+      total: "10",
+      balances: [{ asset: "XLM", amount: "10", sellingLiabilities: "5" }],
+    };
+    // Spendable = 10 - 1.0 reserve - 5 liabilities = 4. Sending 5 must fail.
+    const result = simulatePayment({ ...request, amount: "5" }, withOffer, 200);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("insufficient_balance");
+    }
+  });
+});
+
 describe("simulatePayment — destination handling", () => {
   it("predicts success for a G-address destination (classic payment)", () => {
     // A classic payment to another G-address is the flow the review screen

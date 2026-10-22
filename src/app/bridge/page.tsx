@@ -202,7 +202,7 @@ export default function BridgePage() {
       availableBalance === null
         ? null
         : asset === "XLM"
-          ? Number(availableBalance) - Number(getAccountMinimumBalance())
+          ? Number(availableBalance) - Number(getAccountMinimumBalance(activeBalances ?? undefined))
           : Number(availableBalance),
     [availableBalance, asset]
   );
