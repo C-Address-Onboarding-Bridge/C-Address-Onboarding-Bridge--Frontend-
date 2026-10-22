@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { Horizon } from "@stellar/stellar-sdk";
 import { HORIZON_URL, type StellarNetwork } from "@/lib/types";
 import { isValidHash, type TransactionConfirmation } from "@/lib/confirmations";
+import { extractTransferFromOps } from "@/lib/operationTransfer";
+import { extractTransferFromOps } from "@/lib/stellar";
 
 /** Stroops per XLM (1 XLM = 10,000,000 stroops). */
 const STROOPS_PER_XLM = 10_000_000;
@@ -37,12 +39,15 @@ async function lookupConfirmation(hash: string, network: StellarNetwork): Promis
   let asset: string | null = null;
   try {
     const operations = await server.operations().forTransaction(hash).call();
-    const payment = operations.records.find((op) => op.type === "payment");
-    if (payment && payment.type === "payment") {
-      fromAddress = payment.from ?? null;
-      toAddress = payment.to ?? null;
-      amount = payment.amount ?? null;
-      asset = payment.asset_type === "native" ? "XLM" : (payment.asset_code ?? null);
+    // Cast to the HorizonPayment-compatible shape; all fields used by
+    // extractTransferFromOps are present on every Horizon operation record.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const transfer = extractTransferFromOps(operations.records as any[]);
+    if (transfer) {
+      fromAddress = transfer.fromAddress;
+      toAddress = transfer.toAddress;
+      amount = transfer.amount;
+      asset = transfer.asset;
     }
   } catch {
     // Best-effort — if this fails, fromAddress/etc. stay null and the
