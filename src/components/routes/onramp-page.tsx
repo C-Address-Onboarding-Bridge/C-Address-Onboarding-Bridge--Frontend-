@@ -13,7 +13,7 @@ import {
 } from "@/lib/onrampQuotes";
 import type { OnrampProvider } from "@/lib/types";
 import { useDebounce } from "@/hooks/useDebounce";
-import { providers, getProviderFeeRate, calculateOnrampFeeAndReceive } from "@/lib/onrampProviders";
+import { providers, getProviderFeeRate, calculateOnrampFeeAndReceive, isWithinProviderLimits } from "@/lib/onrampProviders";
 import { useHelp } from "@/contexts/HelpContext";
 
 // Provider config lives in `src/lib/onrampProviders.ts` (#721) so lib code and
@@ -262,7 +262,15 @@ export default function OnrampPage() {
   const debouncedCAddress = useDebounce(cAddress, 300);
   const debouncedFiatAmount = useDebounce(fiatAmount, 300);
   const validAddress = !debouncedCAddress || (isValidStellarAddress(debouncedCAddress) && isCAddress(debouncedCAddress));
-  const validAmount = !debouncedFiatAmount || /^\d+(\.\d{1,2})?$/.test(debouncedFiatAmount);
+  const validAmountFormat = !debouncedFiatAmount || /^\d+(\.\d{1,2})?$/.test(debouncedFiatAmount);
+  // Format validity alone lets "0" and "0.00" through, and says nothing about
+  // a provider's advertised min/max — both let "Continue" redirect to a
+  // checkout the provider will itself reject. Enforce the provider's actual
+  // numeric bounds (`isWithinProviderLimits`, derived from `minAmount`/
+  // `maxAmount` in onrampProviders.ts) here too. (#940)
+  const withinProviderLimits =
+    !debouncedFiatAmount || !validAmountFormat || isWithinProviderLimits(Number(debouncedFiatAmount), selectedProvider);
+  const validAmount = validAmountFormat && withinProviderLimits;
   const canProceed = cAddress && fiatAmount && validAddress && validAmount && debouncedCAddress === cAddress && debouncedFiatAmount === fiatAmount;
 
   const { fee: feeAmount, receive: receiveAmount } = calculateOnrampFeeAndReceive(
@@ -411,8 +419,13 @@ export default function OnrampPage() {
                        ))}
                      </select>
                    </div>
-                   {!validAmount && debouncedFiatAmount && (
+                   {!validAmountFormat && debouncedFiatAmount && (
                      <p id="fiat-amount-error" className="text-xs text-[var(--error)] mt-1" role="alert">Invalid amount format</p>
+                   )}
+                   {validAmountFormat && !withinProviderLimits && debouncedFiatAmount && provider && (
+                     <p id="fiat-amount-error" className="text-xs text-[var(--error)] mt-1" role="alert">
+                       Enter an amount within {provider.name}&apos;s limits ({provider.limits}).
+                     </p>
                    )}
                 </div>
 
