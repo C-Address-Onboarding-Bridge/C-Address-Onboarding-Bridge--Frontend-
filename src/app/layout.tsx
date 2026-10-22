@@ -78,10 +78,11 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  // Read the per-request CSP nonce set by the proxy (#698). The enforcing
-  // Content-Security-Policy uses `script-src 'self' 'nonce-…'`, so every inline
-  // script must carry the matching nonce or the browser blocks it.
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Read the per-request CSP nonce set by the proxy (#698, #876). The
+  // enforcing Content-Security-Policy uses `script-src 'self' 'nonce-…'
+  // 'strict-dynamic'`, so every inline script must carry the matching nonce or
+  // the browser blocks it. `headers()` is async in Next 15+.
   const nonce = (await headers()).get("x-nonce") ?? undefined;
 
   const structuredData = {
@@ -112,9 +113,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           id="theme-init"
           src="/theme-init.js"
           strategy="beforeInteractive"
+          nonce={nonce}
         />
         <script
           type="application/ld+json"
+          nonce={nonce}
         >
           {JSON.stringify(structuredData).replace(/</g, "\\u003c")}
         </script>

@@ -4,8 +4,8 @@ import { buildCsp, buildWidgetCsp, isWidgetPath, proxy } from "@/proxy";
 
 /**
  * Tests the real CSP builders and proxy (formerly middleware) exported from
- * src/proxy.ts (#866). The policy currently uses `script-src 'self'` with no
- * nonce, so these assertions describe what is actually shipped.
+ * src/proxy.ts (#866). Without a nonce the policy is `script-src 'self'`; the
+ * proxy passes a per-request nonce so inline bootstrap scripts are allowed (#876).
  */
 
 function scriptSrc(csp: string): string | undefined {
@@ -91,5 +91,21 @@ describe("CSP framing for /widget (issue #699)", () => {
     const widget = proxy(new NextRequest("http://localhost/widget"));
     expect(app.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
     expect(widget.headers.get("Content-Security-Policy")).toContain("frame-ancestors *");
+  });
+});
+
+describe("CSP nonce (issue #876)", () => {
+  it("adds the nonce and strict-dynamic to script-src when given one", () => {
+    const csp = buildCsp({}, "abc123");
+    expect(scriptSrc(csp)).toBe("script-src 'self' 'nonce-abc123' 'strict-dynamic'");
+  });
+
+  it("proxy forwards a fresh nonce in the request and the CSP header", () => {
+    const a = proxy(new NextRequest("http://localhost/"));
+    const b = proxy(new NextRequest("http://localhost/"));
+    const nonce = (r: ReturnType<typeof proxy>) =>
+      /'nonce-([^']+)'/.exec(r.headers.get("Content-Security-Policy") ?? "")?.[1];
+    expect(nonce(a)).toBeTruthy();
+    expect(nonce(a)).not.toBe(nonce(b));
   });
 });

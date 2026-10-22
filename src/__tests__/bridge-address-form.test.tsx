@@ -96,4 +96,68 @@ describe("Bridge page — Address Form", () => {
 
     expect(amountInput.value).toBe("0.0015");
   });
+
+  it("fires exactly one /api/simulate request on two rapid Review clicks", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    let resolveSimulate: ((value: unknown) => void) | null = null;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/simulate")) {
+        return new Promise((resolve) => {
+          resolveSimulate = resolve as (value: unknown) => void;
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({}),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await act(async () => {
+      root?.render(<BridgePage />);
+    });
+
+    const fromInput = container.querySelector("#bridge-from") as HTMLInputElement;
+    const toInput = container.querySelector("#bridge-to") as HTMLInputElement;
+    const amountInput = container.querySelector("#bridge-amount") as HTMLInputElement;
+
+    const setValue = (el: HTMLInputElement, value: string) => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value"
+      )?.set;
+      setter?.call(el, value);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+
+    await act(async () => {
+      if (fromInput) setValue(fromInput, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF");
+      if (toInput) setValue(toInput, "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM");
+      if (amountInput) setValue(amountInput, "1");
+    });
+
+    const reviewButton = Array.from(container.querySelectorAll("button")).find(
+      (el) => /review/i.test(el.textContent ?? "")
+    ) as HTMLButtonElement | undefined;
+    expect(reviewButton).toBeTruthy();
+
+    await act(async () => {
+      reviewButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      reviewButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const simulateCalls = fetchMock.mock.calls.filter(([input]) => {
+      const url = typeof input === "string" ? input : String(input);
+      return url.includes("/api/simulate");
+    });
+    expect(simulateCalls).toHaveLength(1);
+
+    await act(async () => {
+      resolveSimulate?.({ ok: true, json: async () => ({}) });
+    });
+  });
 });
