@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { StrKey, Keypair } from '@stellar/stellar-sdk';
 import {
+  createTestWallet,
   createFundedTestWallet,
   setupE2EWallet,
   setE2EWalletRejectSign,
@@ -19,15 +20,47 @@ function randomCAddress(): string {
   return StrKey.encodeContract(Keypair.random().rawPublicKey());
 }
 
+/**
+ * Mock Horizon responses so specs that only check UI rendering need no live
+ * network (#914). The app reads account balances via `fetchHorizonJson`, which
+ * hits `https://horizon-testnet.stellar.org`. We intercept these calls and
+ * return a minimal funded-account shape so the dashboard/navbar renders
+ * without a real testnet round-trip.
+ */
+function mockHorizon(page: import('@playwright/test').Page) {
+  return page.route('**/horizon-testnet.stellar.org/**', (route) => {
+    const url = route.request().url();
+    if (url.includes('/accounts/')) {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'mock-account',
+          account_id: 'mock-account',
+          sequence: '1',
+          balances: [
+            { asset_type: 'native', balance: '1000.0000000' },
+          ],
+          subentry_count: 0,
+          flags: { auth_required: false, auth_revocable: false, auth_immutable: false },
+          thresholds: { low_threshold: 0, med_threshold: 0, high_threshold: 0 },
+        }),
+      });
+      return;
+    }
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+}
+
 test.describe('Funding Flow', () => {
-  // A fresh, Friendbot-funded testnet keypair per test — sharing one sender
-  // across tests would race on its sequence number once Playwright runs them
-  // in parallel (fullyParallel: true in playwright.config.ts).
+  // Use an unfunded random keypair for specs that never submit a transaction.
+  // No Friendbot round-trip, no live testnet dependency (#914).
   let wallet: E2EWallet;
 
   test.beforeEach(async ({ page }) => {
-    wallet = await createFundedTestWallet();
+    wallet = createTestWallet();
     await setupE2EWallet(page, wallet);
+    await mockHorizon(page);
   });
 
   test('should successfully connect wallet and initiate bridge transfer', async ({ page }) => {
@@ -42,16 +75,13 @@ test.describe('Funding Flow', () => {
     );
   });
 
-  // The form itself only accepts C-address recipients (see `validTo` in
-  // src/app/bridge/page.tsx), and `bridgingBlocked` disables "Review Bridge
-  // Transaction" the moment one is entered in non-locked mode, showing
-  // BRIDGING_UNAVAILABLE_MESSAGE inline instead of ever letting the user
-  // submit — classic Stellar payments can't reach a Soroban contract address
-  // yet (issue #284). The review/confirm/sign steps below are unreachable
-  // for this destination format today, so this test (and the two below, for
-  // the same reason) asserts that real, current, form-level outcome rather
-  // than a submission failure this app never lets you attempt.
-  test('should complete the full funding flow and report the known #284 limitation', async ({ page }) => {
+  // The form only accepts C-address recipients, and `bridgingBlocked` disables
+  // "Review Bridge Transaction" the moment one is entered, showing an inline
+  // #284 message instead of ever letting the user submit. This merged test
+  // replaces the three former duplicates ("should complete the full funding
+  // flow", "should handle rejected signature", "should show appropriate error
+  // for failed submission") which all asserted the same form-level block.
+  test('should show the #284 block when bridging to a C-address', async ({ page }) => {
     await page.goto('/bridge');
     await page.getByTestId('navbar-connect-button').click();
     await expect(page.getByTestId('navbar-address')).toBeVisible({ timeout: 10000 });
@@ -63,13 +93,12 @@ test.describe('Funding Flow', () => {
     await expect(page.getByRole('button', { name: 'Review Bridge Transaction' })).toBeDisabled();
   });
 
-  // A rejected signature can't be distinguished from any other outcome here:
-  // the form disables submission before the wallet is ever asked to sign
-  // anything (see the comment above), so setE2EWalletRejectSign has no code
-  // path left to affect. Kept (rather than skipped) so this test starts
-  // exercising real rejection the moment #284 lands and a signing step
-  // becomes reachable, with no rewrite needed beyond removing this note.
-  test('should handle rejected signature', async ({ page }) => {
+  // The signing-rejection and submission-failure paths are unreachable while
+  // #284 blocks submission before the wallet is ever asked to sign (#914).
+  // Marked fixme so these tests start exercising real rejection the moment
+  // #284 lands and a signing step becomes reachable — remove the fixme and
+  // the comment, no rewrite needed.
+  test.fixme('should handle rejected signature', async ({ page }) => {
     await page.goto('/bridge');
     await page.getByTestId('navbar-connect-button').click();
     await expect(page.getByTestId('navbar-address')).toBeVisible({ timeout: 10000 });
@@ -83,6 +112,22 @@ test.describe('Funding Flow', () => {
     await expect(page.getByRole('button', { name: 'Review Bridge Transaction' })).toBeDisabled();
   });
 
+  test.fixme('should show appropriate error for failed submission', async ({ page }) => {
+    await page.goto('/bridge');
+    await page.getByTestId('navbar-connect-button').click();
+    await expect(page.getByTestId('navbar-address')).toBeVisible({ timeout: 10000 });
+
+    await page.getByPlaceholder('CABC...DEF').fill(randomCAddress());
+    await page.getByPlaceholder('0.00').fill(AMOUNT);
+
+    await expect(page.getByText(/issue #284/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Review Bridge Transaction' })).toBeDisabled();
+  });
+
+  // @network — this spec connects, disconnects, and reconnects, which reads
+  // the wallet address from the injected hook (no Horizon call needed).
+  // It doesn't need a funded account but exercises the connect/disconnect
+  // state machine, so we keep it here with the unfunded keypair.
   test('should handle wallet disconnect and reconnect', async ({ page }) => {
     await page.goto('/bridge');
 
@@ -101,21 +146,21 @@ test.describe('Funding Flow', () => {
       { timeout: 5000 }
     );
   });
+});
 
-  // Same #284 caveat as the two tests above: this exercises the app's real
-  // failure-reporting path — a form-level block with an explanatory message —
-  // rather than the post-submission failure the name originally implied,
-  // since no submission is ever reachable for this destination format today.
-  test('should show appropriate error for failed submission', async ({ page }) => {
+// @network — Specs tagged @network require a real funded testnet account.
+// They can be skipped when Friendbot is down:
+//   npx playwright test --grep-invert @network
+test.describe('@network — Funding Flow (funded account)', () => {
+  test.beforeEach(async ({ page }) => {
+    const wallet = await createFundedTestWallet();
+    await setupE2EWallet(page, wallet);
+  });
+
+  test('@network should connect with a Friendbot-funded account', async ({ page }) => {
     await page.goto('/bridge');
     await page.getByTestId('navbar-connect-button').click();
     await expect(page.getByTestId('navbar-address')).toBeVisible({ timeout: 10000 });
-
-    await page.getByPlaceholder('CABC...DEF').fill(randomCAddress());
-    await page.getByPlaceholder('0.00').fill(AMOUNT);
-
-    await expect(page.getByText(/issue #284/)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Review Bridge Transaction' })).toBeDisabled();
   });
 });
 

@@ -39,10 +39,11 @@ jobs:
           # so a placeholder is enough. A real deployment must set its own.
           NEXT_PUBLIC_API_URL: "https://api.ci-placeholder.example"
 
-  # Blocking. The specs in e2e/ are currently skipped (see the TODO at the top
-  # of e2e/funding-flow.spec.ts -- their selectors drifted while this job could
-  # not run), but the job still starts the app via Playwright's webServer, so a
-  # dev server that fails to boot -- as it did under Next 16 -- fails CI.
+  # Blocking. The specs in e2e/ are active (21 tests across 7 specs × 3 browsers)
+  # and depend on live Stellar testnet (Friendbot funding + Horizon reads).
+  # The job can fail when testnet is slow, rate-limited, or reset, even though
+  # the app code is correct. It also starts the app via Playwright's webServer,
+  # so a dev server that fails to boot — as it did under Next 16 — fails CI.
   e2e-tests:
     name: End-to-End Tests
     runs-on: ubuntu-latest

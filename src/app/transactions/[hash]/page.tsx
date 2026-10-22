@@ -22,7 +22,7 @@ import { useWallet } from "@/components/wallet-provider";
 import { IN_FLIGHT_TRANSACTION_KEY } from "@/components/error-boundary";
 import {
   getExplorerUrl,
-  getTransactionByHash,
+  findTransactionByHash,
   subscribeToTransactionStatus,
   type TransactionDetails,
 } from "@/lib/stellar";

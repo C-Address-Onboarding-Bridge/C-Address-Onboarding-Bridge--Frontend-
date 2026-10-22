@@ -17,6 +17,13 @@ import { Keypair } from '@stellar/stellar-sdk';
  * Friendbot faucet, so the funding flow's actual Horizon calls (sequence
  * number, fee stats, transaction submission) run for real against testnet
  * rather than needing their response shapes guessed and mocked.
+ *
+ * Exports:
+ * - {@link E2EWallet} — the keypair interface (address + secret)
+ * - {@link createFundedTestWallet} — generate a keypair and fund it via Friendbot
+ * - {@link createTestWallet} — generate an unfunded keypair (no network call)
+ * - {@link setupE2EWallet} — inject `window.__E2E_WALLET__` into the page
+ * - {@link setE2EWalletRejectSign} — toggle whether the next sign is rejected
  */
 
 declare global {
@@ -39,9 +46,24 @@ export interface E2EWallet {
 const FRIENDBOT_URL = 'https://friendbot.stellar.org';
 
 /**
+ * Generates a fresh testnet keypair without funding it. Use this for specs
+ * that never submit a transaction and therefore don't need a live account —
+ * it avoids a Friendbot round-trip and its associated testnet dependency.
+ */
+export function createTestWallet(): E2EWallet {
+  const keypair = Keypair.random();
+  return { address: keypair.publicKey(), secret: keypair.secret() };
+}
+
+/**
  * Generates a fresh testnet keypair and funds it via Friendbot. Each e2e run
  * gets its own account, so parallel/repeated runs never race over a shared
  * account's sequence number or balance.
+ *
+ * Tag specs that call this with `@network` so they can be filtered out when
+ * Friendbot is down:
+ *
+ *   npx playwright test --grep-invert @network
  */
 export async function createFundedTestWallet(): Promise<E2EWallet> {
   const keypair = Keypair.random();
