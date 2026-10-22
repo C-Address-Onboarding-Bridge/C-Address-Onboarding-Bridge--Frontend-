@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { getAllowedEmbedderOrigins, buildFrameAncestorsCsp } from "@/lib/widget";
 import { SOROBAN_RPC_URL, HORIZON_URL } from "./lib/types";
 
 /**
@@ -99,7 +100,13 @@ export function buildWidgetCsp(
   env: Record<string, string | undefined> = process.env,
   nonce?: string,
 ): string {
-  return buildCsp(env, nonce).replace("frame-ancestors 'none'", "frame-ancestors *");
+  // frame-ancestors comes from the registered embedder allowlist
+  // (NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS); with nothing registered it stays
+  // 'none' so unregistered origins can't frame the widget.
+  const frameAncestors = buildFrameAncestorsCsp(
+    getAllowedEmbedderOrigins(env.NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS),
+  );
+  return buildCsp(env, nonce).replace("frame-ancestors 'none'", frameAncestors);
 }
 
 /**

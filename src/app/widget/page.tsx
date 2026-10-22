@@ -25,11 +25,8 @@ import {
   isTrustedParentOrigin,
   parseWidgetConfig,
   postWidgetMessage,
-<<<<<<< HEAD
   WIDGET_MESSAGE_SOURCE,
-=======
   getAllowedEmbedderOrigins,
->>>>>>> pr972
   type WidgetConfig,
   type WidgetOutboundMessage,
 } from "@/lib/widget";
@@ -243,34 +240,25 @@ function WidgetPageInner() {
   // The widget must not trust the self-declared `parentOrigin` query param:
   // any site can embed it with its own origin and overlay it to trick users
   // into signing a funding transaction (clickjacking). Cross-check the
-<<<<<<< HEAD
-  // declared origin against the browser-reported ancestor origin(s) before
-  // rendering anything that can move funds. Hooks stay above the early
-  // returns below so the hook order is stable across renders.
+  // declared origin against the browser-reported ancestor origin(s) and the
+  // configured allowlist before rendering anything that can move funds. Hooks
+  // stay above the early returns below so the hook order is stable across
+  // renders.
   const [trusted, setTrusted] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (parentOrigin === null) return;
-    setTrusted(isTrustedParentOrigin(parentOrigin));
-  }, [parentOrigin]);
-
-  if (!result.ok) {
-    return <WidgetError message={result.error} />;
-  }
-=======
-  // declared origin against the browser-reported ancestor origin(s) and the
-  // configured allowlist before rendering anything that can move funds.
-  const [trusted, setTrusted] = useState<boolean | null>(null);
-
-  useEffect(() => {
     const allowedOrigins = getAllowedEmbedderOrigins();
     const evidence = {
       ancestorOrigins: typeof window !== "undefined" ? window.location.ancestorOrigins || null : null,
       referrer: typeof document !== "undefined" ? document.referrer || null : null,
     };
-    setTrusted(isTrustedParentOrigin(result.config.parentOrigin, allowedOrigins, evidence));
-  }, [result.config.parentOrigin]);
->>>>>>> pr972
+    setTrusted(isTrustedParentOrigin(parentOrigin, allowedOrigins, evidence));
+  }, [parentOrigin]);
+
+  if (!result.ok) {
+    return <WidgetError message={result.error} />;
+  }
 
   if (trusted === null) {
     return null;
