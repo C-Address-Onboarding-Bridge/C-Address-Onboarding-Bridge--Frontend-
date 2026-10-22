@@ -63,7 +63,7 @@ export function TelemetryProvider({ children }: TelemetryProviderProps) {
   return (
     <TelemetryContext.Provider value={value}>
       {children}
-      {consent === "pending" && <TelemetryConsentPrompt />}
+      {hydrated && consent === "pending" && <TelemetryConsentPrompt />}
     </TelemetryContext.Provider>
   );
 }

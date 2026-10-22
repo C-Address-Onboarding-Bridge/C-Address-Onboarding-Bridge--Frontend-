@@ -1,19 +1,21 @@
 "use client";
 
-import React, { memo, useCallback, useEffect, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell, CheckCheck, Trash2, X } from "lucide-react";
 import {
   clearNotifications,
   dismissNotification,
   formatNotificationAge,
+  isSafeNotificationHref,
   loadNotifications,
   markAllNotificationsRead,
   markNotificationRead,
   unreadNotificationCount,
   type AppNotification,
+  type NotificationScope,
 } from "@/lib/notifications";
-import { useWallet } from "@/hooks/useWallet";
+import { useWallet } from "@/components/wallet-provider";
 
 /**
  * Notification centre for transaction and account events (#477).
@@ -30,8 +32,9 @@ import { useWallet } from "@/hooks/useWallet";
  * closed and the list is emptied.
  *
  * Hrefs are validated at parse time (#695); this component additionally
- * re-checks before rendering so a tampered store can never produce a
- * `javascript:`/`data:` link in the trusted UI.
+ * re-checks each one with the same `isSafeNotificationHref` before rendering, so
+ * a tampered store can never produce a `javascript:`/`data:` link in the trusted
+ * UI. An item whose href fails the check is shown as plain text, not a link.
  */
 
 export interface NotificationCentreProps {
@@ -39,39 +42,27 @@ export interface NotificationCentreProps {
   closeOnNavigate?: boolean;
 }
 
-/**
- * Returns true only for hrefs that are safe to render as a link:
- * same-origin relative paths (single leading `/`, no `//` or `\` tricks)
- * or absolute `https://stellar.expert/...` explorer URLs.
- */
-const isSafeNotificationHref = (href: string): boolean => {
-  if (typeof href !== "string" || href.length === 0) return false;
-  // Reject control characters and whitespace that could smuggle a scheme.
-  if (/[\u0000-\u001f\u007f\s]/.test(href)) return false;
-  // Same-origin relative path: exactly one leading slash, not protocol-relative.
-  if (href.startsWith("/")) {
-    return !href.startsWith("//") && !href.startsWith("/\\");
-  }
-  // Absolute explorer URL: https scheme, host stellar.expert.
-  try {
-    const url = new URL(href);
-    return url.protocol === "https:" && url.hostname === "stellar.expert";
-  } catch {
-    return false;
-  }
-};
-
 const NotificationCentre = ({ closeOnNavigate = true }: NotificationCentreProps) => {
   const { address, network } = useWallet();
+  // The notifications lib keys storage by { address, network } (#694). With no
+  // wallet connected it falls back to its legacy global key, which only ever
+  // holds events recorded without a wallet.
+  const scope = useMemo<NotificationScope | null>(
+    () => (address ? { address, network } : null),
+    [address, network]
+  );
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [open, setOpen] = useState(false);
+  // The panel remembers which wallet+network it was opened for, so a
+  // disconnect or account/network switch closes it on the next render, without
+  // an effect, and the next user never sees the previous account's list (#694).
+  const sessionKey = `${address ?? ""}|${network ?? ""}`;
+  const [openFor, setOpenFor] = useState<string | null>(null);
+  const open = openFor === sessionKey;
+  const close = useCallback(() => setOpenFor(null), []);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const refresh = useCallback(
-    () => setNotifications(loadNotifications(address, network)),
-    [address, network]
-  );
+  const refresh = useCallback(() => setNotifications(loadNotifications(scope)), [scope]);
 
   useEffect(() => {
     // Pull the persisted list into React state once on mount and whenever the
@@ -81,64 +72,53 @@ const NotificationCentre = ({ closeOnNavigate = true }: NotificationCentreProps)
     refresh();
   }, [refresh]);
 
-  // On disconnect (or wallet/network switch) close the panel so the next user
-  // never sees the previous account's activity.
-  useEffect(() => {
-    if (!address) {
-      setOpen(false);
-    }
-  }, [address]);
-
   // Escape closes the panel and returns focus to the bell.
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setOpen(false);
+        close();
         buttonRef.current?.focus();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open]);
+  }, [open, close]);
 
   const unread = unreadNotificationCount(notifications);
 
   const handleToggle = useCallback(() => {
-    setOpen((v) => {
-      const next = !v;
-      // Opening the panel marks nothing read; unread state is only changed by
-      // explicit interaction or navigation.
-      return next;
-    });
-  }, []);
+    // Opening the panel marks nothing read; unread state is only changed by
+    // explicit interaction or navigation.
+    setOpenFor((current) => (current === sessionKey ? null : sessionKey));
+  }, [sessionKey]);
 
   const handleActivate = useCallback(
     (id: string) => {
-      markNotificationRead(id, address, network);
+      markNotificationRead(id, scope);
       refresh();
-      if (closeOnNavigate) setOpen(false);
+      if (closeOnNavigate) close();
     },
-    [refresh, closeOnNavigate, address, network]
+    [refresh, closeOnNavigate, scope, close]
   );
 
   const handleDismiss = useCallback(
     (id: string) => {
-      dismissNotification(id, address, network);
+      dismissNotification(id, scope);
       refresh();
     },
-    [refresh, address, network]
+    [refresh, scope]
   );
 
   const handleMarkAllRead = useCallback(() => {
-    markAllNotificationsRead(address, network);
+    markAllNotificationsRead(scope);
     refresh();
-  }, [refresh, address, network]);
+  }, [refresh, scope]);
 
   const handleClearAll = useCallback(() => {
-    clearNotifications(address, network);
+    clearNotifications(scope);
     refresh();
-  }, [refresh, address, network]);
+  }, [refresh, scope]);
 
   return (
     <div className="relative">
@@ -239,6 +219,53 @@ const NotificationCentre = ({ closeOnNavigate = true }: NotificationCentreProps)
                 return (
                   <li
                     key={notification.id}
-                    className={`
+                    className={`relative group ${notification.read ? "" : "bg-[var(--surface-2)]/50"}`}
+                  >
+                    {safeHref === null ? (
+                      // Failed the render-time href check (#695): show the text,
+                      // but never as a link.
+                      <div aria-label={itemLabel} className="block px-4 py-3">
+                        {content}
+                      </div>
+                    ) : isExternal ? (
+                      <a
+                        href={safeHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => handleActivate(notification.id)}
+                        aria-label={itemLabel}
+                        className="block px-4 py-3 hover:bg-[var(--surface-2)] transition-colors"
+                      >
+                        {content}
+                      </a>
+                    ) : (
+                      <Link
+                        href={safeHref}
+                        onClick={() => handleActivate(notification.id)}
+                        aria-label={itemLabel}
+                        className="block px-4 py-3 hover:bg-[var(--surface-2)] transition-colors"
+                      >
+                        {content}
+                      </Link>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDismiss(notification.id)}
+                      aria-label={`Dismiss notification: ${notification.title}`}
+                      title="Dismiss"
+                      className="absolute top-2 right-2 p-1 rounded text-[var(--text-muted)] opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-opacity"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
-/* … truncated 1768 chars — edit only what you need near the top … */
+export default memo(NotificationCentre);

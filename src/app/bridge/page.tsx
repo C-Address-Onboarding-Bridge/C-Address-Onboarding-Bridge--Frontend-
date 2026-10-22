@@ -128,6 +128,7 @@ export default function BridgePage() {
   // names as its source, so any other value could only ever produce a
   // tx_bad_auth failure after the user had already approved the signature. (#287)
   const fromAddress = address ?? "";
+  const notificationScope = address ? { address, network } : null;
   const [flowMode, setFlowMode] = useState<FlowMode>("single");
   const [toAddress, setToAddress] = useState("");
   const [rawAmount, setRawAmount] = useState("");
@@ -397,22 +398,30 @@ export default function BridgePage() {
       setStep("confirm");
       // Record the outcome in the notification centre so the result survives
       // navigation away from the review/confirm screen. (#477)
-      addNotification({
-        kind: "transaction",
-        title: "Transaction submitted",
-        message: `${amount} ${asset} to ${toAddress.slice(0, 8)}…${toAddress.slice(-6)}`,
-        href: getExplorerUrl(network, "tx", result.hash),
-      });
+      // Scoped to this wallet+network (#694) so the navbar's notification
+      // centre, which reads the same scope, shows it (#844).
+      addNotification(
+        {
+          kind: "transaction",
+          title: "Transaction submitted",
+          message: `${amount} ${asset} to ${toAddress.slice(0, 8)}…${toAddress.slice(-6)}`,
+          href: getExplorerUrl(network, "tx", result.hash),
+        },
+        notificationScope
+      );
     } catch (e: unknown) {
       const message = toSafeErrorMessage(e, "Transaction failed. Please try again.");
       setTxError(message);
       setTxStatus("error");
-      addNotification({
-        kind: "failure",
-        title: "Transaction failed",
-        message: `${message.slice(0, 120)}${message.length > 120 ? "…" : ""}`,
-        href: "/bridge",
-      });
+      addNotification(
+        {
+          kind: "failure",
+          title: "Transaction failed",
+          message: `${message.slice(0, 120)}${message.length > 120 ? "…" : ""}`,
+          href: "/bridge",
+        },
+        notificationScope
+      );
     }
   };
 

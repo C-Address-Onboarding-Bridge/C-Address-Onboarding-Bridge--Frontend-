@@ -35,6 +35,21 @@ export function useHealthStatus(options: UseHealthStatusOptions = {}) {
   const retainTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const initialDelayRef = useRef<NodeJS.Timeout | null>(null);
 
+  // checkHealth reads the latest isDegraded through a ref rather than closing
+  // over it (#753). With isDegraded in its dependencies, every degraded/healthy
+  // transition recreated checkHealth, which re-ran the polling effect below:
+  // polling restarted on initialDelay instead of keeping pollInterval, and the
+  // retain window was cut short by that extra early poll.
+  const isDegradedRef = useRef(isDegraded);
+  useEffect(() => {
+    isDegradedRef.current = isDegraded;
+  }, [isDegraded]);
+  // True once a healthy poll has started the retain window, until it ends or
+  // a degraded/failed check cancels it. Later healthy polls inside the window
+  // must not restart it, or a poll interval shorter than retainTime would
+  // keep the banner up forever.
+  const recoveringRef = useRef(false);
+
   const checkHealth = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -45,19 +60,29 @@ export function useHealthStatus(options: UseHealthStatusOptions = {}) {
       // Only show degraded banner if service is actually degraded
       if (status && (status.status === 'degraded' || status.status === 'unhealthy')) {
         setIsDegraded(true);
+        recoveringRef.current = false;
 
         // Clear any existing timeout
         if (retainTimeoutRef.current) {
           clearTimeout(retainTimeoutRef.current);
         }
-      } else if (isDegraded) {
-        // Keep the degraded banner visible for retainTime to avoid flashing
+      } else if (isDegradedRef.current && !recoveringRef.current) {
+        // Keep the degraded banner visible for retainTime after the first
+        // healthy result, to avoid flashing.
+        recoveringRef.current = true;
+        if (retainTimeoutRef.current) {
+          clearTimeout(retainTimeoutRef.current);
+        }
         retainTimeoutRef.current = setTimeout(() => {
+          recoveringRef.current = false;
           setIsDegraded(false);
         }, retainTime);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
+      // A failed check ends any recovery in progress; a healthy retry below
+      // starts a fresh window on the next healthy poll.
+      recoveringRef.current = false;
 
       // A null result means the health endpoint was unreachable. Retry once
       // before declaring a total outage so a transient blip doesn't flash
@@ -89,7 +114,7 @@ export function useHealthStatus(options: UseHealthStatusOptions = {}) {
     } finally {
       setIsLoading(false);
     }
-  }, [isDegraded, retainTime]);
+  }, [retainTime]);
 
   useEffect(() => {
     const startPolling = () => {
