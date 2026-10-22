@@ -96,7 +96,7 @@ function clearPersistedFormState(): void {
 
 const ASSET_DECIMALS: Record<string, number> = {
   XLM: 7,
-  USDC: 2,
+  USDC: 7,
 };
 
 function normalizeAmountInput(value: string, decimals: number): string {
@@ -730,7 +730,7 @@ export default function BridgePage() {
                   )}
                   {availableBalance !== null && (
                     <p className="text-xs text-[var(--text-muted)] mt-1">
-                      Balance: {parseFloat(availableBalance).toFixed(2)} {asset}
+                      Balance: {parseFloat(availableBalance).toFixed(7)} {asset}
                     </p>
                   )}
                   {balanceError && isConnected && isNetworkSupported && (
@@ -835,7 +835,7 @@ export default function BridgePage() {
                   {insufficientBalance && (
                     <p id="amount-balance-error" className="text-xs text-[var(--error)] mt-1" role="alert">
                       Insufficient balance. Available:{" "}
-                      {spendableBalance !== null ? Math.max(spendableBalance, 0).toFixed(2) : "0.00"} {asset}
+                      {spendableBalance !== null ? Math.max(spendableBalance, 0).toFixed(7) : "0.00"} {asset}
                       {asset === "XLM" ? " (after minimum reserve)" : ""}
                     </p>
                   )}

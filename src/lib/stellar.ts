@@ -66,7 +66,11 @@ export interface E2EWalletConfig {
 let _e2eConnected = false;
 
 function e2eWalletConfig(): E2EWalletConfig | undefined {
-  if (typeof window === "undefined") return undefined;
+  // E2E wallet config is only allowed in development/test builds.
+  // In production (NODE_ENV === "production"), this path is always disabled.
+  if (typeof window === "undefined" || (typeof process !== "undefined" && process.env.NODE_ENV === "production")) {
+    return undefined;
+  }
   return (window as unknown as { __E2E_WALLET__?: E2EWalletConfig }).__E2E_WALLET__;
 }
 
