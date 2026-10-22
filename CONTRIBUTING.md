@@ -23,11 +23,13 @@ Thank you for contributing to C-Address Bridge. This guide covers the setup, wor
    cp .env.example .env.local
    ```
 
-   Required env vars (see `.env.example` for all options):
+   See `.env.example` (committed to the repo) for every variable and its description, and the [README environment table](README.md#getting-started) for full documentation. The minimum set to start the dev server:
 
    | Variable | Required | Description |
    |---|---|---|
    | `NEXT_PUBLIC_STELLAR_NETWORK` | Yes | `TESTNET` or `PUBLIC` |
+   | `NEXT_PUBLIC_API_URL` | Yes in production | Base URL of the C-Address Bridge backend. Falls back to a placeholder in dev/test |
+   | `BACKEND_API_KEY` | For backend calls beyond `/health` | The backend's `X-API-Key`, attached server-side only by the proxy routes under `src/app/api/backend/`. **Never** put this in a `NEXT_PUBLIC_*` var |
    | `NEXT_PUBLIC_BRIDGE_CONTRACT_ID` | No | Soroban bridge contract |
    | `NEXT_PUBLIC_SOROBAN_RPC_URL_TESTNET` | No | Soroban RPC endpoint for testnet |
    | `NEXT_PUBLIC_SOROBAN_RPC_URL_PUBLIC` | For mainnet | Soroban RPC endpoint for mainnet |

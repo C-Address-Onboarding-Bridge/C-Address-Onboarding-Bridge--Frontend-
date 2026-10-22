@@ -310,20 +310,18 @@ export interface PreparedBatchFunding {
  * invocation for these recipients, returning an unsigned transaction XDR for
  * the wallet to sign (#671).
  *
- * PLACEHOLDER ENDPOINT: no contract ABI/bindings for batch_fund_c_address
- * exist in this repo, so the invocation can't be built client-side with any
- * confidence in the argument encoding. `POST /api/v1/fund/batch` (the
- * confirmed submit endpoint, see submitSignedBatchFunding below) implies a
- * prepare step must exist somewhere to produce the XDR it accepts, but this
- * exact path/body is a best guess and must be reconciled against the real
- * API once it's documented.
+ * Routes through the server-side proxy at /api/backend/batch-fund/prepare
+ * (#900) so the X-API-Key is never sent from the browser.
+ *
+ * The backend route is POST /api/v1/fund/prepare (funding.ts:64) — not the
+ * previously-used /api/v1/fund/batch/prepare which does not exist.
  */
 export async function prepareBatchFunding(
   fromAddress: string,
   recipients: BatchFundingRecipient[],
   network: StellarNetwork
 ): Promise<PreparedBatchFunding> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/fund/batch/prepare`, {
+  const response = await fetch(`/api/backend/batch-fund/prepare`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -344,17 +342,19 @@ export async function prepareBatchFunding(
 
 /**
  * Submits a wallet-signed `batch_fund_c_address` transaction to the real
- * batch endpoint (#671). Resolves with one result per recipient — including
- * partial failure, where some recipients succeed and others don't — as long
- * as the request itself reaches the API. Throws only when the request as a
- * whole cannot be completed (network failure, non-2xx response), since at
- * that point no per-recipient results exist to report.
+ * batch endpoint (#671). Routes through the server-side proxy at
+ * /api/backend/batch-fund (#900) so the X-API-Key is never sent from the
+ * browser. Resolves with one result per recipient — including partial
+ * failure, where some recipients succeed and others don't — as long as the
+ * request itself reaches the API. Throws only when the request as a whole
+ * cannot be completed (network failure, non-2xx response), since at that
+ * point no per-recipient results exist to report.
  */
 export async function submitSignedBatchFunding(
   signedXdr: string,
   network: StellarNetwork
 ): Promise<BatchFundingResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/fund/batch`, {
+  const response = await fetch(`/api/backend/batch-fund`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -445,6 +445,9 @@ export async function listIncomingLocks(recipient: string, network: StellarNetwo
  * any address (#672). The exact proof fields the backend expects are a best
  * guess pending the real API (see signClaimProof's own doc comment).
  *
+ * Routes through the server-side proxy at /api/backend/locks/[id]/claim
+ * (#900) so the X-API-Key is never sent from the browser.
+ *
  * Throws {@link LockAlreadyClaimedError} on a 409 response — the shape of
  * "someone else (or another session) already claimed this" — so callers can
  * distinguish it from a generic failure and reconcile their view instead of
@@ -456,7 +459,7 @@ export async function claimLock(
   network: StellarNetwork,
   proof: ClaimProof
 ): Promise<Lock> {
-  const response = await fetch(`${API_BASE_URL}/locks/${encodeURIComponent(lockId)}/claim`, {
+  const response = await fetch(`/api/backend/locks/${encodeURIComponent(lockId)}/claim`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -541,6 +544,9 @@ export async function getReferralStats(
 /**
  * Submits a signed transaction to the backend for relay to Horizon.
  *
+ * Routes through the server-side proxy at /api/backend/transactions (#900)
+ * so the X-API-Key is never sent from the browser.
+ *
  * PLACEHOLDER INTERFACE: no transaction submission route exists anywhere in
  * this repo to build against yet; the route (`POST /transactions`) and
  * response shape are a best-guess and must be reconciled against the real
@@ -550,7 +556,7 @@ export async function submitTransaction(
   signedXdr: string,
   network: StellarNetwork
 ): Promise<BridgeTransactionData> {
-  const response = await fetch(`${API_BASE_URL}/transactions`, {
+  const response = await fetch(`/api/backend/transactions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ xdr: signedXdr, network }),

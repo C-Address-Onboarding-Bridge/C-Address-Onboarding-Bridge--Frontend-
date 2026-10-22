@@ -15,6 +15,10 @@
 /playwright-report/
 /test-results/
 
+# test snapshots
+**/__snapshots__/
+*.snap
+
 # next.js
 /.next/
 /out/
@@ -32,8 +36,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — .env.example is committed so contributors know what to configure
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -41,3 +46,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# pr description scratch files (not part of source)
+pr-description*.md
+docs-pr-description.md
