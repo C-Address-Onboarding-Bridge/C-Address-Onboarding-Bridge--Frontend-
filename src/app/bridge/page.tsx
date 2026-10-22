@@ -460,7 +460,7 @@ export default function BridgePage() {
     }
     await assertActiveAccountMatches(fromAddress);
     const { xdr } = await prepareBatchFunding(fromAddress, recipients, network);
-    const signedXdr = await signPreparedTransaction(xdr, network);
+    const signedXdr = await signPreparedTransaction(xdr, network, fromAddress);
     const response = await submitSignedBatchFunding(signedXdr, network);
     return response.results;
   };

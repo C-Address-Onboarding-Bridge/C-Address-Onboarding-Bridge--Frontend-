@@ -418,11 +418,18 @@ export function isValidStellarAddress(address: string): boolean {
   return isValidEd25519PublicKey(address) || isValidContract(address);
 }
 
+// int64 max, in stroops (the largest amount the Stellar XDR can represent).
+const MAX_AMOUNT_STROOPS = 9223372036854775807n;
+
 export function isValidStellarAmount(amount: string): boolean {
   if (!amount || typeof amount !== "string") return false;
   if (!/^\d+(\.\d{1,7})?$/.test(amount)) return false;
-  const num = Number(amount);
-  return !isNaN(num) && num > 0;
+  const [intPart, fracPart = ""] = amount.split(".");
+  // Compare in stroops as a BigInt so very large integer strings (e.g. a
+  // 20-digit value) aren't only approximated by a float comparison, and so
+  // amounts above int64 max are rejected before the SDK throws on them.
+  const stroops = BigInt(intPart) * 10_000_000n + BigInt(fracPart.padEnd(7, "0"));
+  return stroops > 0n && stroops <= MAX_AMOUNT_STROOPS;
 }
 
 /** Whether `address` is a valid Soroban contract address (a `C...` StrKey). */
@@ -731,6 +738,81 @@ export async function fetchRecentTransactions(
  * @param server        - An already-initialised Horizon.Server instance
  * @param passphrase    - The network passphrase for signing/rebuilding
  */
+/**
+ * Re-fetches the wallet's current network and aborts with a clear,
+ * actionable message if it no longer matches `network`. Shared by
+ * buildSignAndSubmit and signPreparedTransaction (#929) so both signing
+ * paths get the same protection against a network switch happening between
+ * the app loading and the "Confirm" click.
+ *
+ * We call getNetwork() directly (rather than getCurrentNetwork()) so we can
+ * distinguish:
+ *   a) getNetwork returns undefined (test mock not set up, or extension
+ *      returned no data) → treat as "can't verify, proceed"
+ *   b) getNetwork returns a different known network → abort
+ *   c) getNetwork rejects (Freighter locked, etc.) → abort with UNKNOWN
+ */
+async function assertWalletOnExpectedNetwork(network: StellarNetwork): Promise<void> {
+  try {
+    const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+    const netResult = await StellarWalletsKit.getNetwork();
+    if (netResult !== undefined && netResult !== null && typeof netResult === "object") {
+      // Check for in-band error (e.g. user declined access)
+      if ("error" in netResult && (netResult as { error?: unknown }).error) {
+        throw new Error(
+          `Network changed in Freighter — please retry. ` +
+          `Transaction was built for ${network} but Freighter is now on UNKNOWN.`
+        );
+      }
+      // Compare the actual reported network
+      const reportedRaw = (netResult as { network?: string }).network;
+      const reported = (reportedRaw ?? "").toUpperCase() as WalletNetworkState;
+      if (reported && reported !== network) {
+        throw new Error(
+          `Network changed in Freighter — please retry. ` +
+          `Transaction was built for ${network} but Freighter is now on ${reported}.`
+        );
+      }
+    }
+    // If netResult is undefined/null, we can't verify the network — proceed
+  } catch (networkErr) {
+    // Re-throw errors we raised ourselves
+    if (networkErr instanceof Error && networkErr.message.includes("Network changed in Freighter")) {
+      throw networkErr;
+    }
+    // getNetwork() itself rejected (Freighter locked, locked extension, etc.)
+    throw new Error(
+      "Network changed in wallet — please retry. " +
+      `Transaction was built for ${network} but wallet is now on UNKNOWN.`
+    );
+  }
+}
+
+/**
+ * Runtime shape guard on a wallet-kit signing response. A version mismatch,
+ * API change, or compromised extension could return a missing or non-string
+ * `signedTxXdr`. The response is untrusted input, so the object itself is
+ * checked before anything is read from it: a missing response, or one
+ * carrying an `error` field, is rejected even if it also holds something
+ * that looks like a signed transaction. Shared by buildSignAndSubmit and
+ * signPreparedTransaction (#242, #652, #929).
+ */
+function extractSignedXdr(signedResult: unknown): string {
+  const response: unknown = signedResult;
+  const signedXDR =
+    typeof response === "object" && response !== null && !("error" in response && response.error)
+      ? (response as { signedTxXdr?: unknown }).signedTxXdr
+      : undefined;
+  if (typeof signedXDR !== "string" || !signedXDR) {
+    // Deliberately avoids wallet-API jargon (XDR) so the message stays
+    // readable for a user who just saw a malformed wallet response.
+    throw new Error(
+      "Wallet returned an unexpected response while signing — the signed transaction is missing or empty."
+    );
+  }
+  return signedXDR;
+}
+
 async function buildSignAndSubmit(
   sourceAddress: string,
   destination: string,
@@ -771,57 +853,13 @@ async function buildSignAndSubmit(
       const e2eWallet = e2eWalletConfig();
 
       // #241 — Re-fetch the wallet's current network immediately before
-      // signing.  The user may have switched networks in Freighter during the
-      // time between the app loading and the "Confirm" click.  If the wallet
-      // is no longer on the same network the transaction was built for, abort
-      // here with a clear, actionable message rather than signing a transaction
-      // that will either fail at submission or, worse, succeed on the wrong
-      // chain.
-      //
-      // We call getNetwork() directly (rather than getCurrentNetwork()) so we
-      // can distinguish:
-      //   a) getNetwork returns undefined (test mock not set up, or extension
-      //      returned no data) → treat as "can't verify, proceed"
-      //   b) getNetwork returns a different known network → abort
-      //   c) getNetwork rejects (Freighter locked, etc.) → abort with UNKNOWN
-      //
-      // Under the e2e test hook (#669) there is no real extension to have
-      // changed networks underneath us — the fixture's configured network is
-      // authoritative, so this check is skipped entirely.
+      // signing, in case the user switched networks in Freighter between the
+      // app loading and the "Confirm" click. Under the e2e test hook (#669)
+      // there is no real extension to have changed networks underneath us —
+      // the fixture's configured network is authoritative, so this is
+      // skipped entirely. Shared with signPreparedTransaction (#929).
       if (!e2eWallet) {
-        try {
-          const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
-          const netResult = await StellarWalletsKit.getNetwork();
-          if (netResult !== undefined && netResult !== null && typeof netResult === "object") {
-            // Check for in-band error (e.g. user declined access)
-            if ("error" in netResult && (netResult as { error?: unknown }).error) {
-              throw new Error(
-                `Network changed in Freighter — please retry. ` +
-                `Transaction was built for ${network} but Freighter is now on UNKNOWN.`
-              );
-            }
-            // Compare the actual reported network
-            const reportedRaw = (netResult as { network?: string }).network;
-            const reported = (reportedRaw ?? "").toUpperCase() as WalletNetworkState;
-            if (reported && reported !== network) {
-              throw new Error(
-                `Network changed in Freighter — please retry. ` +
-                `Transaction was built for ${network} but Freighter is now on ${reported}.`
-              );
-            }
-          }
-          // If netResult is undefined/null, we can't verify the network — proceed
-        } catch (networkErr) {
-          // Re-throw errors we raised ourselves
-          if (networkErr instanceof Error && networkErr.message.includes("Network changed in Freighter")) {
-            throw networkErr;
-          }
-          // getNetwork() itself rejected (Freighter locked, locked extension, etc.)
-          throw new Error(
-            "Network changed in wallet — please retry. " +
-            `Transaction was built for ${network} but wallet is now on UNKNOWN.`
-          );
-        }
+        await assertWalletOnExpectedNetwork(network);
       }
 
       // Use the Stellar Wallets Kit to sign — this works regardless of which
@@ -843,24 +881,9 @@ async function buildSignAndSubmit(
         });
       }
 
-      // #242 — Runtime shape guard on the wallet's response.  A version
-      // mismatch, API change, or compromised extension could return a missing
-      // or non-string `signedTxXdr`.  The response is untrusted input, so the
-      // object itself is checked before anything is read from it: a missing
-      // response, or one carrying an `error` field, is rejected even if it
-      // also holds something that looks like a signed transaction. (#652)
-      const response: unknown = signedResult;
-      const signedXDR =
-        typeof response === "object" && response !== null && !("error" in response && response.error)
-          ? (response as { signedTxXdr?: unknown }).signedTxXdr
-          : undefined;
-      if (typeof signedXDR !== "string" || !signedXDR) {
-        // Deliberately avoids wallet-API jargon (XDR) so the message stays
-        // readable for a user who just saw a malformed wallet response.
-        throw new Error(
-          "Wallet returned an unexpected response while signing — the signed transaction is missing or empty."
-        );
-      }
+      // #242 — Runtime shape guard on the wallet's response, shared with
+      // signPreparedTransaction (#929). (#652)
+      const signedXDR = extractSignedXdr(signedResult);
 
       const signedTx = TransactionBuilder.fromXDR(signedXDR, passphrase);
 
@@ -1038,18 +1061,102 @@ export async function bridgeViaContract(
   return buildAndSubmitPayment(sourceAddress, cAddress, amount, assetCode, network, onPhase);
 }
 
+// Fee cap enforced on a backend-supplied prepared transaction before it is
+// ever shown to the wallet for signing (#929). Generous relative to
+// getRecommendedFee's own 10 000-stroop cap, but still bounds how much a
+// compromised/misconfigured "prepare" endpoint could get the user to pay.
+const MAX_PREPARED_TX_FEE_STROOPS = 50_000;
+
+/**
+ * Decodes a backend-supplied unsigned transaction XDR and asserts it is safe
+ * to hand to the wallet for signing (#929):
+ *   - its source account is the connected account the caller expects to sign
+ *     with, not some other account the backend substituted
+ *   - its fee is within MAX_PREPARED_TX_FEE_STROOPS
+ *   - every operation is an invokeHostFunction call against the configured
+ *     bridge contract — never a payment, account merge, or a call into any
+ *     other contract
+ *
+ * Fails closed: any operation that isn't a recognised, expected
+ * invokeHostFunction against BRIDGE_CONTRACT_ID is rejected, as is a
+ * transaction whose contract-id can't be determined at all. A backend (or
+ * anyone able to tamper with its response) must not be able to hand the
+ * wallet an arbitrary transaction — e.g. a payment draining the account —
+ * disguised as a "prepared batch funding" transaction.
+ */
+function assertPreparedTransactionIsSafe(
+  unsignedXdr: string,
+  passphrase: string,
+  expectedSourceAddress: string
+): void {
+  const decoded = TransactionBuilder.fromXDR(unsignedXdr, passphrase);
+  const tx = "innerTransaction" in decoded ? decoded.innerTransaction : decoded;
+
+  if (tx.source !== expectedSourceAddress) {
+    throw new Error(
+      `Prepared transaction's source account (${truncateAddress(tx.source)}) does not match the connected account (${truncateAddress(expectedSourceAddress)}) — refusing to sign.`
+    );
+  }
+
+  if (BigInt(tx.fee) > BigInt(MAX_PREPARED_TX_FEE_STROOPS)) {
+    throw new Error(`Prepared transaction's fee (${tx.fee} stroops) is higher than expected — refusing to sign.`);
+  }
+
+  if (tx.operations.length === 0) {
+    throw new Error("Prepared transaction has no operations — refusing to sign.");
+  }
+
+  for (const op of tx.operations) {
+    if (op.type !== "invokeHostFunction") {
+      throw new Error(`Prepared transaction contains an unexpected "${op.type}" operation — refusing to sign.`);
+    }
+    if (!BRIDGE_CONTRACT_ID) {
+      throw new Error("No bridge contract is configured — refusing to sign a prepared transaction.");
+    }
+    let invokedContractId: string | null = null;
+    try {
+      const hostFn = op.func;
+      if (hostFn.switch().name === "hostFunctionTypeInvokeContract") {
+        const contractAddress = hostFn.invokeContract().contractAddress();
+        if (contractAddress.switch().name === "scAddressTypeContract") {
+          invokedContractId = StrKey.encodeContract(contractAddress.contractId());
+        }
+      }
+    } catch {
+      invokedContractId = null;
+    }
+    if (invokedContractId !== BRIDGE_CONTRACT_ID) {
+      throw new Error("Prepared transaction invokes an unexpected contract — refusing to sign.");
+    }
+  }
+}
+
 /**
  * Signs an already-built, unsigned transaction XDR — e.g. one a backend
  * "prepare" endpoint returned — through the same e2e-aware, kit-abstracted
- * path buildAndSubmitPayment's own signing step uses (#671). Unlike that
- * path, this never builds the transaction itself, so it has no source
- * account or operations of its own to validate; callers that need the
- * active wallet to match a specific address (as batch funding does) must
- * call assertActiveAccountMatches themselves first.
+ * path buildAndSubmitPayment's own signing step uses (#671).
+ *
+ * Unlike buildSignAndSubmit, this never builds the transaction itself, so
+ * before anything is shown to the wallet it decodes the XDR and runs the
+ * same network/source/shape guards that path has, plus XDR-content checks
+ * of its own (#929): callers that need the active wallet to match a specific
+ * address (as batch funding does) must still call assertActiveAccountMatches
+ * themselves first, since that checks the *wallet's* active account, not the
+ * prepared transaction's.
  */
-export async function signPreparedTransaction(unsignedXdr: string, network: StellarNetwork): Promise<string> {
+export async function signPreparedTransaction(
+  unsignedXdr: string,
+  network: StellarNetwork,
+  expectedSourceAddress: string
+): Promise<string> {
   const passphrase = await getNetworkPassphrase(network);
   const e2eWallet = e2eWalletConfig();
+
+  assertPreparedTransactionIsSafe(unsignedXdr, passphrase, expectedSourceAddress);
+
+  if (!e2eWallet) {
+    await assertWalletOnExpectedNetwork(network);
+  }
 
   let signedResult: { signedTxXdr: string };
   if (e2eWallet) {
@@ -1066,13 +1173,7 @@ export async function signPreparedTransaction(unsignedXdr: string, network: Stel
     });
   }
 
-  const signedXDR = signedResult.signedTxXdr;
-  if (typeof signedXDR !== "string" || !signedXDR) {
-    throw new Error(
-      "Wallet returned an unexpected response while signing — the signed transaction is missing or empty."
-    );
-  }
-  return signedXDR;
+  return extractSignedXdr(signedResult);
 }
 
 export interface ClaimProof {
