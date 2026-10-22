@@ -74,6 +74,12 @@ export function buildProviderUrl(p: typeof providers[number], cAddress: string, 
 
 const QUOTE_REFRESH_INTERVAL_MS = 30_000;
 
+// MoonPay/Transak only deliver usdc_xlm as a classic Stellar (G-address)
+// payment, which can't target a Soroban contract address — see #934 and the
+// matching BRIDGING_UNAVAILABLE_MESSAGE in src/app/bridge/page.tsx (#284).
+const ONRAMP_CADDRESS_UNAVAILABLE_MESSAGE =
+  "Card purchases can't be delivered to a Soroban C-address yet: MoonPay and Transak only deliver classic Stellar (G-address) payments, and the on-chain transfer path from a G-address to a C-address hasn't shipped. Follow progress in issue #284.";
+
 /**
  * Side-by-side provider comparison (#556). Purely additive to the existing
  * form — `getProviderFeeRate`/`calculateOnrampFeeAndReceive` above still
@@ -281,21 +287,56 @@ export default function OnrampPage() {
       return;
     }
 
-    try {
-      const url = buildProviderUrl(provider, cAddress, fiatAmount, fiatCurrency);
-      setRedirectUrl(url);
-      setStep("redirect");
-      // Open synchronously within the click handler to preserve user activation
-      // so default popup blockers do not block the new tab.
-      window.open(url, "_blank", "noopener,noreferrer");
-    } catch (err) {
-      console.error("Failed to build onramp redirect URL:", err);
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to prepare provider redirect. Please double-check your input and try again."
-      );
+    // MoonPay/Transak deliver usdc_xlm as a classic Stellar (G-address)
+    // payment — neither can target a Soroban contract address, the same
+    // limitation the bridge page blocks G -> C bridging on (#284). Refuse
+    // the redirect with an honest message instead of sending the user to a
+    // provider that will either reject the C-address or (worse) strand
+    // their funds at an address nothing can transfer out of yet. (#934)
+    if (isCAddress(cAddress)) {
+      setError(ONRAMP_CADDRESS_UNAVAILABLE_MESSAGE);
+      return;
     }
+
+    // Open a blank tab synchronously within the click handler so default
+    // popup blockers don't treat the eventual redirect as an unsolicited
+    // popup — its location is set once the signed URL comes back. (#934:
+    // the URL itself is now built and HMAC-signed server-side, in
+    // /api/onramp/redirect-url, instead of in the browser with no signature.)
+    const redirectTab = window.open("", "_blank", "noopener,noreferrer");
+
+    fetch("/api/onramp/redirect-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        providerId: provider.id,
+        address: cAddress,
+        fiatAmount,
+        fiatCurrency,
+      }),
+    })
+      .then(async (response) => {
+        const body = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
+        if (!response.ok || typeof body.url !== "string" || !body.url) {
+          throw new Error(body.error || "Unable to prepare provider redirect. Please double-check your input and try again.");
+        }
+        setRedirectUrl(body.url);
+        setStep("redirect");
+        if (redirectTab) {
+          redirectTab.location.href = body.url;
+        } else {
+          window.open(body.url, "_blank", "noopener,noreferrer");
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("Failed to build onramp redirect URL:", err);
+        redirectTab?.close();
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to prepare provider redirect. Please double-check your input and try again."
+        );
+      });
   };
 
   return (
@@ -476,7 +517,7 @@ export default function OnrampPage() {
                 </div>
                 <h3 className="text-lg font-semibold mb-2">Redirecting to {provider?.name}</h3>
                 <p className="text-sm text-[var(--text-muted)] mb-4">
-                  A new tab has been opened to complete your purchase. Funds will be sent to your C-address.
+                  A new tab has been opened to complete your purchase. Funds will be sent to your Stellar (G-address) account — delivery straight to a Soroban C-address isn't available yet (#934).
                 </p>
                 {redirectUrl && (
                   <a
