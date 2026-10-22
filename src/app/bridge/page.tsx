@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ArrowRightLeft, Wallet, Send, ArrowRight, Check, AlertCircle, Loader2, ExternalLink, HelpCircle, Lock as LockIcon } from "lucide-react";
 import { useWallet } from "@/components/wallet-provider";
-import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel, getEstimatedFeeXLM, toSafeErrorMessage, shouldWarnOnMainnetAction, assertActiveAccountMatches, signPreparedTransaction } from "@/lib/stellar";
+import { isValidStellarAddress, isCAddress, isValidStellarAmount, bridgeViaContract, getExplorerUrl, getAccountBalances, getAccountMinimumBalance, formatNetworkLabel, getEstimatedFeeXLM, toSafeErrorMessage, assertActiveAccountMatches, signPreparedTransaction } from "@/lib/stellar";
 import type { AccountBalances, SimulationResult } from "@/lib/stellar";
 import { createLock, getFeeTierPreview, prepareBatchFunding, submitSignedBatchFunding } from "@/lib/api";
 import { validateUnlockTime, type Lock as LockRecord } from "@/lib/locks";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useMainnetConfirmation } from "@/hooks/useMainnetConfirmation";
+import { MAINNET_CONFIRMATION_MESSAGES } from "@/lib/mainnetConfirmation";
 import { useStepTransition } from "@/hooks/useStepTransition";
 import LiveRegion from "@/components/live-region";
 import BatchFundingForm from "@/components/BatchFundingForm";
@@ -16,6 +19,8 @@ import { useFeatureFlag } from "@/contexts/FeatureFlagContext";
 import type { FeeTierStatus } from "@/lib/feeTiers";
 import FeeTierDisplay from "@/components/fee-tier-display";
 import { addNotification } from "@/lib/notifications";
+import { setInFlightTransaction, clearInFlightTransaction } from "@/components/error-boundary";
+import { parseFundingLink, hasFundingLinkParams } from "@/lib/fundingLink";
 
 type FlowMode = "single" | "batch";
 type Step = "form" | "review" | "confirm";
@@ -93,7 +98,7 @@ function clearPersistedFormState(): void {
 
 const ASSET_DECIMALS: Record<string, number> = {
   XLM: 7,
-  USDC: 2,
+  USDC: 7,
 };
 
 function normalizeAmountInput(value: string, decimals: number): string {
@@ -104,6 +109,7 @@ function normalizeAmountInput(value: string, decimals: number): string {
 }
 
 export default function BridgePage() {
+  const searchParams = useSearchParams();
   const {
     isConnected,
     address,
@@ -125,10 +131,12 @@ export default function BridgePage() {
   // names as its source, so any other value could only ever produce a
   // tx_bad_auth failure after the user had already approved the signature. (#287)
   const fromAddress = address ?? "";
+  const notificationScope = address ? { address, network } : null;
   const [flowMode, setFlowMode] = useState<FlowMode>("single");
   const [toAddress, setToAddress] = useState("");
   const [rawAmount, setRawAmount] = useState("");
   const [asset, setAsset] = useState("XLM");
+  const [fundingLinkNetwork, setFundingLinkNetwork] = useState<"TESTNET" | "PUBLIC" | null>(null);
   // Locking is an optional add-on to the same form, not a separate flow: the
   // address/amount/asset fields above are shared, and only the submit path
   // branches (createLock vs. bridgeViaContract). See src/lib/locks.ts and
@@ -158,9 +166,13 @@ export default function BridgePage() {
   // `simulating` covers the in-flight fetch. (#478)
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [simulating, setSimulating] = useState(false);
-  // Set when the user tries to confirm a mainnet action shortly after a
-  // network change; signing waits for explicit acknowledgement. (#480)
-  const [mainnetWarning, setMainnetWarning] = useState(false);
+  // Mainnet transactions wait for an explicit confirmation: once per session,
+  // and again right after a network switch. (#480, #759)
+  const {
+    prompt: mainnetPrompt,
+    request: confirmMainnetIfNeeded,
+    answer: answerMainnetPrompt,
+  } = useMainnetConfirmation(network, recentlyChangedNetwork);
 
   // Keyboard + screen-reader step transitions: focus the new step's heading and
   // announce the change. Implemented in useStepTransition. (#476)
@@ -244,10 +256,12 @@ export default function BridgePage() {
   useEffect(() => {
     if (!address || !isNetworkSupported) return;
     let cancelled = false;
-    setBalanceError(null);
     getAccountBalances(address, network)
       .then((result) => {
-        if (!cancelled) setSourceBalances(result);
+        if (!cancelled) {
+          setSourceBalances(result);
+          setBalanceError(null);
+        }
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -275,6 +289,24 @@ export default function BridgePage() {
       cancelled = true;
     };
   }, [address, network, isNetworkSupported, feeTierKey]);
+
+  // Parse funding-link query params (target, amount, asset, network) and pre-fill the form.
+  // If the wallet is on a different network than the link specifies, store the mismatch
+  // so we can warn the user. (#895)
+  useEffect(() => {
+    if (hasFundingLinkParams(searchParams)) {
+      const result = parseFundingLink(searchParams);
+      if (result.ok) {
+        setToAddress(result.params.target);
+        if (result.params.amount) setRawAmount(result.params.amount);
+        if (result.params.asset) setAsset(result.params.asset);
+        setFundingLinkNetwork(result.params.network);
+      }
+    }
+  }, [searchParams]);
+
+  // Warn if the wallet is on a different network than the funding link specified.
+  const networkMismatch = fundingLinkNetwork && fundingLinkNetwork !== network;
 
   const handleSubmit = async () => {
     if (!canProceed) return;
@@ -374,26 +406,45 @@ export default function BridgePage() {
         (phase) => setTxStatus(phase)
       );
       setTxHash(result.hash);
+      // Record the submitted hash so the error boundary can link back to it
+      // if the page crashes before the user leaves the confirm screen. (#868)
+      setInFlightTransaction({
+        hash: result.hash,
+        network,
+        from: fromAddress,
+        to: toAddress,
+        amount,
+        asset,
+      });
       setTxStatus("success");
       setStep("confirm");
       // Record the outcome in the notification centre so the result survives
       // navigation away from the review/confirm screen. (#477)
-      addNotification({
-        kind: "transaction",
-        title: "Transaction submitted",
-        message: `${amount} ${asset} to ${toAddress.slice(0, 8)}…${toAddress.slice(-6)}`,
-        href: getExplorerUrl(network, "tx", result.hash),
-      });
+      // Scoped to this wallet+network (#694) so the navbar's notification
+      // centre, which reads the same scope, shows it (#844).
+      addNotification(
+        {
+          kind: "transaction",
+          title: "Transaction submitted",
+          message: `${amount} ${asset} to ${toAddress.slice(0, 8)}…${toAddress.slice(-6)}`,
+          href: getExplorerUrl(network, "tx", result.hash),
+        },
+        notificationScope
+      );
     } catch (e: unknown) {
       const message = toSafeErrorMessage(e, "Transaction failed. Please try again.");
       setTxError(message);
       setTxStatus("error");
-      addNotification({
-        kind: "failure",
-        title: "Transaction failed",
-        message: `${message.slice(0, 120)}${message.length > 120 ? "…" : ""}`,
-        href: "/bridge",
-      });
+      setStep("confirm");
+      addNotification(
+        {
+          kind: "failure",
+          title: "Transaction failed",
+          message: `${message.slice(0, 120)}${message.length > 120 ? "…" : ""}`,
+          href: "/bridge",
+        },
+        notificationScope
+      );
     }
   };
 
@@ -409,12 +460,9 @@ export default function BridgePage() {
       setTxStatus("error");
       return;
     }
-    // Warn before a mainnet action initiated shortly after a network change:
-    // real funds are at stake and the switch may have been a mistake. (#480)
-    if (shouldWarnOnMainnetAction(network, recentlyChangedNetwork, mainnetWarning)) {
-      setMainnetWarning(true);
-      return;
-    }
+    // Real funds are at stake on mainnet: confirm once per session, and again
+    // right after a network switch, which may have been a mistake. (#480, #759)
+    if (!(await confirmMainnetIfNeeded())) return;
     await performConfirm();
   };
 
@@ -424,6 +472,7 @@ export default function BridgePage() {
     setTxHash(null);
     setTxError(null);
     setLockResult(null);
+    clearInFlightTransaction();
   };
 
   // Batch funding invokes the contract's batch_fund_c_address, which moves
@@ -438,9 +487,12 @@ export default function BridgePage() {
           : "Your wallet's network couldn't be read. Unlock the extension and reload before submitting."
       );
     }
+    if (!(await confirmMainnetIfNeeded())) {
+      throw new Error("Mainnet transaction cancelled. Nothing was sent.");
+    }
     await assertActiveAccountMatches(fromAddress);
     const { xdr } = await prepareBatchFunding(fromAddress, recipients, network);
-    const signedXdr = await signPreparedTransaction(xdr, network);
+    const signedXdr = await signPreparedTransaction(xdr, network, fromAddress);
     const response = await submitSignedBatchFunding(signedXdr, network);
     return response.results;
   };
@@ -482,15 +534,79 @@ export default function BridgePage() {
             <LiveRegion politeness="assertive" message={assertiveAnnouncement} />
             <LiveRegion message={stepAnnouncement} />
 
+            {mainnetPrompt && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") answerMainnetPrompt(false);
+                }}
+              >
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="mainnet-confirm-title"
+                  aria-describedby="mainnet-confirm-body"
+                  className="w-full max-w-md rounded-xl border border-[var(--warning)]/30 bg-[var(--surface)] p-6 shadow-lg"
+                >
+                  <div role="alert" className="flex items-start gap-3 mb-6">
+                    <AlertCircle className="w-5 h-5 text-[var(--warning)] flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h2 id="mainnet-confirm-title" className="text-base font-semibold">
+                        {MAINNET_CONFIRMATION_MESSAGES[mainnetPrompt].title}
+                      </h2>
+                      <p id="mainnet-confirm-body" className="text-sm text-[var(--text-muted)] mt-1">
+                        {MAINNET_CONFIRMATION_MESSAGES[mainnetPrompt].body}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      autoFocus
+                      onClick={() => answerMainnetPrompt(false)}
+                      className="flex-1 px-4 py-2 min-h-[44px] rounded-xl border border-[var(--border)] font-medium hover:bg-[var(--surface-2)] transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => answerMainnetPrompt(true)}
+                      className="flex-1 px-4 py-2 min-h-[44px] rounded-xl bg-[var(--warning)] text-black font-medium hover:bg-[var(--warning)]/90 transition-colors"
+                    >
+                      Continue on Mainnet
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div
               role="tablist"
               aria-label="Funding mode"
               className="flex gap-1 p-1 mb-6 rounded-lg bg-[var(--surface-2)] w-fit"
+              onKeyDown={(e) => {
+                const tabs = (e.currentTarget as HTMLElement).querySelectorAll('[role="tab"]');
+                const currentIndex = Array.from(tabs).findIndex((tab) => tab === e.currentTarget.activeElement);
+                if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                  e.preventDefault();
+                  const nextTab = tabs[(currentIndex + 1) % tabs.length] as HTMLButtonElement;
+                  nextTab.focus();
+                  nextTab.click();
+                } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  const prevTab = tabs[(currentIndex - 1 + tabs.length) % tabs.length] as HTMLButtonElement;
+                  prevTab.focus();
+                  prevTab.click();
+                }
+              }}
             >
               <button
                 type="button"
                 role="tab"
+                id="tab-single"
                 aria-selected={flowMode === "single"}
+                aria-controls="panel-single"
+                tabIndex={flowMode === "single" ? 0 : -1}
                 data-testid="flow-mode-single"
                 onClick={() => setFlowMode("single")}
                 disabled={txStatus === "signing" || txStatus === "submitting"}
@@ -503,7 +619,10 @@ export default function BridgePage() {
               <button
                 type="button"
                 role="tab"
+                id="tab-batch"
                 aria-selected={flowMode === "batch"}
+                aria-controls="panel-batch"
+                tabIndex={flowMode === "batch" ? 0 : -1}
                 data-testid="flow-mode-batch"
                 onClick={() => setFlowMode("batch")}
                 disabled={txStatus === "signing" || txStatus === "submitting"}
@@ -516,7 +635,7 @@ export default function BridgePage() {
             </div>
 
             {flowMode === "batch" && (
-              <div className="space-y-6">
+              <div id="panel-batch" role="tabpanel" aria-labelledby="tab-batch" className="space-y-6">
                 <h2 className="text-xl font-semibold mb-4">Batch Fund C-Addresses</h2>
 
                 {!isOnline && (
@@ -554,7 +673,7 @@ export default function BridgePage() {
             )}
 
             {flowMode === "single" && (
-              <>
+              <div id="panel-single" role="tabpanel" aria-labelledby="tab-single">
             {step === "form" && (
               <div className="space-y-6">
                 <h2
@@ -634,12 +753,17 @@ export default function BridgePage() {
                   )}
                   {availableBalance !== null && (
                     <p className="text-xs text-[var(--text-muted)] mt-1">
-                      Balance: {parseFloat(availableBalance).toFixed(2)} {asset}
+                      Balance: {parseFloat(availableBalance).toFixed(7)} {asset}
                     </p>
                   )}
                   {balanceError && isConnected && isNetworkSupported && (
                     <p className="text-xs text-[var(--error)] mt-1" role="alert">
                       {balanceError}
+                    </p>
+                  )}
+                  {networkMismatch && isConnected && (
+                    <p className="text-xs text-[var(--warning)] mt-1" role="alert">
+                      ⚠️ This funding link is for {fundingLinkNetwork}. Your wallet is on {network}. Ensure the address and amounts are correct before sending.
                     </p>
                   )}
                 </div>
@@ -703,7 +827,7 @@ export default function BridgePage() {
                         placeholder="0.00"
                         aria-invalid={(!validAmount && !!amount) || insufficientBalance}
                         aria-describedby={
-                          (!validAmount && amount) ? "amount-format-error" :
+                          (!validAmount && debouncedAmount) ? "amount-format-error" :
                           insufficientBalance ? "amount-balance-error" : undefined
                         }
                         className="w-full px-4 py-3 min-h-[44px] rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2 focus:border-[var(--primary)] transition-colors"
@@ -732,14 +856,14 @@ export default function BridgePage() {
                     </select>
                   </div>
                   {!validAmount && debouncedAmount && (
-                    <p className="text-xs text-[var(--error)] mt-1">
+                    <p id="amount-format-error" className="text-xs text-[var(--error)] mt-1" role="alert">
                       Invalid amount. Enter a positive number with up to 7 decimal places (e.g. &quot;10&quot; or &quot;0.5&quot;).
                     </p>
                   )}
                   {insufficientBalance && (
                     <p id="amount-balance-error" className="text-xs text-[var(--error)] mt-1" role="alert">
                       Insufficient balance. Available:{" "}
-                      {spendableBalance !== null ? Math.max(spendableBalance, 0).toFixed(2) : "0.00"} {asset}
+                      {spendableBalance !== null ? Math.max(spendableBalance, 0).toFixed(7) : "0.00"} {asset}
                       {asset === "XLM" ? " (after minimum reserve)" : ""}
                     </p>
                   )}
@@ -903,6 +1027,7 @@ export default function BridgePage() {
                     disabled={
                       txStatus === "signing" ||
                       txStatus === "submitting" ||
+                      mainnetPrompt !== null ||
                       !isOnline ||
                       (simulation !== null && !simulation.ok)
                     }
@@ -1023,7 +1148,7 @@ export default function BridgePage() {
                 </button>
               </div>
             )}
-              </>
+              </div>
             )}
           </div>
         </div>

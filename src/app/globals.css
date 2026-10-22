@@ -1,6 +1,15 @@
 @import "tailwindcss";
 
 /*
+ * Override Tailwind v4's dark: variant so it responds to the app's `.dark`
+ * class on <html> rather than the OS-level prefers-color-scheme media query.
+ * Without this, users who choose Light theme but whose OS is set to dark get
+ * the dark: utilities applied, producing near-black bg-red-950 banners and
+ * dark-palette cards on a light page (and vice versa). (#907)
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
  * Design tokens — two complete colour palettes.
  *
  * Light theme lives on :root; dark theme overrides those variables when the
@@ -28,7 +37,11 @@
      success/10%, error/10% on --surface). Verified by contrast.test.ts. */
   --text-muted: #5d5f6d;
   --success: #007a63;
-  --warning: #c07800;
+  /* #a06200 achieves >= 4.5:1 over both --surface (#ffffff) and --background
+     (#f5f6fa). The previous #c07800 cleared only 3.5:1 — well below WCAG AA
+     for the Testnet badge and network-changed banner that use this token
+     (#910). Verified by contrast.test.ts. */
+  --warning: #a06200;
   --error: #c0392b;
 
   /* Channel forms for alpha variants — kept in sync with --primary / --secondary. */

@@ -13,6 +13,7 @@
  * threading it through request headers.
  */
 import { usePathname } from "next/navigation";
+import { TelemetryProvider } from "@/contexts/TelemetryContext";
 import { WalletProvider } from "@/components/wallet-provider";
 import { HelpProvider } from "@/contexts/HelpContext";
 import { FeatureFlagProvider } from "@/contexts/FeatureFlagContext";
@@ -33,6 +34,7 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
   }
 
   return (
+    <TelemetryProvider>
     <FeatureFlagProvider>
       <WalletProvider>
         <HelpProvider>
@@ -58,5 +60,6 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
         </HelpProvider>
       </WalletProvider>
     </FeatureFlagProvider>
+    </TelemetryProvider>
   );
 }
