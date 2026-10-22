@@ -153,8 +153,18 @@ export function getActiveWalletId(): string | null {
   return null;
 }
 
-/** Seconds a built transaction stays valid before the network rejects it. */
-const TRANSACTION_TIMEOUT_SECONDS = 30;
+/**
+ * Seconds a built transaction stays valid before the network rejects it.
+ *
+ * The clock starts at `build()`, before the wallet prompt is even shown, and
+ * the round trip to the wallet (reading the request, unlocking, confirming on
+ * a hardware device) comes out of the same budget. 30s is comfortably too
+ * short for that human-approval step, so Horizon regularly rejected
+ * legitimately-signed transactions with `tx_too_late`. 240s gives a generous
+ * window for approval while still bounding how long a built-but-unsigned
+ * transaction can be replayed. (#931)
+ */
+export const TRANSACTION_TIMEOUT_SECONDS = 240;
 
 // ─── Network switching (#480) ──────────────────────────────────────────────────
 //
@@ -862,7 +872,19 @@ async function buildSignAndSubmit(
       const signedTx = TransactionBuilder.fromXDR(signedXDR, passphrase);
 
       onPhase?.("submitting");
-      const submitResult = await server.submitTransaction(signedTx);
+      let submitResult;
+      try {
+        submitResult = await server.submitTransaction(signedTx);
+      } catch (submitErr) {
+        // Horizon doesn't recognize tx_too_late as a generic failure the user
+        // can act on — `classifyError` falls through to "unknown" for it too,
+        // since the raw message is just a result code. Translate it into a
+        // clear, actionable message here instead. (#931)
+        if (isTxTooLateError(submitErr)) {
+          throw new Error("Signature took too long — please retry.");
+        }
+        throw submitErr;
+      }
       return {
         hash: submitResult.hash,
         successful: submitResult.successful,
@@ -871,6 +893,29 @@ async function buildSignAndSubmit(
     server,
     network
   );
+}
+
+/**
+ * Returns true if `error` is Horizon's `tx_too_late` rejection — the
+ * transaction's time bounds expired before it was submitted, typically
+ * because approving it in the wallet (reading the prompt, unlocking,
+ * confirming on a hardware device) took longer than the window. (#931)
+ */
+export function isTxTooLateError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const e = error as Record<string, unknown>;
+
+  if (typeof e.response === "object" && e.response !== null) {
+    const resp = e.response as Record<string, unknown>;
+    const data = resp.data as Record<string, unknown> | undefined;
+    const extras = data?.extras as Record<string, unknown> | undefined;
+    const resultCodes = extras?.result_codes as Record<string, unknown> | undefined;
+    if (resultCodes?.transaction === "tx_too_late") return true;
+  }
+
+  const msg = String(e.message ?? "");
+  return msg.includes("tx_too_late");
 }
 
 /** The abort raised when the wallet isn't on the network a transaction was built for. */
