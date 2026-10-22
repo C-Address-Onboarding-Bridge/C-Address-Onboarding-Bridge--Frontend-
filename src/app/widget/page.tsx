@@ -25,6 +25,7 @@ import {
   isTrustedParentOrigin,
   parseWidgetConfig,
   postWidgetMessage,
+  WIDGET_MESSAGE_SOURCE,
   type WidgetConfig,
   type WidgetOutboundMessage,
 } from "@/lib/widget";
@@ -68,11 +69,11 @@ function FundingWidget({ config }: { config: WidgetConfig }) {
   // Tell the host we're up, and let it size the iframe to fit — the host
   // has no way to know our content height otherwise.
   useEffect(() => {
-    postWidgetMessage(window.parent, { source: "aframp-widget", type: "ready" }, config.parentOrigin);
+    postWidgetMessage(window.parent, { source: WIDGET_MESSAGE_SOURCE, type: "ready" }, config.parentOrigin);
     const reportHeight = () =>
       postWidgetMessage(
         window.parent,
-        { source: "aframp-widget", type: "resize", height: document.body.scrollHeight },
+        { source: WIDGET_MESSAGE_SOURCE, type: "resize", height: document.body.scrollHeight },
         config.parentOrigin
       );
     reportHeight();
@@ -121,17 +122,17 @@ function FundingWidget({ config }: { config: WidgetConfig }) {
       );
       setTxHash(result.hash);
       setPhase("success");
-      send({ source: "aframp-widget", type: "success", txHash: result.hash, amount, asset: config.asset });
+      send({ source: WIDGET_MESSAGE_SOURCE, type: "success", txHash: result.hash, amount, asset: config.asset });
     } catch (cause) {
       const message = toSafeErrorMessage(cause, "Transaction failed. Please try again.");
       setError(message);
       setPhase("error");
-      send({ source: "aframp-widget", type: "error", message });
+      send({ source: WIDGET_MESSAGE_SOURCE, type: "error", message });
     }
   }
 
   function handleCancel() {
-    send({ source: "aframp-widget", type: "cancel" });
+    send({ source: WIDGET_MESSAGE_SOURCE, type: "cancel" });
   }
 
   return (
@@ -141,7 +142,7 @@ function FundingWidget({ config }: { config: WidgetConfig }) {
       className={`flex min-h-dvh flex-col gap-4 p-5 ${isDark ? "bg-neutral-900 text-neutral-50" : "bg-white text-neutral-900"}`}
     >
       <header className="flex items-center justify-between">
-        <p className="text-sm font-semibold">Fund with Aframp</p>
+        <p className="text-sm font-semibold">Fund with C-Address Bridge</p>
         <button
           type="button"
           onClick={handleCancel}
@@ -233,21 +234,24 @@ function FundingWidget({ config }: { config: WidgetConfig }) {
 function WidgetPageInner() {
   const searchParams = useSearchParams();
   const result = parseWidgetConfig(searchParams);
-
-  if (!result.ok) {
-    return <WidgetError message={result.error} />;
-  }
+  const parentOrigin = result.ok ? result.config.parentOrigin : null;
 
   // The widget must not trust the self-declared `parentOrigin` query param:
   // any site can embed it with its own origin and overlay it to trick users
   // into signing a funding transaction (clickjacking). Cross-check the
   // declared origin against the browser-reported ancestor origin(s) before
-  // rendering anything that can move funds.
+  // rendering anything that can move funds. Hooks stay above the early
+  // returns below so the hook order is stable across renders.
   const [trusted, setTrusted] = useState<boolean | null>(null);
 
   useEffect(() => {
-    setTrusted(isTrustedParentOrigin(result.config.parentOrigin));
-  }, [result.config.parentOrigin]);
+    if (parentOrigin === null) return;
+    setTrusted(isTrustedParentOrigin(parentOrigin));
+  }, [parentOrigin]);
+
+  if (!result.ok) {
+    return <WidgetError message={result.error} />;
+  }
 
   if (trusted === null) {
     return null;
