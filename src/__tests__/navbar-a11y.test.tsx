@@ -230,4 +230,59 @@ describe("Navbar Mobile Menu A11Y & Focus Management", () => {
 
     vi.useRealTimers();
   });
+
+  // --- #901: aria-current="page" on nav links ---
+
+  it("sets aria-current='page' only on the desktop link matching the current pathname", async () => {
+    // usePathname is mocked to return "/bridge" at the top of this file.
+    await act(async () => {
+      root?.render(<Navbar />);
+    });
+
+    const desktopLinks = container?.querySelectorAll(".hidden.md\\:flex a[href]");
+    expect(desktopLinks?.length).toBeGreaterThan(0);
+
+    for (const link of Array.from(desktopLinks ?? [])) {
+      const href = link.getAttribute("href");
+      if (href === "/bridge") {
+        expect(link.getAttribute("aria-current")).toBe("page");
+      } else {
+        expect(link.getAttribute("aria-current")).toBeNull();
+      }
+    }
+  });
+
+  it("sets aria-current='page' only on the mobile link matching the current pathname", async () => {
+    await act(async () => {
+      root?.render(<Navbar />);
+    });
+
+    const toggleBtn = container?.querySelector('button[aria-controls="mobile-menu"]') as HTMLButtonElement;
+    await act(async () => {
+      toggleBtn.click();
+    });
+
+    const mobileMenu = container?.querySelector("#mobile-menu");
+    const mobileLinks = mobileMenu?.querySelectorAll("a[href]");
+    expect(mobileLinks?.length).toBeGreaterThan(0);
+
+    for (const link of Array.from(mobileLinks ?? [])) {
+      const href = link.getAttribute("href");
+      if (href === "/bridge") {
+        expect(link.getAttribute("aria-current")).toBe("page");
+      } else {
+        expect(link.getAttribute("aria-current")).toBeNull();
+      }
+    }
+  });
+
+  it("has aria-label='Main' on the <nav> element", async () => {
+    await act(async () => {
+      root?.render(<Navbar />);
+    });
+
+    const nav = container?.querySelector("nav");
+    expect(nav).not.toBeNull();
+    expect(nav?.getAttribute("aria-label")).toBe("Main");
+  });
 });

@@ -48,8 +48,19 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, workflow, and tes
    | `NEXT_PUBLIC_BRIDGE_CONTRACT_ID` | No | Soroban bridge contract (omits direct payment) |
    | `NEXT_PUBLIC_SOROBAN_RPC_URL_TESTNET` | No | Soroban RPC endpoint for testnet. Defaults to the official SDF endpoint `https://soroban-testnet.stellar.org` |
    | `NEXT_PUBLIC_SOROBAN_RPC_URL_PUBLIC` | For mainnet Soroban calls | SDF does not operate a free public mainnet Soroban RPC — set this to your own provider's URL. Soroban RPC calls on `PUBLIC` fail with a clear configuration error until this is set |
+   | `NEXT_PUBLIC_HORIZON_URL_PUBLIC` | No | Horizon base URL for Mainnet. Defaults to `https://horizon.stellar.org` |
+   | `NEXT_PUBLIC_HORIZON_URL_TESTNET` | No | Horizon base URL for Testnet. Defaults to `https://horizon-testnet.stellar.org` |
    | `NEXT_PUBLIC_MOONPAY_API_KEY` | For onramp | From [Moonpay dashboard](https://buy.moonpay.com) |
    | `NEXT_PUBLIC_TRANSAK_API_KEY` | For onramp | From [Transak dashboard](https://global.transak.com) |
+   | `NEXT_PUBLIC_CEX_BRIDGE_DEPOSIT_ADDRESS` | No | Bridge deposit address shown in the CEX withdrawal routing flow |
+   | `NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS` | For widget embeds | Comma-separated list of origins allowed to embed the widget via postMessage |
+   | `NEXT_PUBLIC_ENABLE_SW` | No | Set to `"true"` to enable the caching service worker. Disabled by default |
+   | `NEXT_PUBLIC_INITIAL_JS_BUDGET_KB` | No | Initial JS budget in KB (default `700`). Overrides the value in `next.config.ts` for one build |
+   | `NEXT_PUBLIC_SITE_URL` | No | Canonical site URL for sitemap/robots.txt. Defaults to `http://localhost:3000` |
+   | `NEXT_PUBLIC_TRANSACTION_STATUS_URL` | No | URL polled for transaction status. Defaults to `/api/transactions` |
+   | `NEXT_PUBLIC_FEATURE_FLAGS` | No | Comma-separated client-side feature flag overrides, e.g. `locked_transfers=true` |
+   | `INDEXER_EVENTS_URL` | For activity feed | URL for the indexer events endpoint (server-side). Required for the recent-activity feed to return real data |
+   | `FEATURE_FLAGS_JSON` | No | JSON object of feature flag overrides evaluated server-side by `/api/feature-flags` |
 
    > **Note — Horizon and Soroban RPC endpoints:**
    > Horizon URLs are **hardcoded constants** in `src/lib/types.ts` (`HORIZON_URL`) and are not configurable via environment variables. They always resolve to `https://horizon.stellar.org` (PUBLIC) or `https://horizon-testnet.stellar.org` (TESTNET). Soroban RPC URLs for TESTNET also default to the SDF endpoint (`https://soroban-testnet.stellar.org`) but can be overridden via the env vars above. Soroban RPC for PUBLIC is empty by default — you must provide your own provider URL. See [Sequence Number Caching](docs/sequence-numbers.md) for details on how network requests are managed.

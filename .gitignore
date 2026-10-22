@@ -14,6 +14,9 @@
 /coverage
 /playwright-report/
 /test-results/
+# Vitest / Jest snapshot files are generated artefacts — they should not be
+# committed unless the project has deliberately adopted snapshot testing.
+**/__snapshots__/
 
 # next.js
 /.next/
@@ -32,8 +35,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — ignore all .env* except the committed example template (#902)
 .env*
+!.env.example
 
 # vercel
 .vercel

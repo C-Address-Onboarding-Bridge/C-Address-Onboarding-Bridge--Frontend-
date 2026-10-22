@@ -340,7 +340,7 @@ const Navbar = () => {
   }, [networkStatus, walletNetworkName]);
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-xl">
+    <nav aria-label="Main" className="fixed top-0 left-0 right-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* The full nav-link list plus the connected-wallet chip can exceed
             max-w-7xl on real desktop widths, with nothing here to wrap; an
@@ -363,6 +363,7 @@ const Navbar = () => {
                 <PrefetchLink
                   key={link.href}
                   href={link.href}
+                  aria-current={isActive ? "page" : undefined}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                     isActive
                       ? "bg-[var(--primary)]/10 text-[var(--primary-light)]"
@@ -548,6 +549,7 @@ const Navbar = () => {
                   key={link.href}
                   href={link.href}
                   onClick={closeMobile}
+                  aria-current={isActive ? "page" : undefined}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                     isActive
                       ? "bg-[var(--primary)]/10 text-[var(--primary-light)]"

@@ -15,6 +15,7 @@ import type { OnrampProvider } from "@/lib/types";
 import { useDebounce } from "@/hooks/useDebounce";
 import { providers, getProviderFeeRate, calculateOnrampFeeAndReceive } from "@/lib/onrampProviders";
 import { useHelp } from "@/contexts/HelpContext";
+import { useLocale } from "@/contexts/LocaleContext";
 
 // Provider config lives in `src/lib/onrampProviders.ts` (#721) so lib code and
 // server routes don't import this client page module. Re-exported for callers
@@ -91,6 +92,7 @@ function QuoteComparisonPanel({
   fiatCurrency,
   isValid,
   cAddress,
+  t,
 }: {
   fiatAmount: string;
   fiatCurrency: string;
@@ -102,6 +104,8 @@ function QuoteComparisonPanel({
    * fetch for this refresh and keeps the local estimate. (#678)
    */
   cAddress?: string;
+  /** Bound translation function from useLocale(). */
+  t: (key: string) => string;
 }) {
   const [loadedComparisons, setLoadedComparisons] = useState<{ query: string; items: OnrampQuoteComparison[] } | null>(null);
   const [quotedAt, setQuotedAt] = useState<number | null>(null);
@@ -164,11 +168,11 @@ function QuoteComparisonPanel({
   return (
     <div className="card p-5" data-testid="quote-comparison-panel">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold">Compare Providers</h3>
+        <h3 className="font-semibold">{t("onramp.compare_providers")}</h3>
         <button
           type="button"
           onClick={refresh}
-          aria-label="Refresh quotes"
+          aria-label={t("onramp.refresh_quotes")}
           data-testid="quote-refresh-button"
           className="p-1.5 rounded hover:bg-[var(--surface-2)] text-[var(--text-muted)] transition-colors"
         >
@@ -178,7 +182,7 @@ function QuoteComparisonPanel({
 
       {comparisons.length === 0 ? (
         <p className="text-sm text-[var(--text-muted)]">
-          No provider currently supports {fiatCurrency} for this comparison.
+          {t("onramp.no_provider_support")}
         </p>
       ) : (
         <>
@@ -195,23 +199,23 @@ function QuoteComparisonPanel({
                   <span className="text-sm font-medium flex items-center gap-1.5">
                     {q.isBest && <Trophy className="w-3.5 h-3.5 text-[var(--primary)]" aria-hidden="true" />}
                     {q.providerName}
-                    {q.isBest && <span className="sr-only"> — best rate</span>}
+                    {q.isBest && <span className="sr-only"> — {t("onramp.best_rate")}</span>}
                   </span>
                   <span className="text-xs text-[var(--text-muted)]">
-                    {q.source === "live" ? "Live" : "Estimated"}
+                    {q.source === "live" ? t("onramp.live") : t("onramp.estimated")}
                   </span>
                 </div>
                 <div className="flex justify-between text-xs text-[var(--text-muted)]">
-                  <span>Rate ({formatQuoteFeeRate(q.provider)} fee)</span>
+                  <span>{t("onramp.fee_label")} ({formatQuoteFeeRate(q.provider)} fee)</span>
                   <span className="tabular-nums">-{q.fee} {q.fiatCurrency}</span>
                 </div>
                 <div className="flex justify-between text-sm font-semibold mt-1">
-                  <span className="text-[var(--text-muted)] font-normal text-xs self-center">You receive</span>
+                  <span className="text-[var(--text-muted)] font-normal text-xs self-center">{t("onramp.you_pay")}</span>
                   <span className="tabular-nums">{q.destinationAmount} USDC</span>
                 </div>
                 {q.withinLimits === false && (
                   <p className="text-xs text-[var(--error)] mt-1" role="alert">
-                    Outside {q.providerName}&apos;s advertised limits for this amount.
+                    {q.providerName}&apos;s {t("onramp.outside_limits")}
                   </p>
                 )}
               </li>
@@ -236,6 +240,7 @@ function QuoteComparisonPanel({
 
 export default function OnrampPage() {
   const { openHelp } = useHelp();
+  const { t } = useLocale();
   const [cAddress, setCAddress] = useState("");
   const [fiatAmount, setFiatAmount] = useState("");
   const [selectedProvider, setSelectedProvider] = useState("moonpay");
@@ -277,7 +282,7 @@ export default function OnrampPage() {
     if (!provider) return;
 
     if (!provider.apiKey) {
-      setError(`${provider.name} API key is not configured. Set NEXT_PUBLIC_${provider.id === "moonpay" ? "MOONPAY" : "TRANSAK"}_API_KEY in your environment.`);
+      setError(`${provider.name} ${t("onramp.api_key_missing")} Set NEXT_PUBLIC_${provider.id === "moonpay" ? "MOONPAY" : "TRANSAK"}_API_KEY in your environment.`);
       return;
     }
 
@@ -293,7 +298,7 @@ export default function OnrampPage() {
       setError(
         err instanceof Error
           ? err.message
-          : "Unable to prepare provider redirect. Please double-check your input and try again."
+          : t("onramp.redirect_error")
       );
     }
   };
@@ -301,9 +306,9 @@ export default function OnrampPage() {
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Fiat Onramp</h1>
+        <h1 className="text-3xl font-bold mb-2">{t("onramp.title")}</h1>
         <p className="text-[var(--text-muted)]">
-          Buy crypto with a credit card and send it directly to a Soroban C-address.
+          {t("onramp.subtitle")}
         </p>
       </div>
 
@@ -318,14 +323,14 @@ export default function OnrampPage() {
             <LiveRegion
               message={
                 step === "redirect"
-                  ? `Opened a new tab to complete your purchase with ${provider?.name ?? "the provider"}.`
+                  ? `${t("onramp.redirecting_to")} ${provider?.name ?? "the provider"}.`
                   : ""
               }
             />
             {step === "form" && (
               <div className="space-y-6" data-testid="onramp-form">
                 <div>
-                  <label className="block text-sm font-medium mb-3">Select Provider</label>
+                  <label className="block text-sm font-medium mb-3">{t("onramp.select_provider")}</label>
                   {/* Single column on phones: at ~320px two provider cards left the
                       name, description and fee/limit rows overlapping their own
                       borders. (#341) */}
@@ -353,7 +358,7 @@ export default function OnrampPage() {
                         {/* Wrap instead of overflowing: "$15 - $25,000" does not fit
                             beside the fee on a narrow card. */}
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--text-muted)]">
-                          <span>Fee: {p.fee}</span>
+                          <span>{t("onramp.fee_label")}: {p.fee}</span>
                           <span aria-hidden="true">•</span>
                           <span>{p.limits}</span>
                         </div>
@@ -363,7 +368,7 @@ export default function OnrampPage() {
                 </div>
 
                 <div>
-                  <label htmlFor="onramp-c-address" className="block text-sm font-medium mb-2">Destination C-Address</label>
+                  <label htmlFor="onramp-c-address" className="block text-sm font-medium mb-2">{t("onramp.destination_address")}</label>
                   <div className="relative">
                     <Wallet className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
                     <input
@@ -372,19 +377,19 @@ export default function OnrampPage() {
                        autoComplete="off"
                        value={cAddress}
                        onChange={(e) => setCAddress(e.target.value)}
-                       placeholder="CABC...DEF"
+                       placeholder={t("onramp.destination_placeholder")}
                        aria-invalid={!validAddress && !!cAddress}
                        aria-describedby={!validAddress && cAddress ? "c-address-error" : undefined}
                        className="w-full pl-10 pr-4 py-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm font-mono focus:outline-none focus:border-[var(--primary)] transition-colors"
                      />
                    </div>
                    {!validAddress && debouncedCAddress && (
-                     <p id="c-address-error" className="text-xs text-[var(--error)] mt-1" role="alert">Invalid C-address (must start with C, 56 characters)</p>
+                     <p id="c-address-error" className="text-xs text-[var(--error)] mt-1" role="alert">{t("onramp.invalid_c_address")}</p>
                    )}
                 </div>
 
                 <div>
-                  <label htmlFor="onramp-fiat-amount" className="block text-sm font-medium mb-2">Amount</label>
+                  <label htmlFor="onramp-fiat-amount" className="block text-sm font-medium mb-2">{t("onramp.amount_label")}</label>
                   <div className="flex gap-2">
                     <div className="relative flex-1">
                       <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
@@ -403,7 +408,7 @@ export default function OnrampPage() {
                        id="onramp-fiat-currency"
                        value={fiatCurrency}
                        onChange={(e) => setFiatCurrency(e.target.value)}
-                       aria-label="Currency"
+                       aria-label={t("onramp.currency_label")}
                        className="px-3 py-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-sm focus:outline-none focus:border-[var(--primary)] transition-colors"
                      >
                        {(provider?.currencies ?? []).map((c) => (
@@ -412,7 +417,7 @@ export default function OnrampPage() {
                      </select>
                    </div>
                    {!validAmount && debouncedFiatAmount && (
-                     <p id="fiat-amount-error" className="text-xs text-[var(--error)] mt-1" role="alert">Invalid amount format</p>
+                     <p id="fiat-amount-error" className="text-xs text-[var(--error)] mt-1" role="alert">{t("onramp.invalid_amount")}</p>
                    )}
                 </div>
 
@@ -421,19 +426,19 @@ export default function OnrampPage() {
                     free text) grew the row past the card edge because flex items
                     do not shrink below their content width by default. (#341) */}
                 <div className="p-4 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
-                  <h4 className="text-sm font-medium mb-2">Estimated Output</h4>
+                  <h4 className="text-sm font-medium mb-2">{t("onramp.estimated_output")}</h4>
                   <div className="flex justify-between items-baseline gap-3 text-sm">
-                    <span className="shrink-0 text-[var(--text-muted)]">You pay</span>
+                    <span className="shrink-0 text-[var(--text-muted)]">{t("onramp.you_pay")}</span>
                     <span className="min-w-0 text-right break-all tabular-nums">${fiatAmount || "0"} {fiatCurrency}</span>
                   </div>
                   <div className="flex justify-between items-baseline gap-3 text-sm mt-1">
-                    <span className="shrink-0 text-[var(--text-muted)]">Fee ({provider?.fee})</span>
+                    <span className="shrink-0 text-[var(--text-muted)]">{t("onramp.fee_label")} ({provider?.fee})</span>
                     <span className="min-w-0 text-right break-all tabular-nums">
                       -${fiatAmount && validAmount ? feeAmount.toFixed(2) : "0"}
                     </span>
                   </div>
                   <div className="flex justify-between items-baseline gap-3 text-sm mt-1">
-                    <span className="shrink-0 text-[var(--text-muted)]">Est. receive</span>
+                    <span className="shrink-0 text-[var(--text-muted)]">{t("onramp.est_receive")}</span>
                     <span className="min-w-0 text-right break-all tabular-nums font-semibold">
                       {fiatAmount && validAmount
                         ? `~${receiveAmount.toFixed(2)} USDC`
@@ -464,7 +469,7 @@ export default function OnrampPage() {
                   className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <CreditCard className="w-4 h-4 shrink-0" />
-                  <span className="truncate">Continue with {provider?.name}</span>
+                  <span className="truncate">{t("onramp.continue_with")} {provider?.name}</span>
                 </button>
               </div>
             )}
@@ -474,9 +479,9 @@ export default function OnrampPage() {
                 <div className="w-16 h-16 rounded-full bg-[var(--primary)]/10 flex items-center justify-center mx-auto mb-4">
                   <ExternalLink className="w-8 h-8 text-[var(--primary-light)]" />
                 </div>
-                <h3 className="text-lg font-semibold mb-2">Redirecting to {provider?.name}</h3>
+                <h3 className="text-lg font-semibold mb-2">{t("onramp.redirecting_to")} {provider?.name}</h3>
                 <p className="text-sm text-[var(--text-muted)] mb-4">
-                  A new tab has been opened to complete your purchase. Funds will be sent to your C-address.
+                  {t("onramp.redirect_subtitle")}
                 </p>
                 {redirectUrl && (
                   <a
@@ -486,7 +491,7 @@ export default function OnrampPage() {
                     className="inline-flex items-start gap-1 text-sm text-[var(--primary-light)] hover:underline mb-4"
                   >
                     <ExternalLink className="w-3 h-3 shrink-0 mt-1" />
-                    <span>Checkout didn&apos;t open? Continue to {provider?.name}</span>
+                    <span>{t("onramp.redirect_fallback")} {provider?.name}</span>
                   </a>
                 )}
                 <div className="mt-4">
@@ -495,7 +500,7 @@ export default function OnrampPage() {
                     onClick={() => { setStep("form"); setRedirectUrl(null); }}
                     className="text-sm text-[var(--primary-light)] hover:underline"
                   >
-                    Go back
+                    {t("onramp.go_back")}
                   </button>
                 </div>
               </div>
@@ -516,10 +521,11 @@ export default function OnrampPage() {
                 ? debouncedCAddress
                 : undefined
             }
+            t={t}
           />
 
           <div className="card p-5">
-            <h3 className="font-semibold mb-3">Supported Providers</h3>
+            <h3 className="font-semibold mb-3">{t("onramp.supported_providers")}</h3>
             <div className="space-y-3">
               {providers.map((p) => (
                 <div key={p.id} className="p-3 rounded-lg bg-[var(--surface-2)]">
@@ -534,31 +540,31 @@ export default function OnrampPage() {
           </div>
 
           <div className="card p-5">
-            <h3 className="font-semibold mb-3">How It Works</h3>
+            <h3 className="font-semibold mb-3">{t("onramp.how_it_works")}</h3>
             <ol className="space-y-3 text-sm text-[var(--text-muted)]">
               <li className="flex gap-2">
                 <span className="text-[var(--primary-light)] font-medium">1.</span>
-                <span>Choose your preferred fiat provider</span>
+                <span>{t("onramp.step_1")}</span>
               </li>
               <li className="flex gap-2">
                 <span className="text-[var(--primary-light)] font-medium">2.</span>
-                <span>Enter your Soroban C-address</span>
+                <span>{t("onramp.step_2")}</span>
               </li>
               <li className="flex gap-2">
                 <span className="text-[var(--primary-light)] font-medium">3.</span>
-                <span>Complete checkout and receive USDC</span>
+                <span>{t("onramp.step_3")}</span>
               </li>
               <li className="flex gap-2">
                 <span className="text-[var(--primary-light)] font-medium">4.</span>
-                <span>Funds land directly in your smart account</span>
+                <span>{t("onramp.step_4")}</span>
               </li>
             </ol>
           </div>
 
           <div className="card p-5">
-            <h3 className="font-semibold mb-3">Need Help?</h3>
+            <h3 className="font-semibold mb-3">{t("onramp.need_help")}</h3>
             <p className="text-sm text-[var(--text-muted)] mb-3">
-              Make sure your C-address is valid before continuing.
+              {t("onramp.help_subtitle")}
             </p>
             <button
               type="button"
@@ -566,7 +572,7 @@ export default function OnrampPage() {
               className="inline-flex items-center gap-2 text-sm text-[var(--primary-light)] hover:underline"
             >
               <HelpCircle className="w-4 h-4" />
-              Open help centre
+              {t("onramp.open_help_centre")}
             </button>
           </div>
         </div>

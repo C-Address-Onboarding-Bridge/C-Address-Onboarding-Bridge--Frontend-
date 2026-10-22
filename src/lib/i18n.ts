@@ -27,6 +27,44 @@ export interface TranslationSet {
     search_help: string;
     no_results: string;
   };
+  onramp: {
+    title: string;
+    subtitle: string;
+    select_provider: string;
+    destination_address: string;
+    destination_placeholder: string;
+    invalid_c_address: string;
+    amount_label: string;
+    currency_label: string;
+    estimated_output: string;
+    you_pay: string;
+    fee_label: string;
+    est_receive: string;
+    continue_with: string;
+    redirecting_to: string;
+    redirect_subtitle: string;
+    redirect_fallback: string;
+    go_back: string;
+    compare_providers: string;
+    refresh_quotes: string;
+    no_provider_support: string;
+    best_rate: string;
+    live: string;
+    estimated: string;
+    outside_limits: string;
+    how_it_works: string;
+    step_1: string;
+    step_2: string;
+    step_3: string;
+    step_4: string;
+    need_help: string;
+    help_subtitle: string;
+    open_help_centre: string;
+    supported_providers: string;
+    invalid_amount: string;
+    api_key_missing: string;
+    redirect_error: string;
+  };
   bridge: {
     title: string;
     source_network: string;
@@ -132,6 +170,44 @@ const translations: Record<Locale, TranslationSet> = {
       search_help: 'Search help...',
       no_results: 'No results found',
     },
+    onramp: {
+      title: 'Fiat Onramp',
+      subtitle: 'Buy crypto with a credit card and send it directly to a Soroban C-address.',
+      select_provider: 'Select Provider',
+      destination_address: 'Destination C-Address',
+      destination_placeholder: 'CABC...DEF',
+      invalid_c_address: 'Invalid C-address (must start with C, 56 characters)',
+      amount_label: 'Amount',
+      currency_label: 'Currency',
+      estimated_output: 'Estimated Output',
+      you_pay: 'You pay',
+      fee_label: 'Fee',
+      est_receive: 'Est. receive',
+      continue_with: 'Continue with',
+      redirecting_to: 'Redirecting to',
+      redirect_subtitle: 'A new tab has been opened to complete your purchase. Funds will be sent to your C-address.',
+      redirect_fallback: "Checkout didn't open? Continue to",
+      go_back: 'Go back',
+      compare_providers: 'Compare Providers',
+      refresh_quotes: 'Refresh quotes',
+      no_provider_support: 'No provider currently supports this currency for this comparison.',
+      best_rate: 'best rate',
+      live: 'Live',
+      estimated: 'Estimated',
+      outside_limits: "Outside advertised limits for this amount.",
+      how_it_works: 'How It Works',
+      step_1: 'Choose your preferred fiat provider',
+      step_2: 'Enter your Soroban C-address',
+      step_3: 'Complete checkout and receive USDC',
+      step_4: 'Funds land directly in your smart account',
+      need_help: 'Need Help?',
+      help_subtitle: 'Make sure your C-address is valid before continuing.',
+      open_help_centre: 'Open help centre',
+      supported_providers: 'Supported Providers',
+      invalid_amount: 'Invalid amount format',
+      api_key_missing: 'API key is not configured.',
+      redirect_error: 'Unable to prepare provider redirect. Please double-check your input and try again.',
+    },
     bridge: {
       title: 'Bridge Assets',
       source_network: 'Source Network',
@@ -234,6 +310,44 @@ const translations: Record<Locale, TranslationSet> = {
       help: 'Ayuda',
       search_help: 'Buscar ayuda...',
       no_results: 'No se encontraron resultados',
+    },
+    onramp: {
+      title: 'Rampa Fiat',
+      subtitle: 'Compra criptomonedas con tarjeta de crédito y envíalas directamente a una C-address Soroban.',
+      select_provider: 'Seleccionar Proveedor',
+      destination_address: 'C-Address de Destino',
+      destination_placeholder: 'CABC...DEF',
+      invalid_c_address: 'C-address inválida (debe comenzar con C, 56 caracteres)',
+      amount_label: 'Cantidad',
+      currency_label: 'Moneda',
+      estimated_output: 'Resultado Estimado',
+      you_pay: 'Pagas',
+      fee_label: 'Tarifa',
+      est_receive: 'Rec. est.',
+      continue_with: 'Continuar con',
+      redirecting_to: 'Redirigiendo a',
+      redirect_subtitle: 'Se ha abierto una nueva pestaña para completar tu compra. Los fondos se enviarán a tu C-address.',
+      redirect_fallback: '¿La ventana no se abrió? Continuar a',
+      go_back: 'Volver',
+      compare_providers: 'Comparar Proveedores',
+      refresh_quotes: 'Actualizar cotizaciones',
+      no_provider_support: 'Ningún proveedor admite actualmente esta moneda para esta comparación.',
+      best_rate: 'mejor tarifa',
+      live: 'En vivo',
+      estimated: 'Estimado',
+      outside_limits: 'Fuera de los límites anunciados para esta cantidad.',
+      how_it_works: 'Cómo Funciona',
+      step_1: 'Elige tu proveedor fiat preferido',
+      step_2: 'Introduce tu C-address Soroban',
+      step_3: 'Completa el pago y recibe USDC',
+      step_4: 'Los fondos llegan directamente a tu cuenta inteligente',
+      need_help: '¿Necesitas Ayuda?',
+      help_subtitle: 'Asegúrate de que tu C-address sea válida antes de continuar.',
+      open_help_centre: 'Abrir centro de ayuda',
+      supported_providers: 'Proveedores Disponibles',
+      invalid_amount: 'Formato de cantidad inválido',
+      api_key_missing: 'La clave API no está configurada.',
+      redirect_error: 'No se pudo preparar la redirección al proveedor. Comprueba tus datos e inténtalo de nuevo.',
     },
     bridge: {
       title: 'Transferir Activos',
@@ -338,6 +452,44 @@ const translations: Record<Locale, TranslationSet> = {
       search_help: 'Rechercher de l\'aide...',
       no_results: 'Aucun résultat trouvé',
     },
+    onramp: {
+      title: 'Rampe Fiat',
+      subtitle: 'Achetez des cryptomonnaies par carte de crédit et envoyez-les directement à une C-address Soroban.',
+      select_provider: 'Choisir un Fournisseur',
+      destination_address: 'C-Address de Destination',
+      destination_placeholder: 'CABC...DEF',
+      invalid_c_address: 'C-address invalide (doit commencer par C, 56 caractères)',
+      amount_label: 'Montant',
+      currency_label: 'Devise',
+      estimated_output: 'Résultat Estimé',
+      you_pay: 'Vous payez',
+      fee_label: 'Frais',
+      est_receive: 'Rec. est.',
+      continue_with: 'Continuer avec',
+      redirecting_to: 'Redirection vers',
+      redirect_subtitle: 'Un nouvel onglet a été ouvert pour finaliser votre achat. Les fonds seront envoyés à votre C-address.',
+      redirect_fallback: "La fenêtre ne s'est pas ouverte ? Continuer vers",
+      go_back: 'Retour',
+      compare_providers: 'Comparer les Fournisseurs',
+      refresh_quotes: 'Actualiser les devis',
+      no_provider_support: 'Aucun fournisseur ne prend actuellement en charge cette devise pour cette comparaison.',
+      best_rate: 'meilleur taux',
+      live: 'En direct',
+      estimated: 'Estimé',
+      outside_limits: 'En dehors des limites annoncées pour ce montant.',
+      how_it_works: 'Comment Ça Marche',
+      step_1: 'Choisissez votre fournisseur fiat préféré',
+      step_2: 'Saisissez votre C-address Soroban',
+      step_3: 'Finalisez le paiement et recevez des USDC',
+      step_4: 'Les fonds arrivent directement dans votre compte intelligent',
+      need_help: 'Besoin d\'Aide ?',
+      help_subtitle: 'Assurez-vous que votre C-address est valide avant de continuer.',
+      open_help_centre: 'Ouvrir le centre d\'aide',
+      supported_providers: 'Fournisseurs Disponibles',
+      invalid_amount: 'Format de montant invalide',
+      api_key_missing: 'La clé API n\'est pas configurée.',
+      redirect_error: 'Impossible de préparer la redirection vers le fournisseur. Vérifiez vos informations et réessayez.',
+    },
     bridge: {
       title: 'Transférer des Actifs',
       source_network: 'Réseau Source',
@@ -440,6 +592,44 @@ const translations: Record<Locale, TranslationSet> = {
       help: 'Ajuda',
       search_help: 'Pesquisar ajuda...',
       no_results: 'Nenhum resultado encontrado',
+    },
+    onramp: {
+      title: 'Rampa Fiat',
+      subtitle: 'Compre criptomoedas com cartão de crédito e envie diretamente para uma C-address Soroban.',
+      select_provider: 'Selecionar Provedor',
+      destination_address: 'C-Address de Destino',
+      destination_placeholder: 'CABC...DEF',
+      invalid_c_address: 'C-address inválida (deve começar com C, 56 caracteres)',
+      amount_label: 'Valor',
+      currency_label: 'Moeda',
+      estimated_output: 'Resultado Estimado',
+      you_pay: 'Você paga',
+      fee_label: 'Taxa',
+      est_receive: 'Rec. est.',
+      continue_with: 'Continuar com',
+      redirecting_to: 'Redirecionando para',
+      redirect_subtitle: 'Uma nova aba foi aberta para concluir sua compra. Os fundos serão enviados para sua C-address.',
+      redirect_fallback: 'A janela não abriu? Continuar para',
+      go_back: 'Voltar',
+      compare_providers: 'Comparar Provedores',
+      refresh_quotes: 'Atualizar cotações',
+      no_provider_support: 'Nenhum provedor suporta atualmente esta moeda para esta comparação.',
+      best_rate: 'melhor taxa',
+      live: 'Ao vivo',
+      estimated: 'Estimado',
+      outside_limits: 'Fora dos limites anunciados para este valor.',
+      how_it_works: 'Como Funciona',
+      step_1: 'Escolha seu provedor fiat preferido',
+      step_2: 'Insira sua C-address Soroban',
+      step_3: 'Conclua o pagamento e receba USDC',
+      step_4: 'Os fundos chegam diretamente na sua conta inteligente',
+      need_help: 'Precisa de Ajuda?',
+      help_subtitle: 'Certifique-se de que sua C-address é válida antes de continuar.',
+      open_help_centre: 'Abrir central de ajuda',
+      supported_providers: 'Provedores Disponíveis',
+      invalid_amount: 'Formato de valor inválido',
+      api_key_missing: 'A chave API não está configurada.',
+      redirect_error: 'Não foi possível preparar o redirecionamento para o provedor. Verifique seus dados e tente novamente.',
     },
     bridge: {
       title: 'Transferir Ativos',
@@ -544,4 +734,46 @@ export function t(locale: Locale, key: string): string {
     }
   }
   return typeof current === 'string' ? current : key;
+}
+
+/**
+ * Detect the preferred locale from the browser environment.
+ * Priority: localStorage stored value → navigator.language → DEFAULT_LOCALE.
+ * Returns a Locale guaranteed to be in SUPPORTED_LOCALES.
+ */
+export function detectLocale(): Locale {
+  if (typeof navigator === 'undefined') return DEFAULT_LOCALE;
+  try {
+    const lang = navigator.language ?? '';
+    // Match on the primary language subtag (e.g. "en" from "en-US")
+    const primary = lang.split('-')[0].toLowerCase() as Locale;
+    if (SUPPORTED_LOCALES.includes(primary)) return primary;
+  } catch {
+    // navigator not available or property access failed
+  }
+  return DEFAULT_LOCALE;
+}
+
+/**
+ * Format a number using the locale's conventions.
+ * Falls back to basic toLocaleString when the Intl API is unavailable.
+ */
+export function formatNumber(value: number, locale: Locale, options?: Intl.NumberFormatOptions): string {
+  try {
+    return new Intl.NumberFormat(locale, options).format(value);
+  } catch {
+    return value.toLocaleString();
+  }
+}
+
+/**
+ * Format a currency amount using the locale's conventions.
+ * Falls back to `${value} ${currency}` when Intl is unavailable.
+ */
+export function formatCurrency(value: number, currency: string, locale: Locale): string {
+  try {
+    return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value);
+  } catch {
+    return `${value} ${currency}`;
+  }
 }

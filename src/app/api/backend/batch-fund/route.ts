@@ -1,6 +1,9 @@
 import { proxyToBackend } from "@/lib/backendProxy";
 
-/** Proxies src/lib/api.ts's submitBatchFunding to the real backend (#674). */
+/**
+ * Proxies src/lib/api.ts's submitSignedBatchFunding to the backend's
+ * confirmed batch-submit endpoint POST /api/v1/fund/batch (#674, #900).
+ */
 export async function POST(request: Request) {
-  return proxyToBackend(request, "/batch-fund");
+  return proxyToBackend(request, "/api/v1/fund/batch");
 }

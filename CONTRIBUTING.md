@@ -23,16 +23,18 @@ Thank you for contributing to C-Address Bridge. This guide covers the setup, wor
    cp .env.example .env.local
    ```
 
-   Required env vars (see `.env.example` for all options):
+   `.env.example` lists every variable the codebase reads, with descriptions
+   and sensible defaults. The full table is maintained in
+   [README.md — Configure environment](README.md#getting-started) to avoid
+   duplication.
+
+   The minimum you need to run the app locally:
 
    | Variable | Required | Description |
    |---|---|---|
    | `NEXT_PUBLIC_STELLAR_NETWORK` | Yes | `TESTNET` or `PUBLIC` |
-   | `NEXT_PUBLIC_BRIDGE_CONTRACT_ID` | No | Soroban bridge contract |
-   | `NEXT_PUBLIC_SOROBAN_RPC_URL_TESTNET` | No | Soroban RPC endpoint for testnet |
-   | `NEXT_PUBLIC_SOROBAN_RPC_URL_PUBLIC` | For mainnet | Soroban RPC endpoint for mainnet |
-   | `NEXT_PUBLIC_MOONPAY_API_KEY` | For onramp | From Moonpay dashboard |
-   | `NEXT_PUBLIC_TRANSAK_API_KEY` | For onramp | From Transak dashboard |
+   | `NEXT_PUBLIC_API_URL` | Yes in production | Base URL of the C-Address Bridge backend |
+   | `BACKEND_API_KEY` | For backend calls beyond `/health` | The backend's `X-API-Key` — never use a `NEXT_PUBLIC_*` name for this |
 
 3. Run the development server:
 

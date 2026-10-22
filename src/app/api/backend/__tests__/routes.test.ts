@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
- * Wiring tests for the backend proxy routes (#674): each route file is a
+ * Wiring tests for the backend proxy routes (#674, #900): each route file is a
  * thin adapter over proxyToBackend (tested on its own in
  * src/lib/__tests__/backendProxy.test.ts) — these just confirm each route
  * forwards to the backend path src/lib/api.ts actually calls, including the
@@ -24,11 +24,18 @@ function makeRequest(url: string, method = "GET"): Request {
 }
 
 describe("backend proxy route wiring", () => {
-  it("POST /api/backend/batch-fund -> /batch-fund", async () => {
+  it("POST /api/backend/batch-fund -> /api/v1/fund/batch", async () => {
     const { POST } = await import("../batch-fund/route");
     const request = makeRequest("http://localhost/api/backend/batch-fund", "POST");
     await POST(request);
-    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/batch-fund");
+    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/api/v1/fund/batch");
+  });
+
+  it("POST /api/backend/batch-fund/prepare -> /api/v1/fund/prepare", async () => {
+    const { POST } = await import("../batch-fund/prepare/route");
+    const request = makeRequest("http://localhost/api/backend/batch-fund/prepare", "POST");
+    await POST(request);
+    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/api/v1/fund/prepare");
   });
 
   it("POST /api/backend/locks -> /locks", async () => {
@@ -74,5 +81,12 @@ describe("backend proxy route wiring", () => {
       request,
       "/transactions/export?address=G1&network=TESTNET&from=0&to=1&limit=200"
     );
+  });
+
+  it("POST /api/backend/transactions -> /transactions", async () => {
+    const { POST } = await import("../transactions/route");
+    const request = makeRequest("http://localhost/api/backend/transactions", "POST");
+    await POST(request);
+    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/transactions");
   });
 });
