@@ -163,6 +163,10 @@ describe("isValidStellarAmount", () => {
     expect(isValidStellarAmount("922337203686")).toBe(false);
     expect(isValidStellarAmount("1000000000000")).toBe(false);
   });
+
+  it("rejects a 20-digit integer string instead of only approximating it as a float", () => {
+    expect(isValidStellarAmount("99999999999999999999")).toBe(false);
+  });
 });
 
 describe("isCAddress", () => {

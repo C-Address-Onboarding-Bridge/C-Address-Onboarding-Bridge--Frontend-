@@ -415,11 +415,18 @@ export function isValidStellarAddress(address: string): boolean {
   return isValidEd25519PublicKey(address) || isValidContract(address);
 }
 
+// int64 max, in stroops (the largest amount the Stellar XDR can represent).
+const MAX_AMOUNT_STROOPS = 9223372036854775807n;
+
 export function isValidStellarAmount(amount: string): boolean {
   if (!amount || typeof amount !== "string") return false;
   if (!/^\d+(\.\d{1,7})?$/.test(amount)) return false;
-  const num = Number(amount);
-  return !isNaN(num) && num > 0;
+  const [intPart, fracPart = ""] = amount.split(".");
+  // Compare in stroops as a BigInt so very large integer strings (e.g. a
+  // 20-digit value) aren't only approximated by a float comparison, and so
+  // amounts above int64 max are rejected before the SDK throws on them.
+  const stroops = BigInt(intPart) * 10_000_000n + BigInt(fracPart.padEnd(7, "0"));
+  return stroops > 0n && stroops <= MAX_AMOUNT_STROOPS;
 }
 
 /** Whether `address` is a valid Soroban contract address (a `C...` StrKey). */
