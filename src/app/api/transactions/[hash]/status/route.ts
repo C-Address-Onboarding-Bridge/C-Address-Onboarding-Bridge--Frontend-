@@ -7,6 +7,9 @@ import {
 
 export const dynamic = "force-dynamic";
 
+const HASH_PATTERN = /^[0-9a-fA-F]{64}$/;
+const ALLOWED_NETWORKS: StellarNetwork[] = ["PUBLIC", "TESTNET"];
+
 /** How often the server re-checks Horizon while the tx is still in flight. */
 const POLL_INTERVAL_MS = 3_000;
 /** Hard cap for a single SSE connection before it closes. */
