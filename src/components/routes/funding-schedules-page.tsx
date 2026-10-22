@@ -145,9 +145,12 @@ export default function FundingSchedulesPage() {
   };
 
   const handleMarkCompleted = (schedule: FundingSchedule) => {
-    markScheduleCompleted(schedule.id);
+    const updated = markScheduleCompleted(schedule.id);
     refresh();
-    setNotice(`Marked "${schedule.label}" as sent. Next due: one ${schedule.frequency.replace("ly", "")} from now.`);
+    const nextRunCopy = updated
+      ? new Date(updated.nextRunAt).toLocaleDateString()
+      : `one ${schedule.frequency.replace("ly", "")} from now`;
+    setNotice(`Marked "${schedule.label}" as sent. Next due: ${nextRunCopy}.`);
   };
 
   const openFundingLink = (schedule: FundingSchedule) => {

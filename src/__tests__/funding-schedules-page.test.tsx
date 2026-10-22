@@ -158,5 +158,23 @@ describe("FundingSchedulesPage (#557)", () => {
       render(<FundingSchedulesPage />);
       expect(screen.queryByTestId("due-banner")).not.toBeInTheDocument();
     });
+
+    it("announces a real next-run date, not 'one biweek from now', for a biweekly schedule", async () => {
+      const saved = createFundingSchedule(
+        "Rent",
+        C_ADDRESS,
+        "100",
+        "USDC",
+        "biweekly",
+        Date.now() - WEEK_MS - 1_000
+      )!;
+      render(<FundingSchedulesPage />);
+      await screen.findByTestId("due-banner");
+
+      fireEvent.click(screen.getByTestId(`mark-completed-${saved.id}`));
+
+      const notice = await screen.findByText(/Marked "Rent" as sent\. Next due:/);
+      expect(notice.textContent).not.toMatch(/biweek/);
+    });
   });
 });
