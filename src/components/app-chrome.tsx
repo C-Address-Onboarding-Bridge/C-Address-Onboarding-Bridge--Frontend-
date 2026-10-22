@@ -23,6 +23,8 @@ import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
 import { OfflineBanner } from "@/components/offline-banner";
+import { ReauthGate } from "@/components/reauth-gate";
+import { ReferralCapture } from "@/components/referral-capture";
 
 export function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -36,6 +38,7 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
     <FeatureFlagProvider>
       <WalletProvider>
         <HelpProvider>
+          <ReferralCapture />
           <StatusBanner />
           <div className="min-h-screen flex flex-col">
             <a
@@ -53,6 +56,7 @@ export function AppChrome({ children }: { children: React.ReactNode }) {
           <FeatureFlagPanel />
           <ServiceWorkerRegistrar />
           <OfflineBanner />
+          <ReauthGate />
         </HelpProvider>
       </WalletProvider>
     </FeatureFlagProvider>

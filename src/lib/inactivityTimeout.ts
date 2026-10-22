@@ -60,7 +60,13 @@ export function getInactivityState(now: number = Date.now(), timeoutMs: number =
   const inactiveFor = now - lastActivity;
   const isTimedOut = inactiveFor > timeoutMs;
   const isWarning = inactiveFor > timeoutMs - (INACTIVITY_TIMEOUT_MS - INACTIVITY_WARNING_MS);
-  const reauthRequired = isTimedOut;
+  // The timed-out flag is derived purely from elapsed time, so it resets the
+  // moment `now` is re-evaluated (e.g. a page reload bumps `now` without any
+  // real user activity). The re-auth requirement has to be sticky across
+  // reloads, so it's honoured from the persisted flag set by
+  // markReauthRequired() and only cleared by clearReauthRequired() after an
+  // explicit wallet re-confirmation.
+  const reauthRequired = isTimedOut || isReauthRequired();
 
   return { lastActivityAt: lastActivity, isTimedOut, isWarning, reauthRequired };
 }
