@@ -97,6 +97,13 @@ interface Props {
   network: StellarNetwork;
   /** When provided, the "View all" link points to this account's history. (#294) */
   address?: string;
+  /**
+   * When provided, the bulk "Claim" button is shown and wired to this handler.
+   * Called with the IDs of all selected transactions the user confirmed.
+   * Until the parent wires the real lock-claim path here (#919), omitting this
+   * prop hides the button entirely rather than reporting fake success.
+   */
+  onClaim?: (ids: string[]) => Promise<void>;
 }
 
 // TODO(next-bounty): the bulk-actions feature (#486) was only half-merged into
@@ -249,7 +256,7 @@ function getInitialUrlState() {
   };
 }
 
-function TransactionHistory({ transactions, loading, network, address }: Props) {
+function TransactionHistory({ transactions, loading, network, address, onClaim }: Props) {
   const initial = getInitialUrlState();
   const [searchQuery, setSearchQuery] = useState(initial.q);
   const [statusFilter, setStatusFilter] = useState(initial.status);
@@ -347,6 +354,7 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
       : "";
   const [confirmingClaim, setConfirmingClaim] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const [claimError, setClaimError] = useState<string | null>(null);
   const filteredIds = useMemo(() => filteredTransactions.map((tx) => tx.id), [filteredTransactions]);
   const selectedFilteredCount = useMemo(
     () => filteredIds.reduce((count, id) => count + (selectedIds.has(id) ? 1 : 0), 0),
@@ -387,14 +395,23 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
     downloadCsv(csv, `transactions-${new Date().toISOString().slice(0, 10)}.csv`);
     setStatusMessage(`Exported ${selectedCount} transaction${selectedCount === 1 ? "" : "s"}.`);
   };
-  const handleConfirmClaim = () => {
-    setStatusMessage(`Claimed ${selectedCount} transaction${selectedCount === 1 ? "" : "s"}.`);
-    setSelectedIds((previous) => {
-      const next = new Set(previous);
-      selectedTransactions.forEach((tx) => next.delete(tx.id));
-      return next;
-    });
-    setConfirmingClaim(false);
+  const handleConfirmClaim = async () => {
+    if (!onClaim) return;
+    setClaimError(null);
+    const ids = selectedTransactions.map((tx) => tx.id);
+    try {
+      await onClaim(ids);
+      setStatusMessage(`Claimed ${selectedCount} transaction${selectedCount === 1 ? "" : "s"}.`);
+      setSelectedIds((previous) => {
+        const next = new Set(previous);
+        selectedTransactions.forEach((tx) => next.delete(tx.id));
+        return next;
+      });
+      setConfirmingClaim(false);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Claim failed. Please try again.";
+      setClaimError(msg);
+    }
   };
 
   const items = useMemo(
@@ -524,10 +541,12 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
             <button
               type="button"
               onClick={handleExportClick}
+              data-testid="bulk-export-button"
               className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-sm hover:bg-[var(--surface-2)] transition-colors"
             >
               Export
             </button>
+            {onClaim && (
             <button
               type="button"
               onClick={handleClaimClick}
@@ -537,9 +556,10 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
             >
               Claim
             </button>
+            )}
           </div>
         )}
-        {claimDisabledReason && (
+        {onClaim && claimDisabledReason && (
           <p className="text-xs text-[var(--text-muted)]" role="note">
             {claimDisabledReason}
           </p>
@@ -623,7 +643,7 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(0, 0, 0, 0.5)" }}
           onKeyDown={(event) => {
-            if (event.key === "Escape") setConfirmingClaim(false);
+            if (event.key === "Escape") { setConfirmingClaim(false); setClaimError(null); }
           }}
           data-testid="bulk-claim-dialog"
         >
@@ -635,10 +655,13 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
               This claims {selectedCount} transaction{selectedCount === 1 ? "" : "s"} and moves funds on-chain.
               This action cannot be undone.
             </p>
+            {claimError && (
+              <p role="alert" className="text-xs text-[var(--error)] mb-4">{claimError}</p>
+            )}
             <div className="flex justify-end gap-3">
               <button
                 type="button"
-                onClick={() => setConfirmingClaim(false)}
+                onClick={() => { setConfirmingClaim(false); setClaimError(null); }}
                 autoFocus
                 className="px-4 py-2 rounded-lg border border-[var(--border)] text-sm hover:bg-[var(--surface-2)] transition-colors"
               >
@@ -646,7 +669,7 @@ function TransactionHistory({ transactions, loading, network, address }: Props) 
               </button>
               <button
                 type="button"
-                onClick={handleConfirmClaim}
+                onClick={() => { void handleConfirmClaim(); }}
                 className="px-4 py-2 rounded-lg bg-[var(--primary)] text-white text-sm font-medium hover:bg-[var(--primary)]/90 transition-colors"
               >
                 Confirm claim

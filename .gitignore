@@ -14,6 +14,9 @@
 /coverage
 /playwright-report/
 /test-results/
+# Vitest / Jest snapshot files — generated output, not source of truth
+**/__snapshots__/
+*.snap
 
 # next.js
 /.next/
@@ -25,6 +28,12 @@
 # misc
 .DS_Store
 *.pem
+# Editor / OS artefacts
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
 
 # Stray PR description files committed by mistake (#908)
 pr-description*.md
@@ -50,3 +59,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Percy / Storybook (not configured — see CONTRIBUTING.md)
+.percy/
+storybook-static/

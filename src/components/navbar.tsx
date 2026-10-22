@@ -431,6 +431,12 @@ const Navbar = () => {
             {/* Language switcher (desktop) */}
             <LanguageSwitcher />
 
+            {/* Notification centre (#477, #844). This row is visible at every
+                width, so one instance serves both the desktop and the mobile
+                navbar; a second copy inside the mobile menu would duplicate the
+                panel's id. */}
+            <NotificationCentre />
+
             {/* Theme toggle */}
             <ThemeToggle />
 

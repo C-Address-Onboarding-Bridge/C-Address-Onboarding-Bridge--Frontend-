@@ -9,8 +9,11 @@ import {
   Account,
   StrKey,
   Keypair,
+  Contract,
+  Address,
+  scValToNative,
 } from "@stellar/stellar-sdk";
-import { getNetwork as getFreighterNetwork } from "@stellar/freighter-api";
+import { isValidContract, isValidEd25519PublicKey } from "./strkey";
 import {
   BRIDGE_CONTRACT_ID,
   HORIZON_URL,
@@ -23,8 +26,6 @@ import {
   isSupportedNetwork,
 } from "./types";
 import { withSequenceRetry } from "./sequenceManager";
-import { extractTransferFromOps } from "./operationTransfer";
-export type { OperationTransfer } from "./operationTransfer";
 
 export type { AppNetwork, WalletNetworkState, BridgeTransactionData } from "./types";
 
@@ -65,7 +66,11 @@ export interface E2EWalletConfig {
 let _e2eConnected = false;
 
 function e2eWalletConfig(): E2EWalletConfig | undefined {
-  if (typeof window === "undefined") return undefined;
+  // E2E wallet config is only allowed in development/test builds.
+  // In production (NODE_ENV === "production"), this path is always disabled.
+  if (typeof window === "undefined" || (typeof process !== "undefined" && process.env.NODE_ENV === "production")) {
+    return undefined;
+  }
   return (window as unknown as { __E2E_WALLET__?: E2EWalletConfig }).__E2E_WALLET__;
 }
 
@@ -154,8 +159,18 @@ export function getActiveWalletId(): string | null {
   return null;
 }
 
-/** Seconds a built transaction stays valid before the network rejects it. */
-const TRANSACTION_TIMEOUT_SECONDS = 30;
+/**
+ * Seconds a built transaction stays valid before the network rejects it.
+ *
+ * The clock starts at `build()`, before the wallet prompt is even shown, and
+ * the round trip to the wallet (reading the request, unlocking, confirming on
+ * a hardware device) comes out of the same budget. 30s is comfortably too
+ * short for that human-approval step, so Horizon regularly rejected
+ * legitimately-signed transactions with `tx_too_late`. 240s gives a generous
+ * window for approval while still bounding how long a built-but-unsigned
+ * transaction can be replayed. (#931)
+ */
+export const TRANSACTION_TIMEOUT_SECONDS = 240;
 
 // ─── Network switching (#480) ──────────────────────────────────────────────────
 //
@@ -198,6 +213,10 @@ const SWITCH_POLL_TIMEOUT_MS = 8_000;
  * Whether a mainnet action needs an explicit warning: the user is on mainnet
  * and the network changed recently, and they haven't acknowledged it yet.
  * Pure so it is unit-testable without rendering the page. (#480)
+ *
+ * This covers only the recent-switch case. The bridge also asks once per
+ * session before any mainnet transaction; see `getMainnetConfirmationReason`
+ * in `./mainnetConfirmation`. (#759)
  */
 export function shouldWarnOnMainnetAction(
   network: StellarNetwork,
@@ -230,15 +249,12 @@ export async function switchWalletNetwork(target: StellarNetwork): Promise<Switc
     return "cancelled";
   }
 
-  // Confirm via freighter-api directly rather than the multi-wallet
-  // getWalletNetwork()/StellarWalletsKit abstraction: switchWalletNetwork is
-  // already Freighter-specific (it only runs when window.freighter.setNetwork
-  // exists), and the kit singleton has no bearing on whether *this* request
-  // landed.
+  // Confirm through the wallet kit (getWalletNetwork), the same path every
+  // other network read uses. @stellar/freighter-api is no longer a dependency
+  // (#722, #846); the kit's Freighter module reports the same network.
   const deadline = Date.now() + SWITCH_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const result = await getFreighterNetwork();
-    if (!result.error && String(result.network ?? "").toUpperCase() === target) {
+    if ((await getWalletNetwork()).status === target) {
       return "switched";
     }
     await new Promise((resolve) => setTimeout(resolve, SWITCH_POLL_INTERVAL_MS));
@@ -413,24 +429,31 @@ export function formatNetworkLabel(
 // hand-rolled regex cannot verify the checksum and, as [G|C] showed, is easy
 // to get subtly wrong (that character class also accepted a leading '|').
 export function isValidStellarAddress(address: string): boolean {
-  return isValidEd25519PublicKey(address) || isValidContract(address);
+  return StrKey.isValidEd25519PublicKey(address) || StrKey.isValidContract(address);
 }
+
+// int64 max, in stroops (the largest amount the Stellar XDR can represent).
+const MAX_AMOUNT_STROOPS = 9223372036854775807n;
 
 export function isValidStellarAmount(amount: string): boolean {
   if (!amount || typeof amount !== "string") return false;
   if (!/^\d+(\.\d{1,7})?$/.test(amount)) return false;
-  const num = Number(amount);
-  return !isNaN(num) && num > 0;
+  const [intPart, fracPart = ""] = amount.split(".");
+  // Compare in stroops as a BigInt so very large integer strings (e.g. a
+  // 20-digit value) aren't only approximated by a float comparison, and so
+  // amounts above int64 max are rejected before the SDK throws on them.
+  const stroops = BigInt(intPart) * 10_000_000n + BigInt(fracPart.padEnd(7, "0"));
+  return stroops > 0n && stroops <= MAX_AMOUNT_STROOPS;
 }
 
 /** Whether `address` is a valid Soroban contract address (a `C...` StrKey). */
 export function isCAddress(address: string): boolean {
-  return isValidContract(address);
+  return StrKey.isValidContract(address);
 }
 
 /** Whether `address` is a valid Stellar account address (a `G...` ed25519 StrKey). */
 export function isGAddress(address: string): boolean {
-  return isValidEd25519PublicKey(address);
+  return StrKey.isValidEd25519PublicKey(address);
 }
 
 export interface PaymentResult {
@@ -440,7 +463,7 @@ export interface PaymentResult {
 
 export interface AccountBalances {
   total: string;
-  balances: { asset: string; amount: string }[];
+  balances: { asset: string; amount: string; asset_issuer?: string }[];
   /** True when the account does not exist on-chain (unfunded). (#293) */
   unfunded?: boolean;
 }
@@ -451,6 +474,22 @@ interface HorizonBalance {
   asset_issuer?: string;
   balance: string;
 }
+
+/**
+ * Canonical issuers for supported non-native assets, keyed by network.
+ * Used by `resolveAsset` to reject a trustline that shares an asset code with
+ * a canonical asset but belongs to a different (potentially fake) issuer.
+ *
+ * Circle USDC:
+ *   PUBLIC  — GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+ *   TESTNET — GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
+ */
+export const CANONICAL_ISSUERS: Readonly<Record<string, Partial<Record<StellarNetwork, string>>>> = {
+  USDC: {
+    PUBLIC: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+    TESTNET: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+  },
+};
 
 interface HorizonCollection<T> {
   _embedded?: { records?: T[] };
@@ -609,6 +648,7 @@ async function loadAccountBalances(
   const balances = (account.balances ?? []).map((b) => ({
     asset: b.asset_type === "native" ? "XLM" : (b.asset_code || "unknown"),
     amount: b.balance,
+    ...(b.asset_issuer ? { asset_issuer: b.asset_issuer } : {}),
   }));
   const total = balances.find((b) => b.asset === "XLM")?.amount || "0";
   return { total, balances };
@@ -685,6 +725,47 @@ export function clearAccountBalancesCache(): void {
   balanceCache.clear();
 }
 
+/**
+ * Returns the spendable XLM balance for `address` and whether `amount` fits
+ * within it after subtracting reserves, selling liabilities, and a standard
+ * transaction fee. (#577)
+ *
+ * Reserve = (2 + subentry_count + num_sponsoring - num_sponsored) × 0.5 XLM
+ * Spendable = balance − reserve − selling_liabilities − fee
+ */
+export async function getSpendableBalance(
+  address: string,
+  amount: string,
+  network: StellarNetwork
+): Promise<{ spendable: string; sufficient: boolean }> {
+  const BASE_RESERVE_XLM = 0.5;
+  const BASE_ENTRIES = 2;
+  const FEE_XLM = 0.00001; // 100 stroops
+
+  const server = await getHorizonServer(network);
+  const account = await server.loadAccount(address);
+
+  const native = (account.balances as HorizonBalance[]).find(
+    (b) => b.asset_type === "native"
+  );
+  const balance = Number(native?.balance ?? "0");
+  const liabilities = Number((native as { selling_liabilities?: string })?.selling_liabilities ?? "0");
+
+  const subentries = Number((account as unknown as { subentry_count?: number }).subentry_count ?? 0);
+  const sponsored = Number((account as unknown as { num_sponsored?: number }).num_sponsored ?? 0);
+  const sponsoring = Number((account as unknown as { num_sponsoring?: number }).num_sponsoring ?? 0);
+
+  const reserve = (BASE_ENTRIES + subentries + sponsoring - sponsored) * BASE_RESERVE_XLM;
+  const spendable = Math.max(0, balance - reserve - liabilities - FEE_XLM);
+
+  // Round to 5 decimal places to match Stellar's stroop precision display.
+  const spendableStr = spendable.toFixed(5).replace(/\.?0+$/, "") || "0";
+  return {
+    spendable: spendableStr,
+    sufficient: Number(amount) <= spendable,
+  };
+}
+
 export async function fetchRecentTransactions(
   address: string,
   network: StellarNetwork,
@@ -729,6 +810,81 @@ export async function fetchRecentTransactions(
  * @param server        - An already-initialised Horizon.Server instance
  * @param passphrase    - The network passphrase for signing/rebuilding
  */
+/**
+ * Re-fetches the wallet's current network and aborts with a clear,
+ * actionable message if it no longer matches `network`. Shared by
+ * buildSignAndSubmit and signPreparedTransaction (#929) so both signing
+ * paths get the same protection against a network switch happening between
+ * the app loading and the "Confirm" click.
+ *
+ * We call getNetwork() directly (rather than getCurrentNetwork()) so we can
+ * distinguish:
+ *   a) getNetwork returns undefined (test mock not set up, or extension
+ *      returned no data) → treat as "can't verify, proceed"
+ *   b) getNetwork returns a different known network → abort
+ *   c) getNetwork rejects (Freighter locked, etc.) → abort with UNKNOWN
+ */
+async function assertWalletOnExpectedNetwork(network: StellarNetwork): Promise<void> {
+  try {
+    const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
+    const netResult = await StellarWalletsKit.getNetwork();
+    if (netResult !== undefined && netResult !== null && typeof netResult === "object") {
+      // Check for in-band error (e.g. user declined access)
+      if ("error" in netResult && (netResult as { error?: unknown }).error) {
+        throw new Error(
+          `Network changed in Freighter — please retry. ` +
+          `Transaction was built for ${network} but Freighter is now on UNKNOWN.`
+        );
+      }
+      // Compare the actual reported network
+      const reportedRaw = (netResult as { network?: string }).network;
+      const reported = (reportedRaw ?? "").toUpperCase() as WalletNetworkState;
+      if (reported && reported !== network) {
+        throw new Error(
+          `Network changed in Freighter — please retry. ` +
+          `Transaction was built for ${network} but Freighter is now on ${reported}.`
+        );
+      }
+    }
+    // If netResult is undefined/null, we can't verify the network — proceed
+  } catch (networkErr) {
+    // Re-throw errors we raised ourselves
+    if (networkErr instanceof Error && networkErr.message.includes("Network changed in Freighter")) {
+      throw networkErr;
+    }
+    // getNetwork() itself rejected (Freighter locked, locked extension, etc.)
+    throw new Error(
+      "Network changed in wallet — please retry. " +
+      `Transaction was built for ${network} but wallet is now on UNKNOWN.`
+    );
+  }
+}
+
+/**
+ * Runtime shape guard on a wallet-kit signing response. A version mismatch,
+ * API change, or compromised extension could return a missing or non-string
+ * `signedTxXdr`. The response is untrusted input, so the object itself is
+ * checked before anything is read from it: a missing response, or one
+ * carrying an `error` field, is rejected even if it also holds something
+ * that looks like a signed transaction. Shared by buildSignAndSubmit and
+ * signPreparedTransaction (#242, #652, #929).
+ */
+function extractSignedXdr(signedResult: unknown): string {
+  const response: unknown = signedResult;
+  const signedXDR =
+    typeof response === "object" && response !== null && !("error" in response && response.error)
+      ? (response as { signedTxXdr?: unknown }).signedTxXdr
+      : undefined;
+  if (typeof signedXDR !== "string" || !signedXDR) {
+    // Deliberately avoids wallet-API jargon (XDR) so the message stays
+    // readable for a user who just saw a malformed wallet response.
+    throw new Error(
+      "Wallet returned an unexpected response while signing — the signed transaction is missing or empty."
+    );
+  }
+  return signedXDR;
+}
+
 async function buildSignAndSubmit(
   sourceAddress: string,
   destination: string,
@@ -740,8 +896,8 @@ async function buildSignAndSubmit(
   onPhase?: (phase: "signing" | "submitting") => void
 ): Promise<PaymentResult> {
   const { TransactionBuilder, Operation, Account } = await import("@stellar/stellar-sdk");
-  // Fetch a dynamic fee bid (2× base fee, capped at 10 000 stroops) so the
-  // transaction is not rejected during surge-pricing windows. (#301)
+  // Bid from recently charged fees (capped) so the transaction is not left
+  // waiting during surge-pricing windows. (#301, #758)
   const fee = await getRecommendedFee(network);
 
   return withSequenceRetry(
@@ -769,57 +925,13 @@ async function buildSignAndSubmit(
       const e2eWallet = e2eWalletConfig();
 
       // #241 — Re-fetch the wallet's current network immediately before
-      // signing.  The user may have switched networks in Freighter during the
-      // time between the app loading and the "Confirm" click.  If the wallet
-      // is no longer on the same network the transaction was built for, abort
-      // here with a clear, actionable message rather than signing a transaction
-      // that will either fail at submission or, worse, succeed on the wrong
-      // chain.
-      //
-      // We call getNetwork() directly (rather than getCurrentNetwork()) so we
-      // can distinguish:
-      //   a) getNetwork returns undefined (test mock not set up, or extension
-      //      returned no data) → treat as "can't verify, proceed"
-      //   b) getNetwork returns a different known network → abort
-      //   c) getNetwork rejects (Freighter locked, etc.) → abort with UNKNOWN
-      //
-      // Under the e2e test hook (#669) there is no real extension to have
-      // changed networks underneath us — the fixture's configured network is
-      // authoritative, so this check is skipped entirely.
+      // signing, in case the user switched networks in Freighter between the
+      // app loading and the "Confirm" click. Under the e2e test hook (#669)
+      // there is no real extension to have changed networks underneath us —
+      // the fixture's configured network is authoritative, so this is
+      // skipped entirely. Shared with signPreparedTransaction (#929).
       if (!e2eWallet) {
-        try {
-          const { StellarWalletsKit } = await import("@creit.tech/stellar-wallets-kit/sdk");
-          const netResult = await StellarWalletsKit.getNetwork();
-          if (netResult !== undefined && netResult !== null && typeof netResult === "object") {
-            // Check for in-band error (e.g. user declined access)
-            if ("error" in netResult && (netResult as { error?: unknown }).error) {
-              throw new Error(
-                `Network changed in Freighter — please retry. ` +
-                `Transaction was built for ${network} but Freighter is now on UNKNOWN.`
-              );
-            }
-            // Compare the actual reported network
-            const reportedRaw = (netResult as { network?: string }).network;
-            const reported = (reportedRaw ?? "").toUpperCase() as WalletNetworkState;
-            if (reported && reported !== network) {
-              throw new Error(
-                `Network changed in Freighter — please retry. ` +
-                `Transaction was built for ${network} but Freighter is now on ${reported}.`
-              );
-            }
-          }
-          // If netResult is undefined/null, we can't verify the network — proceed
-        } catch (networkErr) {
-          // Re-throw errors we raised ourselves
-          if (networkErr instanceof Error && networkErr.message.includes("Network changed in Freighter")) {
-            throw networkErr;
-          }
-          // getNetwork() itself rejected (Freighter locked, locked extension, etc.)
-          throw new Error(
-            "Network changed in wallet — please retry. " +
-            `Transaction was built for ${network} but wallet is now on UNKNOWN.`
-          );
-        }
+        await assertWalletOnExpectedNetwork(network);
       }
 
       // Use the Stellar Wallets Kit to sign — this works regardless of which
@@ -841,29 +953,26 @@ async function buildSignAndSubmit(
         });
       }
 
-      // #242 — Runtime shape guard on the wallet's response.  A version
-      // mismatch, API change, or compromised extension could return a missing
-      // or non-string `signedTxXdr`.  The response is untrusted input, so the
-      // object itself is checked before anything is read from it: a missing
-      // response, or one carrying an `error` field, is rejected even if it
-      // also holds something that looks like a signed transaction. (#652)
-      const response: unknown = signedResult;
-      const signedXDR =
-        typeof response === "object" && response !== null && !("error" in response && response.error)
-          ? (response as { signedTxXdr?: unknown }).signedTxXdr
-          : undefined;
-      if (typeof signedXDR !== "string" || !signedXDR) {
-        // Deliberately avoids wallet-API jargon (XDR) so the message stays
-        // readable for a user who just saw a malformed wallet response.
-        throw new Error(
-          "Wallet returned an unexpected response while signing — the signed transaction is missing or empty."
-        );
-      }
+      // #242 — Runtime shape guard on the wallet's response, shared with
+      // signPreparedTransaction (#929). (#652)
+      const signedXDR = extractSignedXdr(signedResult);
 
       const signedTx = TransactionBuilder.fromXDR(signedXDR, passphrase);
 
       onPhase?.("submitting");
-      const submitResult = await server.submitTransaction(signedTx);
+      let submitResult;
+      try {
+        submitResult = await server.submitTransaction(signedTx);
+      } catch (submitErr) {
+        // Horizon doesn't recognize tx_too_late as a generic failure the user
+        // can act on — `classifyError` falls through to "unknown" for it too,
+        // since the raw message is just a result code. Translate it into a
+        // clear, actionable message here instead. (#931)
+        if (isTxTooLateError(submitErr)) {
+          throw new Error("Signature took too long — please retry.");
+        }
+        throw submitErr;
+      }
       return {
         hash: submitResult.hash,
         successful: submitResult.successful,
@@ -872,6 +981,29 @@ async function buildSignAndSubmit(
     server,
     network
   );
+}
+
+/**
+ * Returns true if `error` is Horizon's `tx_too_late` rejection — the
+ * transaction's time bounds expired before it was submitted, typically
+ * because approving it in the wallet (reading the prompt, unlocking,
+ * confirming on a hardware device) took longer than the window. (#931)
+ */
+export function isTxTooLateError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const e = error as Record<string, unknown>;
+
+  if (typeof e.response === "object" && e.response !== null) {
+    const resp = e.response as Record<string, unknown>;
+    const data = resp.data as Record<string, unknown> | undefined;
+    const extras = data?.extras as Record<string, unknown> | undefined;
+    const resultCodes = extras?.result_codes as Record<string, unknown> | undefined;
+    if (resultCodes?.transaction === "tx_too_late") return true;
+  }
+
+  const msg = String(e.message ?? "");
+  return msg.includes("tx_too_late");
 }
 
 /** The abort raised when the wallet isn't on the network a transaction was built for. */
@@ -942,7 +1074,8 @@ export async function assertActiveAccountMatches(sourceAddress: string): Promise
 async function resolveAsset(
   server: Horizon.Server,
   sourceAddress: string,
-  assetCode: string
+  assetCode: string,
+  network: StellarNetwork
 ): Promise<Asset> {
   const { Asset } = await import("@stellar/stellar-sdk");
   if (assetCode === "XLM") {
@@ -951,6 +1084,28 @@ async function resolveAsset(
 
   const account = await server.loadAccount(sourceAddress);
   const balances = account.balances as HorizonBalance[];
+
+  // When a canonical issuer is known for this asset/network, require an exact
+  // code+issuer match so a fake token with the same code (e.g. a rogue USDC)
+  // cannot be silently used instead of Circle's.  Fail explicitly if the
+  // account only holds the non-canonical issuer — using it would send a
+  // worthless asset while the UI shows the canonical name. (#921)
+  const canonicalIssuer = CANONICAL_ISSUERS[assetCode]?.[network];
+  if (canonicalIssuer) {
+    const matchingBalance = balances.find(
+      (b) => b.asset_code === assetCode && b.asset_issuer === canonicalIssuer
+    );
+    if (!matchingBalance) {
+      throw new Error(
+        `No canonical ${assetCode} trustline found for this account. ` +
+          `Ensure your account has a trustline to the canonical issuer (${canonicalIssuer}).`
+      );
+    }
+    return new Asset(assetCode, canonicalIssuer);
+  }
+
+  // For assets without a configured canonical issuer, fall back to the first
+  // matching trustline (existing behaviour).
   const matchingBalance = balances.find((b) => b.asset_code === assetCode);
   if (!matchingBalance) {
     throw new Error(`No ${assetCode} trustline found for this account`);
@@ -983,7 +1138,7 @@ export async function buildAndSubmitPayment(
 
   const server = await getHorizonServer(network);
   const passphrase = await getNetworkPassphrase(network);
-  const asset = await resolveAsset(server, sourceAddress, assetCode);
+  const asset = await resolveAsset(server, sourceAddress, assetCode, network);
 
   return buildSignAndSubmit(
     sourceAddress,
@@ -1036,18 +1191,102 @@ export async function bridgeViaContract(
   return buildAndSubmitPayment(sourceAddress, cAddress, amount, assetCode, network, onPhase);
 }
 
+// Fee cap enforced on a backend-supplied prepared transaction before it is
+// ever shown to the wallet for signing (#929). Generous relative to
+// getRecommendedFee's own 10 000-stroop cap, but still bounds how much a
+// compromised/misconfigured "prepare" endpoint could get the user to pay.
+const MAX_PREPARED_TX_FEE_STROOPS = 50_000;
+
+/**
+ * Decodes a backend-supplied unsigned transaction XDR and asserts it is safe
+ * to hand to the wallet for signing (#929):
+ *   - its source account is the connected account the caller expects to sign
+ *     with, not some other account the backend substituted
+ *   - its fee is within MAX_PREPARED_TX_FEE_STROOPS
+ *   - every operation is an invokeHostFunction call against the configured
+ *     bridge contract — never a payment, account merge, or a call into any
+ *     other contract
+ *
+ * Fails closed: any operation that isn't a recognised, expected
+ * invokeHostFunction against BRIDGE_CONTRACT_ID is rejected, as is a
+ * transaction whose contract-id can't be determined at all. A backend (or
+ * anyone able to tamper with its response) must not be able to hand the
+ * wallet an arbitrary transaction — e.g. a payment draining the account —
+ * disguised as a "prepared batch funding" transaction.
+ */
+function assertPreparedTransactionIsSafe(
+  unsignedXdr: string,
+  passphrase: string,
+  expectedSourceAddress: string
+): void {
+  const decoded = TransactionBuilder.fromXDR(unsignedXdr, passphrase);
+  const tx = "innerTransaction" in decoded ? decoded.innerTransaction : decoded;
+
+  if (tx.source !== expectedSourceAddress) {
+    throw new Error(
+      `Prepared transaction's source account (${truncateAddress(tx.source)}) does not match the connected account (${truncateAddress(expectedSourceAddress)}) — refusing to sign.`
+    );
+  }
+
+  if (BigInt(tx.fee) > BigInt(MAX_PREPARED_TX_FEE_STROOPS)) {
+    throw new Error(`Prepared transaction's fee (${tx.fee} stroops) is higher than expected — refusing to sign.`);
+  }
+
+  if (tx.operations.length === 0) {
+    throw new Error("Prepared transaction has no operations — refusing to sign.");
+  }
+
+  for (const op of tx.operations) {
+    if (op.type !== "invokeHostFunction") {
+      throw new Error(`Prepared transaction contains an unexpected "${op.type}" operation — refusing to sign.`);
+    }
+    if (!BRIDGE_CONTRACT_ID) {
+      throw new Error("No bridge contract is configured — refusing to sign a prepared transaction.");
+    }
+    let invokedContractId: string | null = null;
+    try {
+      const hostFn = op.func;
+      if (hostFn.switch().name === "hostFunctionTypeInvokeContract") {
+        const contractAddress = hostFn.invokeContract().contractAddress();
+        if (contractAddress.switch().name === "scAddressTypeContract") {
+          invokedContractId = StrKey.encodeContract(contractAddress.contractId());
+        }
+      }
+    } catch {
+      invokedContractId = null;
+    }
+    if (invokedContractId !== BRIDGE_CONTRACT_ID) {
+      throw new Error("Prepared transaction invokes an unexpected contract — refusing to sign.");
+    }
+  }
+}
+
 /**
  * Signs an already-built, unsigned transaction XDR — e.g. one a backend
  * "prepare" endpoint returned — through the same e2e-aware, kit-abstracted
- * path buildAndSubmitPayment's own signing step uses (#671). Unlike that
- * path, this never builds the transaction itself, so it has no source
- * account or operations of its own to validate; callers that need the
- * active wallet to match a specific address (as batch funding does) must
- * call assertActiveAccountMatches themselves first.
+ * path buildAndSubmitPayment's own signing step uses (#671).
+ *
+ * Unlike buildSignAndSubmit, this never builds the transaction itself, so
+ * before anything is shown to the wallet it decodes the XDR and runs the
+ * same network/source/shape guards that path has, plus XDR-content checks
+ * of its own (#929): callers that need the active wallet to match a specific
+ * address (as batch funding does) must still call assertActiveAccountMatches
+ * themselves first, since that checks the *wallet's* active account, not the
+ * prepared transaction's.
  */
-export async function signPreparedTransaction(unsignedXdr: string, network: StellarNetwork): Promise<string> {
+export async function signPreparedTransaction(
+  unsignedXdr: string,
+  network: StellarNetwork,
+  expectedSourceAddress: string
+): Promise<string> {
   const passphrase = await getNetworkPassphrase(network);
   const e2eWallet = e2eWalletConfig();
+
+  assertPreparedTransactionIsSafe(unsignedXdr, passphrase, expectedSourceAddress);
+
+  if (!e2eWallet) {
+    await assertWalletOnExpectedNetwork(network);
+  }
 
   let signedResult: { signedTxXdr: string };
   if (e2eWallet) {
@@ -1064,13 +1303,7 @@ export async function signPreparedTransaction(unsignedXdr: string, network: Stel
     });
   }
 
-  const signedXDR = signedResult.signedTxXdr;
-  if (typeof signedXDR !== "string" || !signedXDR) {
-    throw new Error(
-      "Wallet returned an unexpected response while signing — the signed transaction is missing or empty."
-    );
-  }
-  return signedXDR;
+  return extractSignedXdr(signedResult);
 }
 
 export interface ClaimProof {
@@ -1148,31 +1381,85 @@ export function getAccountMinimumBalance(): string {
   return "1.0";
 }
 
+/** Percentiles of recently charged fees a bid may be taken from. (#758) */
+export type FeePercentile = "p50" | "p70" | "p80" | "p90" | "p95" | "p99";
+
+/** Network minimum base fee, in stroops; also the fallback bid. */
+export const MIN_BASE_FEE_STROOPS = 100;
+/** Default percentile of recently charged fees to bid. (#758) */
+export const DEFAULT_FEE_PERCENTILE: FeePercentile = "p70";
+/** Default ceiling on a fee bid, in stroops (0.01 XLM). (#758) */
+export const DEFAULT_MAX_FEE_STROOPS = 100_000;
+
+const FEE_PERCENTILES: readonly FeePercentile[] = ["p50", "p70", "p80", "p90", "p95", "p99"];
+
+/** The parts of Horizon's `/fee_stats` response the fee bid uses. */
+export interface HorizonFeeStats {
+  last_ledger_base_fee?: string;
+  fee_charged?: Partial<Record<FeePercentile, string>>;
+}
+
+export interface FeeBidOptions {
+  /** Percentile of `fee_charged` to bid. Default {@link DEFAULT_FEE_PERCENTILE}. */
+  percentile?: FeePercentile;
+  /** Highest bid, in stroops. Default `NEXT_PUBLIC_MAX_FEE_STROOPS` or {@link DEFAULT_MAX_FEE_STROOPS}. */
+  maxFeeStroops?: number;
+}
+
+function parseStroops(value: string | undefined): number | null {
+  if (value === undefined || !/^\d+$/.test(value.trim())) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+/** The configured fee ceiling: `NEXT_PUBLIC_MAX_FEE_STROOPS` when valid, else the default. */
+export function getMaxFeeStroops(): number {
+  const configured = parseStroops(process.env.NEXT_PUBLIC_MAX_FEE_STROOPS);
+  return configured !== null && configured >= MIN_BASE_FEE_STROOPS
+    ? configured
+    : DEFAULT_MAX_FEE_STROOPS;
+}
+
 /**
- * Fetch the current recommended fee from the Horizon fee-stats endpoint and
- * return a fee bid that is 2× the network base fee, capped at 10 000 stroops.
+ * Compute a fee bid from Horizon fee stats: the chosen percentile of fees
+ * actually charged in recent ledgers, never below the ledger's base fee and
+ * never above the ceiling. Pure, so it is testable without network calls.
  *
- * Using a dynamic fee instead of the hardcoded BASE_FEE constant avoids
- * `tx_insufficient_fee` rejections during surge-pricing windows (when the
- * network raises the minimum fee above 100 stroops). (#301)
+ * The base fee alone is the network minimum, which is almost always 100
+ * stroops; under surge pricing transactions bidding it wait until they time
+ * out. Charged-fee percentiles track what is really being accepted. (#758)
+ */
+export function computeFeeBid(stats: HorizonFeeStats, options: FeeBidOptions = {}): number {
+  const percentile =
+    options.percentile && FEE_PERCENTILES.includes(options.percentile)
+      ? options.percentile
+      : DEFAULT_FEE_PERCENTILE;
+  const ceiling = Math.max(
+    MIN_BASE_FEE_STROOPS,
+    Math.floor(options.maxFeeStroops ?? getMaxFeeStroops())
+  );
+  const baseFee = parseStroops(stats.last_ledger_base_fee) ?? MIN_BASE_FEE_STROOPS;
+  const charged = parseStroops(stats.fee_charged?.[percentile]) ?? baseFee;
+  return Math.min(Math.max(charged, baseFee), ceiling);
+}
+
+/**
+ * Fetch Horizon fee stats and return a fee bid in stroops, as a string (see
+ * {@link computeFeeBid}). Falls back to the minimum base fee if the request
+ * fails, so the transaction is still submitted rather than blocked. (#301, #758)
  *
  * @param network - "PUBLIC" or "TESTNET"
- * @returns Fee in stroops as a string (e.g. "200")
+ * @returns Fee in stroops as a string (e.g. "250")
  */
-export async function getRecommendedFee(network: StellarNetwork): Promise<string> {
-  const MAX_FEE_STROOPS = 10_000;
+export async function getRecommendedFee(
+  network: StellarNetwork,
+  options: FeeBidOptions = {}
+): Promise<string> {
   try {
-    const feeStats = await fetchHorizonJson<{ last_ledger_base_fee?: string }>(
-      network,
-      "/fee_stats"
-    );
-    const baseFee = Number.parseInt(feeStats.last_ledger_base_fee ?? "", 10) || 100;
-    const bid = Math.min(baseFee * 2, MAX_FEE_STROOPS);
-    return String(bid);
+    const feeStats = await fetchHorizonJson<HorizonFeeStats>(network, "/fee_stats");
+    return String(computeFeeBid(feeStats, options));
   } catch {
-    // Fall back to the hardcoded BASE_FEE constant if the fee-stats call fails
-    // so the transaction is still submitted rather than silently blocked.
-    return "100";
+    return String(MIN_BASE_FEE_STROOPS);
   }
 }
 
@@ -1194,10 +1481,21 @@ export interface FaucetRequest {
  *
  * - Rate-limited responses (HTTP 429) return a clear message instead of
  *   silently failing.
- * - The control is only intended for testnet; callers must gate on
- *   `network === "TESTNET"` before invoking.
+ * - Friendbot only funds testnet accounts, so anything but `TESTNET` is
+ *   refused before any request is made: a mainnet user must never see a
+ *   "Test XLM sent" message for an account on a different network. (#760)
  */
-export async function requestTestXLM(address: string): Promise<FaucetRequest> {
+export async function requestTestXLM(
+  address: string,
+  network: StellarNetwork
+): Promise<FaucetRequest> {
+  if (network !== "TESTNET") {
+    return {
+      success: false,
+      message: "Test XLM is only available on Testnet. Switch your wallet to Testnet to use the faucet.",
+    };
+  }
+
   if (!isValidEd25519PublicKey(address)) {
     return { success: false, message: "Invalid Stellar address." };
   }
@@ -1766,6 +2064,9 @@ export async function getTransactionByHash(
 /* #673 — Fee-tier rebate lookup (Soroban RPC)                                 */
 /* -------------------------------------------------------------------------- */
 
+/** Well-known valid G-address used only as the simulation source account. */
+const REBATE_SIMULATION_SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
 /**
  * Reads an account's cumulative tier-qualifying volume from the bridge
  * contract's `rebate_for(user)` view function via a Soroban RPC simulation
@@ -1798,10 +2099,10 @@ export async function getRebateVolume(address: string, network: StellarNetwork):
     const server = await getSorobanRpcServer(network);
     const passphrase = await getNetworkPassphrase(network);
     const contract = new Contract(BRIDGE_CONTRACT_ID);
-    // The source account only needs to be a syntactically valid keypair for
-    // the envelope — this transaction is simulated, never submitted, so its
-    // sequence number is never checked against a real account.
-    const account = new Account(address, "0");
+    // The source account only needs to be a syntactically valid G-address for
+    // the envelope — this transaction is simulated, never submitted. The queried
+    // address may be a C-address, which Account cannot wrap, so use a fixed placeholder.
+    const account = new Account(REBATE_SIMULATION_SOURCE, "0");
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
       networkPassphrase: passphrase,
@@ -1816,7 +2117,26 @@ export async function getRebateVolume(address: string, network: StellarNetwork):
     const native = scValToNative(simulation.result.retval);
     const volume = Number(native);
     return Number.isFinite(volume) ? volume : null;
-  } catch {
+  } catch (error) {
+    console.debug("getRebateVolume failed", error);
     return null;
   }
+}
+
+/**
+ * Looks a transaction up by hash. When the link names a network only that one
+ * is tried; otherwise the wallet's network is tried first, then the other. (#717, #853)
+ */
+export async function findTransactionByHash(
+  hash: string,
+  walletNetwork: StellarNetwork,
+  linkNetwork?: StellarNetwork | null
+): Promise<TransactionDetails | null> {
+  const other: StellarNetwork = walletNetwork === "PUBLIC" ? "TESTNET" : "PUBLIC";
+  const order: StellarNetwork[] = linkNetwork ? [linkNetwork] : [walletNetwork, other];
+  for (const net of order) {
+    const result = await getTransactionByHash(hash, net);
+    if (result) return result;
+  }
+  return null;
 }

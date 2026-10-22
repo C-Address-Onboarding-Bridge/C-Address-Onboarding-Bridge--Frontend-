@@ -110,14 +110,27 @@ export function clearReauthRequired(): void {
   }
 }
 
+// Keys that are safe (and intended) to clear from sessionStorage on an
+// inactivity timeout. This must stay an explicit allow-list rather than a
+// blanket `sessionStorage.clear()` call: sessionStorage also holds the
+// in-flight bridge transaction record (IN_FLIGHT_TRANSACTION_KEY, see
+// src/components/error-boundary.tsx) that lets the error boundary tell the
+// user a submitted transaction may still be confirming. Wiping it on timeout
+// would silently hide a real, possibly-successful transaction. (#939)
+const SENSITIVE_SESSION_STORAGE_KEYS = [
+  "bridge:form-state:v1", // BRIDGE_FORM_STORAGE_KEY in src/app/bridge/page.tsx
+];
+
 export function clearSensitiveState(): void {
-  const store = storage();
-  if (!store) return;
+  // sessionStorage access is guarded independently of localStorage: the two
+  // can be reachable/unreachable independently (e.g. some privacy modes
+  // allow one but not the other), so a failure reading one must not skip
+  // clearing the other.
   try {
-    // Clear any sensitive in-memory data that might be cached
-    // This would typically include form data, transaction details, etc.
-    // Specific sensitive data would be cleared by the application
-    sessionStorage?.clear?.();
+    if (typeof sessionStorage === "undefined") return;
+    for (const key of SENSITIVE_SESSION_STORAGE_KEYS) {
+      sessionStorage.removeItem(key);
+    }
   } catch {
     // Ignore
   }
