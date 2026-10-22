@@ -1,52 +1,64 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { renderHook, act } from "@testing-library/react";
 
-describe("Polling Tab Visibility Pausing", () => {
-  let hiddenState = false;
+vi.mock("@/lib/api", () => ({
+  getHealthStatus: vi.fn(),
+}));
+
+import { getHealthStatus } from "@/lib/api";
+import { useHealthStatus } from "@/hooks/useHealthStatus";
+
+describe("useHealthStatus tab visibility pausing (#712)", () => {
+  const originalVisibility = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState");
+  const originalHidden = Object.getOwnPropertyDescriptor(Document.prototype, "hidden");
+  let hidden = false;
+
+  const setHidden = (value: boolean) => {
+    hidden = value;
+  };
 
   beforeEach(() => {
-    hiddenState = false;
-    Object.defineProperty(document, "hidden", {
+    hidden = false;
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+    Object.defineProperty(document, "visibilityState", {
       configurable: true,
-      get: () => hiddenState,
+      get: () => (hidden ? "hidden" : "visible"),
     });
     vi.useFakeTimers();
+    vi.mocked(getHealthStatus).mockReset();
+    vi.mocked(getHealthStatus).mockResolvedValue({ status: "healthy" } as never);
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    delete (document as unknown as Record<string, unknown>).hidden;
+    delete (document as unknown as Record<string, unknown>).visibilityState;
+    if (originalHidden) Object.defineProperty(Document.prototype, "hidden", originalHidden);
+    if (originalVisibility) Object.defineProperty(Document.prototype, "visibilityState", originalVisibility);
   });
 
-  it("pauses polling callback execution when document.hidden is true", () => {
-    const callback = vi.fn();
-    const poll = () => {
-      if (typeof document !== "undefined" && document.hidden) return;
-      callback();
-    };
+  it("does not fetch while hidden and fetches once on becoming visible", async () => {
+    renderHook(() => useHealthStatus({ pollInterval: 1000, initialDelay: 100 }));
 
-    const interval = setInterval(poll, 1000);
-    const handleVisibilityChange = () => {
-      if (typeof document !== "undefined" && !document.hidden) {
-        callback();
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(getHealthStatus).toHaveBeenCalledTimes(1);
 
-    // Active
-    vi.advanceTimersByTime(1000);
-    expect(callback).toHaveBeenCalledTimes(1);
+    setHidden(true);
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(getHealthStatus).toHaveBeenCalledTimes(1);
 
-    // Tab hidden
-    hiddenState = true;
-    vi.advanceTimersByTime(3000);
-    expect(callback).toHaveBeenCalledTimes(1); // Did not increase while hidden
-
-    // Tab visible again
-    hiddenState = false;
-    document.dispatchEvent(new Event("visibilitychange"));
-    expect(callback).toHaveBeenCalledTimes(2); // Immediately fetched on visible
-
-    clearInterval(interval);
-    document.removeEventListener("visibilitychange", handleVisibilityChange);
+    setHidden(false);
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(getHealthStatus).toHaveBeenCalledTimes(2);
   });
 });

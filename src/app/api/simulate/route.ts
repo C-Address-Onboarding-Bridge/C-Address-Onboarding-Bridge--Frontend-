@@ -7,8 +7,7 @@ import type { StellarNetwork } from "@/lib/types";
 import {
   checkRateLimit,
   getClientIp,
-  rateLimitResponse,
-} from "@/lib/rate-limit";
+} from "@/lib/rateLimit";
 
 /**
  * Transaction simulation endpoint (#478).
@@ -31,13 +30,18 @@ const RATE_LIMIT = 30;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
 export async function POST(request: Request) {
-  const limit = checkRateLimit(
-    getClientIp(request),
-    RATE_LIMIT,
-    RATE_LIMIT_WINDOW_MS
-  );
+  const limit = checkRateLimit(`simulate:${getClientIp(request)}`, {
+    max: RATE_LIMIT,
+    windowMs: RATE_LIMIT_WINDOW_MS,
+  });
   if (!limit.allowed) {
-    return rateLimitResponse(limit.retryAfter);
+    return NextResponse.json(
+      { error: "Too many requests. Please try again shortly." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(limit.retryAfterSeconds ?? 60) },
+      }
+    );
   }
 
   let body: unknown;

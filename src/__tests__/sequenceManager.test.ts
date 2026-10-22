@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import {
   getNextSequenceNumber,
+  commitSequenceNumber,
+  releaseSequenceNumber,
   invalidateSequenceCache,
   clearAllSequenceCache,
   isBadSequenceError,
+  wasSubmittedToLedger,
   withSequenceRetry,
 } from "@/lib/sequenceManager";
 import { Horizon, rpc } from "@stellar/stellar-sdk";
@@ -584,6 +587,186 @@ describe("sequenceManager", () => {
     it("is a no-op and does not throw when the cache is already empty", () => {
       expect(() => clearAllSequenceCache()).not.toThrow();
       expect(() => clearAllSequenceCache()).not.toThrow();
+    });
+  });
+
+  // Regression for #933: getNextSequenceNumber used to return the cached
+  // value unchanged until a commit, so two in-flight builds (a batch plus a
+  // single payment, a double-clicked confirm, two tabs) were both handed the
+  // same sequence and one always failed with tx_bad_seq.
+  describe("concurrent reservations", () => {
+    it("hands out distinct, increasing sequences to two concurrent callers", async () => {
+      (mockHorizonServer.loadAccount as Mock).mockResolvedValue({
+        sequenceNumber: () => "100",
+      });
+
+      const [first, second] = await Promise.all([
+        getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET"),
+        getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET"),
+      ]);
+
+      expect([first, second].sort()).toEqual([101n, 102n]);
+      // Only one network fetch — the second caller reused the cached base.
+      expect(mockHorizonServer.loadAccount).toHaveBeenCalledTimes(1);
+    });
+
+    it("releasing the most recently reserved sequence lets it be reused", async () => {
+      (mockHorizonServer.loadAccount as Mock).mockResolvedValue({
+        sequenceNumber: () => "100",
+      });
+
+      const first = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      const second = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      expect(first).toBe(101n);
+      expect(second).toBe(102n);
+
+      // Second build is abandoned (wallet cancelled) before submission.
+      releaseSequenceNumber(testAccountId, "TESTNET", second);
+
+      const third = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      expect(third).toBe(102n);
+    });
+
+    it("releasing a non-tail reservation leaves the high-water mark untouched", async () => {
+      (mockHorizonServer.loadAccount as Mock).mockResolvedValue({
+        sequenceNumber: () => "100",
+      });
+
+      const first = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      const second = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      expect(first).toBe(101n);
+      expect(second).toBe(102n);
+
+      // The earlier of the two is abandoned while the later one is still
+      // outstanding — releasing it must not let 102n be handed out again,
+      // since that would collide with the still-pending reservation.
+      releaseSequenceNumber(testAccountId, "TESTNET", first);
+
+      const third = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      expect(third).toBe(103n);
+    });
+
+    it("commitSequenceNumber advances the base even when a higher reservation is still pending", async () => {
+      (mockHorizonServer.loadAccount as Mock).mockResolvedValue({
+        sequenceNumber: () => "100",
+      });
+
+      const first = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      const second = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      expect(first).toBe(101n);
+      expect(second).toBe(102n);
+
+      commitSequenceNumber(testAccountId, "TESTNET", first);
+
+      // Cache is still within TTL, so the next reservation continues from
+      // the high-water mark rather than refetching.
+      const third = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      expect(third).toBe(103n);
+      expect(mockHorizonServer.loadAccount).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not let a TTL refetch move the high-water mark backwards while reservations are pending", async () => {
+      (mockHorizonServer.loadAccount as Mock).mockResolvedValue({
+        sequenceNumber: () => "100",
+      });
+
+      const first = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      expect(first).toBe(101n);
+
+      // Cache expires before the in-flight build commits or releases.
+      vi.advanceTimersByTime(31_000);
+
+      // The network still reports the old base since the reservation was
+      // never submitted/confirmed.
+      const second = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      expect(second).toBe(102n);
+    });
+  });
+
+  describe("wasSubmittedToLedger", () => {
+    it("returns false for tx_bad_seq — rejected before reaching the ledger", () => {
+      const error = {
+        response: { data: { extras: { result_codes: { transaction: "tx_bad_seq" } } } },
+      };
+      expect(wasSubmittedToLedger(error)).toBe(false);
+    });
+
+    it("returns false for tx_too_late — rejected before reaching the ledger", () => {
+      const error = {
+        response: { data: { extras: { result_codes: { transaction: "tx_too_late" } } } },
+      };
+      expect(wasSubmittedToLedger(error)).toBe(false);
+    });
+
+    it("returns true for tx_failed — the transaction reached the ledger and burned its sequence", () => {
+      const error = {
+        response: {
+          data: {
+            extras: {
+              result_codes: { transaction: "tx_failed", operations: ["op_underfunded"] },
+            },
+          },
+        },
+      };
+      expect(wasSubmittedToLedger(error)).toBe(true);
+    });
+
+    it("returns false for a plain wallet-rejection error with no result envelope", () => {
+      expect(wasSubmittedToLedger(new Error("User rejected the request"))).toBe(false);
+      expect(wasSubmittedToLedger(null)).toBe(false);
+      expect(wasSubmittedToLedger({})).toBe(false);
+    });
+  });
+
+  describe("withSequenceRetry sequence lifecycle", () => {
+    it("commits the sequence when the transaction reached the ledger but failed (tx_failed)", async () => {
+      (mockHorizonServer.loadAccount as Mock).mockResolvedValue({
+        sequenceNumber: () => "100",
+      });
+
+      const txFailedError = {
+        response: {
+          data: {
+            extras: {
+              result_codes: { transaction: "tx_failed", operations: ["op_underfunded"] },
+            },
+          },
+        },
+      };
+
+      const fn = vi.fn(async (getSequence: () => Promise<bigint>) => {
+        await getSequence();
+        throw txFailedError;
+      });
+
+      await expect(
+        withSequenceRetry(testAccountId, fn, mockHorizonServer, "TESTNET", 0)
+      ).rejects.toEqual(txFailedError);
+
+      // The burned sequence (101n) must not be handed out again.
+      const next = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      expect(next).toBe(102n);
+    });
+
+    it("releases the sequence when the build never reached the ledger (e.g. wallet rejection)", async () => {
+      (mockHorizonServer.loadAccount as Mock).mockResolvedValue({
+        sequenceNumber: () => "100",
+      });
+
+      const walletRejection = new Error("User rejected the request");
+
+      const fn = vi.fn(async (getSequence: () => Promise<bigint>) => {
+        await getSequence();
+        throw walletRejection;
+      });
+
+      await expect(
+        withSequenceRetry(testAccountId, fn, mockHorizonServer, "TESTNET", 0)
+      ).rejects.toThrow("User rejected the request");
+
+      // The reserved sequence (101n) is reused since it was never consumed.
+      const next = await getNextSequenceNumber(testAccountId, mockHorizonServer, "TESTNET");
+      expect(next).toBe(101n);
     });
   });
 });

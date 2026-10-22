@@ -72,8 +72,18 @@ function isWidgetAsset(value: string | null): value is WidgetAsset {
   return value !== null && (WIDGET_ASSETS as readonly string[]).includes(value);
 }
 
+/**
+ * `value in STELLAR_NETWORK` walks the prototype chain, so inherited
+ * `Object.prototype` keys ("constructor", "toString", "valueOf",
+ * "__proto__", ...) pass this check even though they are not Stellar
+ * networks. An embed URL like `/widget?network=constructor` then flows
+ * through as `network: "constructor"`, silently resolving to whatever
+ * `HORIZON_URL["constructor"]`/testnet fallback downstream code happens to
+ * pick, while the widget looks correctly configured. `Object.hasOwn` only
+ * matches STELLAR_NETWORK's own keys. (#941)
+ */
 function isStellarNetwork(value: string | null): value is StellarNetwork {
-  return value !== null && value in STELLAR_NETWORK;
+  return value !== null && Object.hasOwn(STELLAR_NETWORK, value);
 }
 
 /**
@@ -174,6 +184,14 @@ export function parseWidgetConfig(params: URLSearchParams): WidgetConfigResult {
   const theme: WidgetTheme = themeParam === "dark" ? "dark" : "light";
 
   const networkParam = params.get("network");
+  // No `network` param at all defaults to TESTNET (the historical,
+  // documented behavior). An explicit but unrecognized value — including a
+  // prototype-chain key like "constructor" or "toString" — is a config
+  // error instead of silently defaulting, so a malformed/malicious embed
+  // URL never looks like a correctly configured widget. (#941)
+  if (networkParam !== null && !isStellarNetwork(networkParam)) {
+    return { ok: false, error: `network must be one of: ${Object.keys(STELLAR_NETWORK).join(", ")}` };
+  }
   const network: StellarNetwork = isStellarNetwork(networkParam) ? networkParam : "TESTNET";
 
   const parentOrigin = (params.get("parentOrigin") ?? "").trim();

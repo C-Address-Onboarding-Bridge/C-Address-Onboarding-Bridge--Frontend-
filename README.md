@@ -154,3 +154,6 @@ MIT
 
 <!-- handsoff-issue-735 -->
 - #735: i18n: translate the onramp page
+
+<!-- handsoff-issue-463 -->
+- #463: feat: multi-asset portfolio view on the dashboard

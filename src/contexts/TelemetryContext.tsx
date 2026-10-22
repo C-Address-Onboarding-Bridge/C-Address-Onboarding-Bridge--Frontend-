@@ -10,6 +10,7 @@ import {
   captureEvent,
 } from "@/lib/telemetry";
 import { TelemetryConsentPrompt } from "@/components/TelemetryConsentPrompt";
+import { useHydrated } from "@/hooks/useHydrated";
 
 interface TelemetryContextType {
   consent: TelemetryConsent;
@@ -55,7 +56,7 @@ export function TelemetryProvider({ children }: TelemetryProviderProps) {
   };
 
   // Don't render children until hydrated to avoid hydration mismatch
-  if (!isHydrated) {
+  if (!hydrated) {
     return <>{children}</>;
   }
 
