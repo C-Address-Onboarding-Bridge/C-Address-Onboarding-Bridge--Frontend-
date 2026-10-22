@@ -8,11 +8,11 @@ export const metadata: Metadata = {
     title: 'Fiat Onramp',
     description:
       'Buy crypto with a credit card and send directly to your Soroban smart account.',
-    url: 'https://c-address-bridge.example.com/onramp',
+    url: '/onramp',
     type: 'website',
     images: [
       {
-        url: 'https://c-address-bridge.example.com/og-image.png',
+        url: '/og-image.png',
         width: 1200,
         height: 630,
         alt: 'C-Address Bridge',
@@ -24,11 +24,16 @@ export const metadata: Metadata = {
     title: 'Fiat Onramp',
     description:
       'Buy crypto with a credit card and send to your Soroban smart account.',
-    images: ['https://c-address-bridge.example.com/og-image.png'],
+    images: ['/og-image.png'],
   },
   robots: {
     index: true,
     follow: true,
+  },
+  // See bridge/layout.tsx: without an own canonical, Next inherits the root
+  // layout's homepage canonical for this route too. (#942)
+  alternates: {
+    canonical: '/onramp',
   },
 };
 

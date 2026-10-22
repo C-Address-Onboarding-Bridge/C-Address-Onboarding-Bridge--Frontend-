@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { getHealthStatus, type HealthStatus } from '@/lib/api';
+import { getHealthStatus, unreachableHealthStatus, type HealthStatus } from '@/lib/api';
 
 /**
  * Hook to poll the API health status (#498).
@@ -18,15 +18,6 @@ interface UseHealthStatusOptions {
 const DEFAULT_POLL_INTERVAL = 30000; // 30 seconds
 const DEFAULT_INITIAL_DELAY = 2000; // Start polling after 2 seconds
 const DEFAULT_RETAIN_TIME = 5000; // Keep degraded status for 5 seconds after recovery
-
-/**
- * Sentinel status used when the health endpoint is completely unreachable.
- * A total outage must surface the banner just like a partial one (#710).
- */
-const UNREACHABLE_STATUS: HealthStatus = {
-  status: 'unhealthy',
-  message: 'Service unreachable',
-};
 
 export function useHealthStatus(options: UseHealthStatusOptions = {}) {
   const {
@@ -112,8 +103,9 @@ export function useHealthStatus(options: UseHealthStatusOptions = {}) {
           }
         }
       } else {
-        // Still unreachable after the retry: treat as a total outage.
-        setHealth(UNREACHABLE_STATUS);
+        // Still unreachable after the retry: treat as a total outage (#710).
+        // Same full-shape fallback as getHealthStatus (#842).
+        setHealth(unreachableHealthStatus());
         setIsDegraded(true);
         if (retainTimeoutRef.current) {
           clearTimeout(retainTimeoutRef.current);

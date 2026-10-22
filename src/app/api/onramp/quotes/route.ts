@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { providers } from "@/lib/onrampProviders";
 import { isOnrampProvider, type OnrampProvider } from "@/lib/types";
 import type { LiveQuoteInput } from "@/lib/onrampQuotes";
+import { isCAddress } from "@/lib/stellar";
 
 /**
  * Live on-ramp quote proxy for #556's provider comparison, backed by the
@@ -74,6 +75,12 @@ async function fetchBackendComparison(
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
   if (!apiBaseUrl) return live;
 
+  // The backend requires X-API-Key on every route except /health. Read it
+  // server-side only (no NEXT_PUBLIC_ prefix) and degrade to the client-side
+  // estimate when it is not configured.
+  const apiKey = process.env.BACKEND_API_KEY;
+  if (!apiKey) return live;
+
   try {
     const url = new URL("/api/v1/offramp/quote", apiBaseUrl);
     url.searchParams.set("fiatAmount", amount);
@@ -81,7 +88,10 @@ async function fetchBackendComparison(
     url.searchParams.set("cryptoCurrency", CRYPTO_CURRENCY);
     url.searchParams.set("cAddress", cAddress);
 
-    const res = await fetch(url, { signal: AbortSignal.timeout(QUOTE_TIMEOUT_MS) });
+    const res = await fetch(url, {
+      headers: { "X-API-Key": apiKey },
+      signal: AbortSignal.timeout(QUOTE_TIMEOUT_MS),
+    });
     if (!res.ok) return live;
 
     const data: unknown = await res.json();

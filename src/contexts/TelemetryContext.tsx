@@ -55,13 +55,11 @@ export function TelemetryProvider({ children }: TelemetryProviderProps) {
     captureEvent,
   };
 
-  // Always provide the context: children that call useTelemetry() on the
-  // first (server/hydration) render must not throw. Before hydration the
-  // values are the deterministic defaults above (pending, first visit,
-  // disabled), so server and client markup match. Only the consent prompt
-  // waits for hydration, since whether to show it depends on localStorage.
-  // (Previously this referenced an undefined `isHydrated` and returned the
-  // children without a provider, so the provider threw on every render.)
+  // Don't render children until hydrated to avoid hydration mismatch
+  if (!hydrated) {
+    return <>{children}</>;
+  }
+
   return (
     <TelemetryContext.Provider value={value}>
       {children}

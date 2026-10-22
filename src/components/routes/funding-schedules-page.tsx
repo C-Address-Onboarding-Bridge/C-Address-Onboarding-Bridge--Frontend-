@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CalendarClock, ExternalLink, Pause, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { truncateAddress } from "@/components/AddressForm";
 import LiveRegion from "@/components/live-region";
@@ -58,6 +58,24 @@ export default function FundingSchedulesPage() {
   const [editError, setEditError] = useState<string | null>(null);
 
   const [notice, setNotice] = useState("");
+
+  // Focus management for the inline edit form (#930): the first field gets
+  // focus when editing starts, and the Edit button that opened it gets focus
+  // back on Save or Cancel, so keyboard users don't lose their place when the
+  // row swaps between its display and edit layouts.
+  const editLabelInputRef = useRef<HTMLInputElement>(null);
+  const editButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const lastEditedId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (editingId) {
+      editLabelInputRef.current?.focus();
+      lastEditedId.current = editingId;
+    } else if (lastEditedId.current) {
+      editButtonRefs.current[lastEditedId.current]?.focus();
+      lastEditedId.current = null;
+    }
+  }, [editingId]);
 
   // Read from storage (and check for due schedules) after mount only —
   // touching localStorage during render would break hydration, same guard
@@ -145,9 +163,12 @@ export default function FundingSchedulesPage() {
   };
 
   const handleMarkCompleted = (schedule: FundingSchedule) => {
-    markScheduleCompleted(schedule.id);
+    const updated = markScheduleCompleted(schedule.id);
     refresh();
-    setNotice(`Marked "${schedule.label}" as sent. Next due: one ${schedule.frequency.replace("ly", "")} from now.`);
+    const nextRunCopy = updated
+      ? new Date(updated.nextRunAt).toLocaleDateString()
+      : `one ${schedule.frequency.replace("ly", "")} from now`;
+    setNotice(`Marked "${schedule.label}" as sent. Next due: ${nextRunCopy}.`);
   };
 
   const openFundingLink = (schedule: FundingSchedule) => {
@@ -307,9 +328,11 @@ export default function FundingSchedulesPage() {
                 <li key={schedule.id} className="p-3 rounded-lg bg-[var(--surface-2)]">
                   <form onSubmit={handleSaveEdit} className="space-y-2">
                     <input
+                      ref={editLabelInputRef}
                       type="text"
                       value={editLabel}
                       onChange={(e) => setEditLabel(e.target.value)}
+                      aria-label={`Label for ${schedule.label}`}
                       data-testid={`edit-label-input-${schedule.id}`}
                       className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-sm"
                     />
@@ -317,6 +340,7 @@ export default function FundingSchedulesPage() {
                       type="text"
                       value={editAddress}
                       onChange={(e) => setEditAddress(e.target.value)}
+                      aria-label={`Address for ${schedule.label}`}
                       data-testid={`edit-address-input-${schedule.id}`}
                       className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-sm font-mono"
                     />
@@ -325,12 +349,14 @@ export default function FundingSchedulesPage() {
                         type="text"
                         value={editAmount}
                         onChange={(e) => setEditAmount(e.target.value)}
+                        aria-label={`Amount for ${schedule.label}`}
                         data-testid={`edit-amount-input-${schedule.id}`}
                         className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-sm"
                       />
                       <select
                         value={editAsset}
                         onChange={(e) => setEditAsset(e.target.value)}
+                        aria-label={`Asset for ${schedule.label}`}
                         data-testid={`edit-asset-select-${schedule.id}`}
                         className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-sm"
                       >
@@ -343,6 +369,7 @@ export default function FundingSchedulesPage() {
                       <select
                         value={editFrequency}
                         onChange={(e) => setEditFrequency(e.target.value)}
+                        aria-label={`Frequency for ${schedule.label}`}
                         data-testid={`edit-frequency-select-${schedule.id}`}
                         className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-sm"
                       >
@@ -432,6 +459,9 @@ export default function FundingSchedulesPage() {
                         {schedule.paused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
                       </button>
                       <button
+                        ref={(el) => {
+                          editButtonRefs.current[schedule.id] = el;
+                        }}
                         type="button"
                         onClick={() => startEdit(schedule)}
                         aria-label={`Edit ${schedule.label}`}
