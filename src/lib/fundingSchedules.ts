@@ -31,7 +31,7 @@ import { hasControlChars } from "./profile";
 import { addNotification } from "./notifications";
 import { FUNDING_LINK_ASSETS, buildFundingLink, type FundingLinkAsset } from "./fundingLink";
 import { ROUTES } from "./routes";
-import { getNetwork, type StellarNetwork } from "./network";
+import { getNetwork, toLinkNetwork, type StellarNetwork } from "./network";
 
 /** Same budget as a recipient label (`RECIPIENT_LABEL_MAX_LENGTH` in addressBook.ts). */
 export const SCHEDULE_LABEL_MAX_LENGTH = 32;
@@ -80,8 +80,6 @@ export interface FundingSchedule {
   createdAt: number;
   updatedAt: number;
   paused: boolean;
-  /** Network this schedule belongs to (#693). */
-  network: StellarNetwork;
   /** Epoch ms the schedule was last marked completed, if ever. */
   lastCompletedAt?: number;
   /**
@@ -191,7 +189,7 @@ export function isRenderableSchedule(value: unknown): value is FundingSchedule {
   if (typeof v.createdAt !== "number" || !Number.isFinite(v.createdAt)) return false;
   if (typeof v.updatedAt !== "number" || !Number.isFinite(v.updatedAt)) return false;
   if (typeof v.paused !== "boolean") return false;
-  if (v.network !== "mainnet" && v.network !== "testnet") return false;
+  if (v.network !== "TESTNET" && v.network !== "PUBLIC") return false;
   if (v.lastCompletedAt !== undefined && (typeof v.lastCompletedAt !== "number" || !Number.isFinite(v.lastCompletedAt))) {
     return false;
   }
@@ -226,8 +224,8 @@ function migrateLegacySchedules(store: Storage, network: StellarNetwork): void {
 
   const entries = Array.isArray(parsed) ? parsed : [];
   const migrated = entries
-    .filter(isRenderableSchedule)
-    .map((schedule) => ({ ...schedule, network }));
+    .map((schedule) => ({ ...(schedule as object), network: toLinkNetwork(network) }))
+    .filter(isRenderableSchedule);
 
   const key = fundingSchedulesStorageKey(network);
   try {
@@ -331,4 +329,214 @@ export function scheduleAnchorDay(schedule: FundingSchedule): number {
   return new Date(schedule.nextRunAt).getDate();
 }
 
-/* … rest of file unchanged … */
+
+/** Human-readable frequency label, e.g. for the schedule list. */
+export function formatFrequency(frequency: FundingFrequency): string {
+  switch (frequency) {
+    case "weekly":
+      return "Weekly";
+    case "biweekly":
+      return "Every 2 weeks";
+    case "monthly":
+      return "Monthly";
+  }
+}
+
+/** Reads the saved schedules, dropping any entry that fails re-validation. */
+export function loadFundingSchedules(): FundingSchedule[] {
+  return readRaw().filter(isRenderableSchedule);
+}
+
+/**
+ * Creates a new schedule. `startAt` (default: now) is the point the first
+ * `nextRunAt` is computed one period forward from — exposed mainly for
+ * deterministic tests; callers scheduling "starting today" can omit it.
+ * Returns null when validation fails, the schedule cap
+ * (`MAX_FUNDING_SCHEDULES`) is already reached, or the write failed.
+ */
+export function createFundingSchedule(
+  rawLabel: string,
+  rawTargetAddress: string,
+  rawAmount: string,
+  asset: string,
+  frequency: string,
+  startAt: number = Date.now(),
+  network: "TESTNET" | "PUBLIC" = toLinkNetwork(getNetwork())
+): FundingSchedule | null {
+  const result = validateFundingSchedule(rawLabel, rawTargetAddress, rawAmount, asset, frequency);
+  if (!result.ok) return null;
+
+  const existing = loadFundingSchedules();
+  if (existing.length >= MAX_FUNDING_SCHEDULES) return null;
+
+  const now = Date.now();
+  const schedule: FundingSchedule = {
+    id: createScheduleId(),
+    label: result.label,
+    targetAddress: result.targetAddress,
+    amount: result.amount,
+    asset: result.asset,
+    frequency: result.frequency,
+    network,
+    ...(result.frequency === "monthly" ? { anchorDay: new Date(startAt).getDate() } : {}),
+    nextRunAt: computeNextRunAt(result.frequency, startAt, result.frequency === "monthly" ? new Date(startAt).getDate() : undefined),
+    createdAt: now,
+    updatedAt: now,
+    paused: false,
+  };
+
+  if (!persist([...existing, schedule])) return null;
+  return schedule;
+}
+
+/**
+ * Updates an existing schedule's editable fields by id. Changing the
+ * frequency recomputes `nextRunAt` from now (rather than leaving a stale
+ * cadence in place); everything else about `nextRunAt`/`paused` is left
+ * untouched. Returns false when validation fails, the id doesn't exist, or
+ * the write failed.
+ */
+export function updateFundingSchedule(
+  id: string,
+  rawLabel: string,
+  rawTargetAddress: string,
+  rawAmount: string,
+  asset: string,
+  frequency: string,
+  network?: "TESTNET" | "PUBLIC"
+): boolean {
+  const result = validateFundingSchedule(rawLabel, rawTargetAddress, rawAmount, asset, frequency);
+  if (!result.ok) return false;
+
+  const existing = loadFundingSchedules();
+  const index = existing.findIndex((s) => s.id === id);
+  if (index === -1) return false;
+
+  const current = existing[index];
+  const frequencyChanged = current.frequency !== result.frequency;
+  const updated: FundingSchedule = {
+    ...current,
+    label: result.label,
+    targetAddress: result.targetAddress,
+    amount: result.amount,
+    asset: result.asset,
+    frequency: result.frequency,
+    network: network ?? current.network,
+    nextRunAt: frequencyChanged ? computeNextRunAt(result.frequency, Date.now()) : current.nextRunAt,
+    updatedAt: Date.now(),
+  };
+
+  const next = [...existing];
+  next[index] = updated;
+  return persist(next);
+}
+
+/** Removes a schedule by id. Returns false if the id wasn't found or the write failed. */
+export function deleteFundingSchedule(id: string): boolean {
+  const existing = loadFundingSchedules();
+  const next = existing.filter((s) => s.id !== id);
+  if (next.length === existing.length) return false;
+  return persist(next);
+}
+
+/** Pauses a schedule (it is excluded from `dueSchedules`/notifications until resumed). */
+export function pauseFundingSchedule(id: string): boolean {
+  return setPaused(id, true);
+}
+
+/** Resumes a paused schedule. Does not change `nextRunAt` — a schedule paused while overdue is immediately due again. */
+export function resumeFundingSchedule(id: string): boolean {
+  return setPaused(id, false);
+}
+
+function setPaused(id: string, paused: boolean): boolean {
+  const existing = loadFundingSchedules();
+  const index = existing.findIndex((s) => s.id === id);
+  if (index === -1) return false;
+  const next = [...existing];
+  next[index] = { ...existing[index], paused, updatedAt: Date.now() };
+  return persist(next);
+}
+
+/** True when an unpaused schedule's `nextRunAt` has passed. */
+export function isScheduleDue(schedule: Pick<FundingSchedule, "paused" | "nextRunAt">, now: number = Date.now()): boolean {
+  return !schedule.paused && schedule.nextRunAt <= now;
+}
+
+/** Due schedules, most overdue first. */
+export function dueSchedules(schedules: FundingSchedule[], now: number = Date.now()): FundingSchedule[] {
+  return schedules.filter((s) => isScheduleDue(s, now)).sort((a, b) => a.nextRunAt - b.nextRunAt);
+}
+
+/**
+ * Marks a schedule as completed for its current due occurrence: advances
+ * `nextRunAt` by one period *from the occurrence that was due* (not from
+ * `now`), so a schedule completed a few days late stays on its original
+ * cadence instead of drifting later with every late completion. Records
+ * `lastCompletedAt`. Returns null if the id doesn't exist or the write
+ * failed.
+ */
+export function markScheduleCompleted(id: string, now: number = Date.now()): FundingSchedule | null {
+  const existing = loadFundingSchedules();
+  const index = existing.findIndex((s) => s.id === id);
+  if (index === -1) return null;
+
+  const current = existing[index];
+  const updated: FundingSchedule = {
+    ...current,
+    nextRunAt: computeNextRunAt(current.frequency, current.nextRunAt, current.frequency === "monthly" ? scheduleAnchorDay(current) : undefined),
+    lastCompletedAt: now,
+    updatedAt: now,
+  };
+
+  const next = [...existing];
+  next[index] = updated;
+  if (!persist(next)) return null;
+  return updated;
+}
+
+/**
+ * Builds a pre-filled funding link for a schedule via `fundingLink.ts`'s
+ * `buildFundingLink`, so acting on a due schedule never means re-typing the
+ * address/amount by hand. Encodes the network so users can't accidentally
+ * send mainnet funds to testnet addresses (or vice versa). (#716)
+ */
+export function buildScheduleFundingLink(baseUrl: string, schedule: Pick<FundingSchedule, "targetAddress" | "amount" | "asset" | "network">): string {
+  return buildFundingLink(baseUrl, {
+    target: schedule.targetAddress,
+    amount: schedule.amount,
+    asset: schedule.asset,
+    network: schedule.network,
+  });
+}
+
+/**
+ * Checks for schedules that are due and haven't been notified for their
+ * current `nextRunAt` yet, records one "schedule"-kind notification each via
+ * `notifications.ts`'s `addNotification`, and stamps `lastNotifiedRunAt` so
+ * re-running this on every page load doesn't re-notify for the same due
+ * occurrence. Returns the schedules that were (newly) notified.
+ */
+export function checkAndNotifyDueSchedules(now: number = Date.now()): FundingSchedule[] {
+  const schedules = loadFundingSchedules();
+  const due = schedules.filter(
+    (s) => isScheduleDue(s, now) && s.lastNotifiedRunAt !== s.nextRunAt
+  );
+  if (due.length === 0) return [];
+
+  const dueIds = new Set(due.map((s) => s.id));
+  const next = schedules.map((s) => (dueIds.has(s.id) ? { ...s, lastNotifiedRunAt: s.nextRunAt } : s));
+  persist(next);
+
+  for (const s of due) {
+    addNotification({
+      kind: "schedule",
+      title: "Recurring funding due",
+      message: `"${s.label}" — ${s.amount} ${s.asset} to ${s.targetAddress.slice(0, 8)}… is due.`,
+      href: ROUTES.SCHEDULES,
+    });
+  }
+
+  return due;
+}
+

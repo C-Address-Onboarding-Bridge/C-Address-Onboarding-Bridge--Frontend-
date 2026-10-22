@@ -10,8 +10,8 @@
  *         reaches TransactionBuilder.fromXDR.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { Keypair } from "@stellar/stellar-sdk";
-import { buildAndSubmitPayment } from "@/lib/stellar";
+import { Keypair, Account, TransactionBuilder, Operation, Asset, Networks } from "@stellar/stellar-sdk";
+import { buildAndSubmitPayment, signPreparedTransaction } from "@/lib/stellar";
 import { clearAllSequenceCache } from "@/lib/sequenceManager";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -342,5 +342,46 @@ describe("#242 — runtime shape guard on signedTxXdr", () => {
     await expect(
       buildAndSubmitPayment(G_SOURCE, G_DEST, "10", "XLM", "TESTNET")
     ).rejects.toThrow(/unexpected response/i);
+  });
+});
+
+// ─── #929: signPreparedTransaction inspects the XDR before signing ──────────
+
+describe("#929 — signPreparedTransaction rejects an unsafe prepared transaction", () => {
+  beforeEach(() => {
+    mockFreighterNetwork("TESTNET");
+    mockValidSign();
+  });
+
+  function buildXdr(source: string, operation: ReturnType<typeof Operation.payment>): string {
+    const account = new Account(source, "100");
+    return new TransactionBuilder(account, { fee: "100", networkPassphrase: Networks.TESTNET })
+      .addOperation(operation)
+      .setTimeout(30)
+      .build()
+      .toXDR();
+  }
+
+  it("rejects a plain payment operation disguised as a prepared batch-funding transaction", async () => {
+    const xdr = buildXdr(
+      G_SOURCE,
+      Operation.payment({ destination: G_DEST, asset: Asset.native(), amount: "10" })
+    );
+
+    await expect(signPreparedTransaction(xdr, "TESTNET", G_SOURCE)).rejects.toThrow(/refusing to sign/i);
+    expect(signTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a prepared transaction whose source account does not match the connected wallet", async () => {
+    const otherSource = Keypair.random().publicKey();
+    const xdr = buildXdr(
+      otherSource,
+      Operation.payment({ destination: G_DEST, asset: Asset.native(), amount: "10" })
+    );
+
+    await expect(signPreparedTransaction(xdr, "TESTNET", G_SOURCE)).rejects.toThrow(
+      /source account.*does not match/i
+    );
+    expect(signTransaction).not.toHaveBeenCalled();
   });
 });

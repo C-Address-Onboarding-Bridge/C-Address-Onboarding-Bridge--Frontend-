@@ -59,7 +59,7 @@ describe("confirmations", () => {
       expect(result.status).toBe("success");
       expect(result.fromAddressTruncated).toMatch(/^[A-Z]{6}\.\.\.[A-Z]{6}$/);
       expect(result.toAddressTruncated).toMatch(/^[A-Z]{6}\.\.\.[A-Z]{6}$/);
-      expect(result.timestamp).toContain("1970");
+      expect(result.timestamp).toContain("2023-11");
     });
   });
 

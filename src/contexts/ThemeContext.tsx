@@ -146,6 +146,9 @@ export function useTheme(): ThemeContextValue {
   const ctx = useContext(ThemeContext);
   if (!ctx) {
     // Graceful fallback outside the provider (e.g. isolated unit tests).
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('useTheme was called outside <ThemeProvider>; theme changes will be ignored.');
+    }
     return { theme: 'dark', toggleTheme: () => {}, setTheme: () => {} };
   }
   return ctx;

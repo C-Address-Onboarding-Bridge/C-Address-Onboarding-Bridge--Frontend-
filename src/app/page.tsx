@@ -1,7 +1,6 @@
 import { ArrowRight, Shield, Zap, CreditCard, Building2, Globe, Code } from "lucide-react";
 import { PrefetchLink } from "@/components/prefetch-link";
 import { RecentActivityFeed } from "@/components/RecentActivityFeed";
-import { OnboardingChecklist } from "@/components/OnboardingChecklist";
 import OnboardingFlow from "@/components/onboarding-flow";
 import { LandingOnboardingChecklist } from "@/components/landing-onboarding-checklist";
 
@@ -54,33 +53,6 @@ const steps = [
     description: "Review the details and confirm the transaction.",
   },
 ];
-
-function useOnboardingSteps() {
-  const { isConnected } = useWallet();
-  return [
-    {
-      id: "connect-wallet",
-      title: "Connect Wallet",
-      description: "Connect your wallet to get started.",
-      href: "/dashboard",
-      check: () => isConnected,
-    },
-    {
-      id: "choose-funding-route",
-      title: "Choose Funding Route",
-      description: "Select G-to-C bridge, fiat onramp, or CEX withdrawal.",
-      href: "/bridge",
-      check: () => false,
-    },
-    {
-      id: "complete-first-transfer",
-      title: "Complete First Transfer",
-      description: "Fund your first C-address and confirm the transaction.",
-      href: "/bridge",
-      check: () => false,
-    },
-  ];
-}
 
 export default function LandingPage() {
   return (
