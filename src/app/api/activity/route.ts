@@ -76,6 +76,23 @@ function decodeTopicAddress(raw: unknown): string | null {
   return null;
 }
 
+/** Maps contract addresses to human-readable asset names. */
+function mapAssetToName(assetAddress: string): string {
+  const usdcContract = process.env.NEXT_PUBLIC_USDC_CONTRACT_ID;
+  if (usdcContract && assetAddress === usdcContract) {
+    return "USDC";
+  }
+  return "XLM";
+}
+
+/** Formats a Soroban i128 amount (stroops) to a decimal string. */
+function formatSorobanAmount(stroops: number): string {
+  const decimals = 7;
+  const divisor = Math.pow(10, decimals);
+  const decimal = stroops / divisor;
+  return decimal.toFixed(7).replace(/\.?0+$/, "");
+}
+
 /**
  * Maps one `CAddressFunded` `IndexedEvent` into a `FundingActivityEvent`, or
  * null if any required field fails validation. Every field is validated
@@ -105,8 +122,8 @@ function mapCAddressFunded(event: IndexedEvent): FundingActivityEvent | null {
   const target = decodeTopicAddress(topics[3]);
   if (!target || !isCAddress(target)) return null;
 
-  const asset = decodeTopicAddress(topics[1]);
-  if (!asset) return null;
+  const assetAddress = decodeTopicAddress(topics[1]);
+  if (!assetAddress) return null;
 
   const rawAmount = Array.isArray(data.value) ? data.value[0] : data.value;
   if (typeof rawAmount !== "number" || !Number.isFinite(rawAmount) || rawAmount <= 0) return null;
@@ -117,8 +134,8 @@ function mapCAddressFunded(event: IndexedEvent): FundingActivityEvent | null {
   return {
     id: event.id,
     address: truncateAddress(target),
-    amount: String(rawAmount),
-    asset,
+    amount: formatSorobanAmount(rawAmount),
+    asset: mapAssetToName(assetAddress),
     timestamp: timestampMs,
   };
 }

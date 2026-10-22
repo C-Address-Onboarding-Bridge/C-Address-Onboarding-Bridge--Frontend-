@@ -26,6 +26,7 @@ vi.mock("@/lib/stellar", async (importOriginal) => {
 });
 
 import { useWallet } from "@/components/wallet-provider";
+import { bridgeViaContract } from "@/lib/stellar";
 import BridgePage from "@/app/bridge/page";
 
 afterEach(cleanup);
@@ -94,5 +95,28 @@ describe("BridgePage — bridging blocked / consent gate", () => {
     mockWallet({ isConnected: true, address: VALID_G_ADDRESS });
     render(<BridgePage />);
     expect(screen.queryByText(/bridging isn't live yet/i)).toBeNull();
+  });
+
+  it("first Confirm click after a recent network change shows the mainnet warning and does not bridge", async () => {
+    mockWallet({
+      isConnected: true,
+      address: VALID_G_ADDRESS,
+      network: "PUBLIC",
+      networkStatus: "PUBLIC",
+      walletNetworkName: "PUBLIC",
+    });
+    render(<BridgePage />);
+
+    const toInput = screen.getByPlaceholderText(/CABC/i);
+    fireEvent.change(toInput, { target: { value: VALID_C_ADDRESS } });
+
+    const confirmBtn = screen.getByRole("button", { name: /Confirm & Sign/i });
+    fireEvent.click(confirmBtn);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/Mainnet/i);
+    expect(screen.getByRole("button", { name: /Continue on Mainnet/i })).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Cancel/i })).not.toBeNull();
+    expect(bridgeViaContract).not.toHaveBeenCalled();
   });
 });

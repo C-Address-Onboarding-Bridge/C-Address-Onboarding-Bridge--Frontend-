@@ -130,7 +130,7 @@ describe("Bridge form — batch funding (#671)", () => {
       ],
       "TESTNET"
     );
-    expect(signPreparedTransactionMock).toHaveBeenCalledWith("unsigned-xdr", "TESTNET");
+    expect(signPreparedTransactionMock).toHaveBeenCalledWith("unsigned-xdr", "TESTNET", FROM_ADDRESS);
     expect(submitSignedBatchFundingMock).toHaveBeenCalledWith("signed-xdr", "TESTNET");
 
     // Call order matters: signing an XDR that was never prepared, or

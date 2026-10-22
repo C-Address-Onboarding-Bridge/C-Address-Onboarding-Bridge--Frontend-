@@ -102,12 +102,17 @@ function parseCircuitMap(value: unknown): HealthStatus['circuitBreakers'] {
 
 /**
  * Validates and maps a raw `GET /health` response into `HealthStatus`.
- * Never throws: an unrecognized or malformed shape degrades to `unhealthy`
- * with empty service/circuit maps rather than crashing the status banner —
- * a shape we can't parse is itself worth surfacing as unhealthy.
+ *
+ * Throws when the body is not an object at all, so `getHealthStatus` treats it
+ * like any other failed attempt (retry, then the unreachable status). A body
+ * that is an object but has an unrecognized shape degrades to `unhealthy` with
+ * empty service/circuit maps rather than crashing the status banner: a shape
+ * we can't parse is itself worth surfacing as unhealthy.
  */
-export function parseHealthResponse(data: unknown): HealthStatus | null {
-  if (!data || typeof data !== 'object') return null;
+export function parseHealthResponse(data: unknown): HealthStatus {
+  if (!data || typeof data !== 'object') {
+    throw new Error('Health check returned a non-object body');
+  }
   const raw = data as Record<string, unknown>;
   const status = raw.status === 'ok' || raw.status === 'healthy' ? 'healthy' : raw.status === 'degraded' ? 'degraded' : 'unhealthy';
   return {
@@ -123,8 +128,12 @@ export function parseHealthResponse(data: unknown): HealthStatus | null {
  * unreachable (network error or non-2xx response). Reporting `unhealthy`
  * here — rather than `null` — is what makes the service-status banner
  * appear during a total outage (#710).
+ *
+ * Shared with `useHealthStatus` so every fallback has the full `HealthStatus`
+ * shape (#842): consumers reading `services` or `circuitBreakers` never get
+ * `undefined`.
  */
-function unreachableHealthStatus(): HealthStatus {
+export function unreachableHealthStatus(): HealthStatus {
   return {
     status: 'unhealthy',
     timestamp: new Date().toISOString(),
@@ -133,6 +142,7 @@ function unreachableHealthStatus(): HealthStatus {
       soroban_rpc: 'down',
       api: 'down',
     },
+    circuitBreakers: {},
   };
 }
 
@@ -143,7 +153,7 @@ function unreachableHealthStatus(): HealthStatus {
  * the retry, resolves with an `unhealthy` status (rather than `null`) so
  * callers surface the outage banner instead of silently showing nothing.
  */
-export async function getHealthStatus(): Promise<HealthStatus | null> {
+export async function getHealthStatus(): Promise<HealthStatus> {
   const attempt = async (): Promise<HealthStatus> => {
     const response = await fetch(`${API_BASE_URL}/health`, {
       method: 'GET',
@@ -170,27 +180,6 @@ export async function getHealthStatus(): Promise<HealthStatus | null> {
   } catch (error) {
     console.error('Failed to fetch health status after retry:', error);
     return unreachableHealthStatus();
-  }
-}
-
-/**
- * Fetch referral statistics for an account. The endpoint is a placeholder
- * until the referral API contract is finalized; failures return null so the
- * page can offer its retry state instead of crashing.
- */
-export async function getReferralStats(
-  address: string,
-  network: StellarNetwork
-): Promise<ReferralStats | null> {
-  try {
-    const response = await fetch(
-      `${API_BASE_URL}/referrals/${encodeURIComponent(address)}?network=${encodeURIComponent(network)}`,
-      { method: "GET", headers: { "Content-Type": "application/json" } }
-    );
-    if (!response.ok) return null;
-    return (await response.json()) as ReferralStats;
-  } catch {
-    return null;
   }
 }
 
@@ -517,6 +506,39 @@ export async function getFeeTierPreview(
 }
 
 /**
+ * Referral stats (#469).
+ *
+ * Goes through the same-origin proxy route
+ * (`src/app/api/backend/referrals/stats/route.ts`), which attaches the
+ * backend's X-API-Key server-side and forwards to `GET /referrals/stats`.
+ * Calling `API_BASE_URL` from the browser would have no key and always fail
+ * (#843).
+ *
+ * PLACEHOLDER INTERFACE: see `src/lib/referrals.ts` for why — the response
+ * shape is a best guess and must be reconciled against the real API.
+ *
+ * Returns null both when the account has no referral data yet and when the
+ * request itself fails — callers treat "no data" as "hide the referral
+ * display" either way.
+ */
+export async function getReferralStats(
+  address: string,
+  network: StellarNetwork
+): Promise<ReferralStats | null> {
+  try {
+    const response = await fetch(
+      `/api/backend/referrals/stats?address=${encodeURIComponent(address)}&network=${encodeURIComponent(network)}`
+    );
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as ReferralStats;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Submits a signed transaction to the backend for relay to Horizon.
  *
  * PLACEHOLDER INTERFACE: no transaction submission route exists anywhere in
@@ -538,4 +560,72 @@ export async function submitTransaction(
     throw new Error(await extractApiErrorMessage(response, `Transaction submission failed (${response.status})`));
   }
   return (await response.json()) as BridgeTransactionData;
+}
+
+/* -------------------------------------------------------------------------- */
+/* #932 — Date-ranged transaction export (paginated)                          */
+/* -------------------------------------------------------------------------- */
+
+/** Export file format offered by the date-ranged export control (#470). */
+export type ExportFormat = "csv" | "json";
+
+export interface TransactionExportPageParams {
+  address: string;
+  network: StellarNetwork;
+  /** Range start, inclusive, as a Unix epoch ms timestamp. */
+  from: number;
+  /** Range end, inclusive, as a Unix epoch ms timestamp. */
+  to: number;
+  /** Opaque pagination cursor from the previous page's response; omitted for the first page. */
+  cursor?: string;
+}
+
+export interface TransactionExportPage {
+  rows: BridgeTransactionData[];
+  /** Cursor to pass on the next call, or null/undefined once the last page has been returned. */
+  nextCursor?: string | null;
+  /** Total row count for the whole range, when the backend can report it up front. */
+  totalCount: number | null;
+}
+
+/**
+ * Fetches one page of transactions for the date-ranged export control
+ * (#470), walking a paginated endpoint via `cursor` rather than requesting
+ * the whole range at once.
+ *
+ * PLACEHOLDER ENDPOINT: no dedicated export route exists in this repo yet.
+ * `GET /api/v1/transactions/export` with `address`/`network`/`from`/`to`/
+ * `cursor` query params, returning `{ rows, nextCursor, totalCount }`, is a
+ * best guess that must be reconciled against the real API once it's
+ * documented. Until then this throws a clear error on any non-2xx response
+ * (including 404, the expected result against today's backend) rather than
+ * silently resolving with no rows, since `TransactionExportControl` already
+ * distinguishes "the request failed" from "the range is genuinely empty".
+ */
+export async function fetchTransactionExportPage(
+  params: TransactionExportPageParams
+): Promise<TransactionExportPage> {
+  const query = new URLSearchParams({
+    address: params.address,
+    network: params.network,
+    from: String(params.from),
+    to: String(params.to),
+  });
+  if (params.cursor) query.set("cursor", params.cursor);
+
+  const response = await fetch(`${API_BASE_URL}/api/v1/transactions/export?${query.toString()}`);
+
+  if (!response.ok) {
+    throw new Error(await extractApiErrorMessage(response, `Transaction export failed (${response.status})`));
+  }
+
+  const body = (await response.json()) as Partial<TransactionExportPage>;
+  if (!Array.isArray(body.rows)) {
+    throw new Error("Transaction export response was missing its rows.");
+  }
+  return {
+    rows: body.rows,
+    nextCursor: body.nextCursor ?? null,
+    totalCount: typeof body.totalCount === "number" ? body.totalCount : null,
+  };
 }
