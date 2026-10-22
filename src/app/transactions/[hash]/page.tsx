@@ -70,7 +70,6 @@ export default function TransactionDetailPage({
 
   useEffect(() => {
     let cancelled = false;
-    setLoadState("loading");
     findTransactionByHash(hash, walletNetwork, linkNetwork)
       .then((result) => {
         if (cancelled) return;
