@@ -53,14 +53,6 @@ vi.mock("@creit.tech/stellar-wallets-kit/modules/rabet", () => ({
 }));
 
 import {
-
-/**
- * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
- * was never finished (or was lost in a bad merge) during the first bounty
- * programme. They are skipped -- not deleted -- so the next programme has an
- * exact worklist: un-skip one, make it pass, repeat. Nothing here was rewritten
- * to fit the current implementation.
- */
   initWalletKit,
   getCurrentNetwork,
   getWalletNetwork,

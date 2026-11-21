@@ -56,14 +56,7 @@ function networkOf(url: string): string {
 // so the transaction is genuinely built, signed and rebuilt from XDR.
 vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
 
-/**
- * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
- * was never finished (or was lost in a bad merge) during the first bounty
- * programme. They are skipped -- not deleted -- so the next programme has an
- * exact worklist: un-skip one, make it pass, repeat. Nothing here was rewritten
- * to fit the current implementation.
- */
-  const actual = await importOriginal<typeof import("@stellar/stellar-sdk")>();
+const actual = await importOriginal<typeof import("@stellar/stellar-sdk")>();
   return {
     ...actual,
     Horizon: {

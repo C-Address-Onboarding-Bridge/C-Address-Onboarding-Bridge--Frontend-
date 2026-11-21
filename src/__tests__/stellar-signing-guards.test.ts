@@ -65,14 +65,6 @@ vi.mock("@creit.tech/stellar-wallets-kit/modules/rabet", () => ({
 // submit a real transaction.  The sequence/balances/fee values just need to be
 // plausible; we are not testing the transaction building logic here.
 vi.mock("@stellar/stellar-sdk", async (importOriginal) => {
-
-/**
- * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
- * was never finished (or was lost in a bad merge) during the first bounty
- * programme. They are skipped -- not deleted -- so the next programme has an
- * exact worklist: un-skip one, make it pass, repeat. Nothing here was rewritten
- * to fit the current implementation.
- */
   const actual = await importOriginal<typeof import("@stellar/stellar-sdk")>();
   return {
     ...actual,

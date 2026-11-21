@@ -74,14 +74,7 @@ vi.mock("@/components/wallet-provider", () => ({
 
 vi.mock("next/link", () => ({
 
-/**
- * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
- * was never finished (or was lost in a bad merge) during the first bounty
- * programme. They are skipped -- not deleted -- so the next programme has an
- * exact worklist: un-skip one, make it pass, repeat. Nothing here was rewritten
- * to fit the current implementation.
- */
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
+default: ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   ),
 }));

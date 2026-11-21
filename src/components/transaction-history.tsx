@@ -106,11 +106,6 @@ interface Props {
   onClaim?: (ids: string[]) => Promise<void>;
 }
 
-// TODO(next-bounty): the bulk-actions feature (#486) was only half-merged into
-// main -- this component kept the selection UI while the parent's selection
-// state and claim handlers were lost in the merge. The orphaned pieces are
-// commented out below so the rest of the history view (search, filtering,
-// date range) keeps working. Re-integrate from commit 4237d8e.
 const TransactionItem = memo(function TransactionItem({
   tx,
   network,

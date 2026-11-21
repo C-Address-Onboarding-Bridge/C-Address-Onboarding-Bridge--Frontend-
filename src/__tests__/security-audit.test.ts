@@ -4,14 +4,6 @@ import path from "node:path";
 import { NEVER_CACHE_ORIGINS } from "@/lib/serviceWorker";
 
 /**
- * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
- * was never finished (or was lost in a bad merge) during the first bounty
- * programme. They are skipped -- not deleted -- so the next programme has an
- * exact worklist: un-skip one, make it pass, repeat. Nothing here was rewritten
- * to fit the current implementation.
- */
-
-/**
  * Automated security audit. (#348)
  *
  * The repo has no E2E harness, so the flows an E2E security pass would walk —
@@ -293,5 +285,39 @@ describe("service worker cache boundary", () => {
 
   it("loads no external script into the worker", () => {
     expect(swSource).not.toMatch(/importScripts/);
+  });
+});
+
+describe("test suite cleanliness (#1071)", () => {
+  it("contains no bare .skip or .only in test files", () => {
+    // Tests should not be committed with .only() or uncommented/untracked .skip()
+    const testFiles: SourceFile[] = [];
+    const scan = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          scan(full);
+        } else if (/\.(test|spec)\.(ts|tsx)$/.test(entry.name)) {
+          const relative = path.relative(repoRoot, full).split(path.sep).join("/");
+          testFiles.push({ path: relative, contents: readFileSync(full, "utf8") });
+        }
+      }
+    };
+    scan(path.join(srcRoot));
+
+    const offenders: string[] = [];
+    for (const file of testFiles) {
+      const lines = file.contents.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (/\b(it|test|describe)\.only\(/.test(line)) {
+          offenders.push(`${file.path}:${i + 1} has .only()`);
+        }
+        if (/\b(it|test|describe)\.skip\(/.test(line) && !line.includes("#")) {
+          offenders.push(`${file.path}:${i + 1} has unlinked .skip()`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });
