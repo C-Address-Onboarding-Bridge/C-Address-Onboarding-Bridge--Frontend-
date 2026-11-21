@@ -3,6 +3,7 @@ import React, { act } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, Root } from "react-dom/client";
 import DashboardPage from "@/components/routes/dashboard-page";
+import { getAccountBalances, requestTestXLM } from "@/lib/stellar";
 
 // DashboardPage mounts ClaimsPanel, which is gated behind the
 // locked_transfers flag (#672) — mock it off since none of these tests
@@ -38,7 +39,7 @@ vi.mock("@/lib/stellar", async (importOriginal) => {
     getExplorerUrl: (_network: unknown, _type: unknown, id: string) => `https://stellar.expert/explorer/testnet/account/${id}`,
     formatNetworkLabel: (_status: unknown, _name?: string | null) => "Testnet",
     toSafeErrorMessage: (_e: unknown, fallback: string) => fallback,
-    requestTestXLM: actual.requestTestXLM,
+    requestTestXLM: vi.fn(actual.requestTestXLM),
     isValidStellarAddress: vi.fn(() => true),
   };
 });
@@ -135,6 +136,59 @@ describe("Dashboard faucet", () => {
       await vi.advanceTimersByTimeAsync(100);
     });
     expect(container.textContent).not.toContain("Request Test XLM");
+  });
+
+  it("does not render faucet button when balance fetch fails (null)", async () => {
+    vi.mocked(getAccountBalances).mockRejectedValueOnce(new Error("Horizon error"));
+    await renderDashboard();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(container.textContent).not.toContain("Request Test XLM");
+    expect(container.textContent).toMatch(/Failed to (load balance|fetch data)/);
+  });
+
+  it("refetches balance after successful faucet request and keeps success message visible", async () => {
+    let callCount = 0;
+    vi.mocked(getAccountBalances).mockImplementation(async () => {
+      callCount++;
+      return { total: callCount === 1 ? "0" : "10000", balances: [] };
+    });
+    vi.mocked(requestTestXLM).mockResolvedValueOnce({
+      success: true,
+      message: "Test XLM sent! Transaction: abc12345...def67890",
+    });
+
+    await renderDashboard();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(container.textContent).toContain("Request Test XLM");
+
+    const button = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Request Test XLM")
+    );
+    expect(button).toBeDefined();
+
+    await act(async () => {
+      button?.click();
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    expect(callCount).toBe(2);
+    expect(container.textContent).toContain("Test XLM sent!");
+
+    // Faucet button is now hidden because balance is 10000
+    expect(container.textContent).not.toContain("Request Test XLM");
+
+    // Success message remains visible with dismiss button
+    const dismissBtn = container.querySelector('button[aria-label="Dismiss faucet notification"]');
+    expect(dismissBtn).toBeDefined();
+    await act(async () => {
+      (dismissBtn as HTMLButtonElement)?.click();
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(container.textContent).not.toContain("Test XLM sent!");
   });
 
   it("shows developer checklist when connected", async () => {

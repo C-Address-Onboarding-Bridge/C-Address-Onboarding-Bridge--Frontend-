@@ -1635,6 +1635,25 @@ export async function requestTestXLM(
     }
 
     if (!response.ok) {
+      if (response.status === 400) {
+        try {
+          const bodyText = await response.text();
+          if (
+            bodyText.includes("op_already_exists") ||
+            bodyText.includes("create_account_already_exist") ||
+            bodyText.toLowerCase().includes("already exists") ||
+            bodyText.toLowerCase().includes("already funded")
+          ) {
+            return {
+              success: false,
+              message: "This account is already funded on Testnet.",
+            };
+          }
+        } catch {
+          // ignore error parsing body
+        }
+      }
+
       return {
         success: false,
         message: `Faucet request failed (${response.status}). Please try again.`,

@@ -388,6 +388,12 @@ export default function DashboardPage() {
     const result = await requestTestXLM(address, network);
     if (result.success) {
       setFaucetMessage(result.message ?? "Test XLM requested.");
+      try {
+        const balResult = await getAccountBalances(address, network);
+        setBalance(balResult.total);
+      } catch {
+        // If immediate balance refetch fails, background polling will pick it up
+      }
     } else {
       setFaucetError(result.message ?? "Faucet request failed.");
     }
@@ -527,7 +533,12 @@ export default function DashboardPage() {
                 {shownBalance !== null ? parseFloat(shownBalance).toFixed(7) : "—"}
               </div>
               <div className="text-xs text-[var(--text-muted)]">XLM</div>
-              {network === "TESTNET" && !showLoading && (shownBalance === null || parseFloat(shownBalance) === 0) && (
+              {shownBalance === null && !showLoading && (
+                <p className="text-xs text-[var(--error)] mt-2">
+                  {error ?? "Failed to load balance."}
+                </p>
+              )}
+              {network === "TESTNET" && !showLoading && shownBalance !== null && parseFloat(shownBalance) === 0 && (
                 <div className="mt-3">
                   <button
                     onClick={handleFaucet}
@@ -543,14 +554,36 @@ export default function DashboardPage() {
                       "Request Test XLM"
                     )}
                   </button>
-                  {faucetMessage && (
-                    <p className="text-xs text-[var(--success)] mt-2">{faucetMessage}</p>
-                  )}
-                  {faucetError && (
-                    <p className="text-xs text-[var(--error)] mt-2">{faucetError}</p>
-                  )}
                 </div>
               )}
+              {faucetMessage && (
+                <div className="mt-3 flex items-center justify-between gap-2 p-2 rounded bg-[var(--success)]/10 border border-[var(--success)]/20">
+                  <p className="text-xs text-[var(--success)]">{faucetMessage}</p>
+                  <button
+                    type="button"
+                    onClick={() => setFaucetMessage(null)}
+                    className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] px-1"
+                    aria-label="Dismiss faucet notification"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+              {faucetError && (
+                <div className="mt-3 flex items-center justify-between gap-2 p-2 rounded bg-[var(--error)]/10 border border-[var(--error)]/20">
+                  <p className="text-xs text-[var(--error)]">{faucetError}</p>
+                  <button
+                    type="button"
+                    onClick={() => setFaucetError(null)}
+                    className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] px-1"
+                    aria-label="Dismiss faucet error"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+              <LiveRegion message={faucetMessage ?? ""} />
+              <LiveRegion politeness="assertive" message={faucetError ?? ""} />
             </>
           )}
         </div>

@@ -38,12 +38,30 @@ describe("requestTestXLM", () => {
     expect(result.message).toContain("rate-limited");
   });
 
+  it("returns already-funded message for 400 with op_already_exists", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 400,
+        text: () => Promise.resolve(JSON.stringify({
+          detail: "create_account_already_exist",
+          extras: { result_codes: { operations: ["op_already_exists"] } },
+        })),
+      } as unknown as Response)
+    );
+
+    const result = await requestTestXLM(VALID_G_ADDRESS, "TESTNET");
+    expect(result.success).toBe(false);
+    expect(result.message).toBe("This account is already funded on Testnet.");
+  });
+
   it("returns failure for non-429 error responses", async () => {
     global.fetch = vi.fn(() =>
       Promise.resolve({
         ok: false,
         status: 500,
-      } as Response)
+        text: () => Promise.resolve("Internal Server Error"),
+      } as unknown as Response)
     );
 
     const result = await requestTestXLM(VALID_G_ADDRESS, "TESTNET");
