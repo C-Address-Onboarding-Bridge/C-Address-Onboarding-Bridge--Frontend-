@@ -5,14 +5,6 @@ import { render, screen, cleanup } from "@testing-library/react";
 import TransactionHistory from "@/components/transaction-history";
 import type { BridgeTransactionData } from "@/lib/types";
 
-/**
- * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
- * was never finished (or was lost in a bad merge) during the first bounty
- * programme. They are skipped -- not deleted -- so the next programme has an
- * exact worklist: un-skip one, make it pass, repeat. Nothing here was rewritten
- * to fit the current implementation.
- */
-
 const TRANSACTIONS: BridgeTransactionData[] = [
   {
     id: "1",

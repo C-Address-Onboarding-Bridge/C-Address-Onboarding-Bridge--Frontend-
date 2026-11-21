@@ -62,14 +62,7 @@ vi.mock("@/lib/stellar", () => ({
 const createLockMock = vi.fn();
 vi.mock("@/lib/api", () => ({
 
-/**
- * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
- * was never finished (or was lost in a bad merge) during the first bounty
- * programme. They are skipped -- not deleted -- so the next programme has an
- * exact worklist: un-skip one, make it pass, repeat. Nothing here was rewritten
- * to fit the current implementation.
- */
-  createLock: (...args: unknown[]) => createLockMock(...args),
+createLock: (...args: unknown[]) => createLockMock(...args),
   // The bridge page also pulls these from @/lib/api; a partial factory makes
   // vitest throw on import before any assertion runs.
   getFeeTierPreview: () => Promise.resolve(null),

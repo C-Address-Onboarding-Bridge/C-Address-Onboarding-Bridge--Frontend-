@@ -61,14 +61,7 @@ vi.mock("@/lib/stellar", () => ({
 const getFeeTierPreviewMock = vi.fn();
 vi.mock("@/lib/api", () => ({
 
-/**
- * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
- * was never finished (or was lost in a bad merge) during the first bounty
- * programme. They are skipped -- not deleted -- so the next programme has an
- * exact worklist: un-skip one, make it pass, repeat. Nothing here was rewritten
- * to fit the current implementation.
- */
-  getFeeTierPreview: (...args: unknown[]) => getFeeTierPreviewMock(...args),
+getFeeTierPreview: (...args: unknown[]) => getFeeTierPreviewMock(...args),
   // See note in bridge-lock-option.test.tsx — the factory must cover every
   // name the bridge page imports from this module.
   createLock: () => Promise.resolve(null),
