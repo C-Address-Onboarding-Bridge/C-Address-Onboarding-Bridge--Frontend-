@@ -18,17 +18,11 @@ import React, { memo } from "react";
 import { Wallet, Globe } from "lucide-react";
 import { PrefetchLink } from "./prefetch-link";
 import { useLocale, SUPPORTED_LOCALES, type Locale } from "@/contexts/LocaleContext";
+import { useTranslation } from "@/lib/i18n";
 
-// Internal destinations must go through the router, not a raw <a>. A bare
-// anchor triggers a full document load, which remounts WalletProvider and
-// wipes its in-memory session refs — most visibly re-connecting a wallet the
-// user had explicitly disconnected (#288) and re-showing a dismissed
-// network-mismatch banner (#289). External links below stay plain anchors.
-const protocolLinks = [
-  { href: "/bridge", label: "G → C Bridge" },
-  { href: "/onramp", label: "Fiat Onramp" },
-  { href: "/cex", label: "CEX Withdrawal" },
-];
+const GITHUB_REPO_URL =
+  process.env.NEXT_PUBLIC_REPO_URL ||
+  "https://github.com/C-Address-Onboarding-Bridge/C-Address-Onboarding-Bridge--Frontend-";
 
 const LOCALE_FULL_LABELS: Record<Locale, string> = {
   en: "English",
@@ -39,6 +33,13 @@ const LOCALE_FULL_LABELS: Record<Locale, string> = {
 
 const Footer = () => {
   const { locale, setLocale } = useLocale();
+  const { t } = useTranslation();
+
+  const protocolLinks = [
+    { href: "/bridge", label: t("footer.bridge") },
+    { href: "/onramp", label: t("footer.onramp") },
+    { href: "/cex", label: t("footer.cex") },
+  ];
 
   return (
     <footer className="border-t border-[var(--border)] bg-[var(--surface)]">
@@ -52,13 +53,12 @@ const Footer = () => {
               <span className="font-semibold text-lg">C-Address Bridge</span>
             </div>
             <p className="text-sm text-[var(--text-muted)] max-w-md">
-              The onboarding layer for Soroban dApps. Fund any C-address directly
-              from a CEX, fiat onramp, or existing G-address.
+              {t("footer.description")}
             </p>
           </div>
 
           <div>
-            <h3 className="text-sm font-semibold mb-3">Protocol</h3>
+            <h3 className="text-sm font-semibold mb-3">{t("footer.protocol")}</h3>
             <ul className="space-y-2">
               {protocolLinks.map((link) => (
                 <li key={link.href}>
@@ -74,26 +74,26 @@ const Footer = () => {
           </div>
 
           <div>
-            <h3 className="text-sm font-semibold mb-3">Resources</h3>
+            <h3 className="text-sm font-semibold mb-3">{t("footer.resources")}</h3>
             <ul className="space-y-2">
               <li>
                 <a
-                  href="https://soroban.stellar.org"
+                  href="https://developers.stellar.org/docs/build/smart-contracts"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]"
                 >
-                  Soroban Docs
+                  {t("footer.soroban_docs")}
                 </a>
               </li>
               <li>
                 <a
-                  href="https://github.com"
+                  href={GITHUB_REPO_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]"
                 >
-                  GitHub
+                  {t("footer.github")}
                 </a>
               </li>
               <li>
@@ -103,7 +103,7 @@ const Footer = () => {
                   rel="noopener noreferrer"
                   className="text-sm text-[var(--text-muted)] hover:text-[var(--foreground)]"
                 >
-                  Stellar
+                  {t("footer.stellar")}
                 </a>
               </li>
             </ul>
@@ -115,7 +115,7 @@ const Footer = () => {
           <div className="flex flex-wrap items-center gap-3">
             <span className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
               <Globe className="w-3.5 h-3.5" aria-hidden="true" />
-              Language
+              {t("footer.language")}
             </span>
             {SUPPORTED_LOCALES.map((l) => (
               <button
@@ -137,7 +137,7 @@ const Footer = () => {
 
         <div className="mt-6 pt-6 border-t border-[var(--border)] flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-xs text-[var(--text-muted)]">
-            Built for the Stellar Soroban ecosystem. Not financial advice.
+            {t("footer.disclaimer")}
           </p>
           <div className="flex items-center gap-4">
             <span className="text-xs text-[var(--text-muted)]">C-Address Bridge Protocol</span>
