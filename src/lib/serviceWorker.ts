@@ -145,6 +145,7 @@ export function isServiceWorkerEnabled(): boolean {
 interface NavigatorLike {
   serviceWorker?: {
     register(url: string, options?: { scope?: string }): Promise<ServiceWorkerRegistration>;
+    getRegistrations?(): Promise<readonly ServiceWorkerRegistration[]>;
   };
 }
 
@@ -154,15 +155,63 @@ export function isServiceWorkerSupported(nav: NavigatorLike | undefined = typeof
 }
 
 /**
- * Registers the worker, returning the registration or `null` when it was
- * skipped (unsupported environment or flag off). Registration failures are
- * swallowed deliberately: the app is fully functional without a worker, so a
- * failed registration must never break boot.
+ * Unregisters any active service worker registrations matching `/sw.js` and
+ * deletes caches starting with `SW_CACHE_PREFIX`. (#1118)
+ *
+ * Safe in SSR and unsupported environments (returns false).
+ */
+export async function unregisterServiceWorkers(
+  nav: NavigatorLike | undefined = typeof navigator === "undefined" ? undefined : navigator,
+): Promise<boolean> {
+  if (!isServiceWorkerSupported(nav)) {
+    return false;
+  }
+  let unregistered = false;
+  try {
+    if (typeof nav?.serviceWorker?.getRegistrations === "function") {
+      const registrations = await nav.serviceWorker.getRegistrations();
+      for (const reg of registrations) {
+        const scriptUrl =
+          reg.active?.scriptURL ||
+          reg.installing?.scriptURL ||
+          reg.waiting?.scriptURL ||
+          "";
+        if (scriptUrl.endsWith(SW_SCRIPT_URL) || scriptUrl.includes(SW_SCRIPT_URL)) {
+          const ok = await reg.unregister();
+          if (ok) unregistered = true;
+        }
+      }
+    }
+    if (typeof caches !== "undefined" && typeof caches.keys === "function") {
+      const keys = await caches.keys();
+      for (const key of keys) {
+        if (key.startsWith(SW_CACHE_PREFIX)) {
+          await caches.delete(key);
+        }
+      }
+    }
+  } catch {
+    // A failed unregister must never break boot
+  }
+  return unregistered;
+}
+
+/**
+ * Registers the worker when enabled, or actively unregisters existing workers
+ * and clears caches when disabled (#1118).
+ *
+ * Registration failures are swallowed deliberately: the app is fully functional
+ * without a worker, so a failed registration must never break boot.
  */
 export async function registerServiceWorker(
   nav: NavigatorLike | undefined = typeof navigator === "undefined" ? undefined : navigator,
 ): Promise<ServiceWorkerRegistration | null> {
-  if (!isServiceWorkerEnabled() || !isServiceWorkerSupported(nav)) {
+  if (!isServiceWorkerSupported(nav)) {
+    return null;
+  }
+  if (!isServiceWorkerEnabled()) {
+    // When the flag is off, ensure no stale worker remains installed (#1118)
+    await unregisterServiceWorkers(nav);
     return null;
   }
   try {

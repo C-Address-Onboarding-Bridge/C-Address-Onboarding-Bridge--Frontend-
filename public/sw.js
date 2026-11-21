@@ -17,7 +17,7 @@
 // Version from build time: format is CACHE_PREFIX + timestamp (milliseconds since epoch).
 // Replace __CACHE_VERSION__ at build time via next.config.ts or during deploy.
 // Falls back to timestamp if not replaced, ensuring stale caches are cleaned up.
-const CACHE_VERSION = typeof __CACHE_VERSION__ !== 'undefined' ? __CACHE_VERSION__ : 'v-' + Date.now();
+const CACHE_VERSION = "v1";
 const CACHE_PREFIX = "c-address-bridge-";
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
 
