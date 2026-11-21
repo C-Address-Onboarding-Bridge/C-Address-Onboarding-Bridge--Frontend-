@@ -222,6 +222,6 @@ export const CEX_LIST = [
     supportedNetworks: ["Stellar"],
     minWithdrawal: "15 USDC",
     fee: "0.15 USDC",
-    withdrawalUrl: "https://www.kraken.com/wi
-
-/* … truncated 57 chars — edit only what you need near the top … */
+    withdrawalUrl: "https://www.kraken.com/withdraw",
+  },
+] as const satisfies readonly CexConfig[];

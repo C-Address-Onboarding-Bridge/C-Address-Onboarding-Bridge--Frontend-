@@ -710,13 +710,13 @@ async function withBalanceFallback(
 
 export async function getAccountBalances(
   address: string,
-  network: "PUBLIC" | "TESTNET"
+  network: "PUBLIC" | "TESTNET" = "TESTNET"
 ): Promise<AccountBalances> {
   // Reject structurally invalid addresses before hitting the network.
   // An empty or malformed address would produce an opaque Horizon 400/404
   // that obscures the real cause and could log confusing errors.
   if (!isValidStellarAddress(address)) {
-    return { total: "0", balances: [] };
+    throw new Error(`Invalid Stellar address: "${address}"`);
   }
 
   const key = `${address}:${network}`;
