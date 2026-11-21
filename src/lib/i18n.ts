@@ -145,6 +145,19 @@ export interface TranslationSet {
     minWithdrawalLabel: string;
     feeLabel: string;
   };
+  footer: {
+    protocol: string;
+    resources: string;
+    bridge: string;
+    onramp: string;
+    cex: string;
+    soroban_docs: string;
+    github: string;
+    stellar: string;
+    language: string;
+    disclaimer: string;
+    description: string;
+  };
 }
 
 const translations: Record<Locale, TranslationSet> = {
@@ -283,6 +296,19 @@ const translations: Record<Locale, TranslationSet> = {
       minWithdrawalLabel: 'Min Withdrawal',
       feeLabel: 'Fee',
     },
+    footer: {
+      protocol: 'Protocol',
+      resources: 'Resources',
+      bridge: 'G → C Bridge',
+      onramp: 'Fiat Onramp',
+      cex: 'CEX Withdrawal',
+      soroban_docs: 'Soroban Docs',
+      github: 'GitHub',
+      stellar: 'Stellar',
+      language: 'Language',
+      disclaimer: 'Built for the Stellar Soroban ecosystem. Not financial advice.',
+      description: 'The onboarding layer for Soroban dApps. Fund any C-address directly from a CEX, fiat onramp, or existing G-address.',
+    },
   },
   es: {
     common: {
@@ -418,6 +444,19 @@ const translations: Record<Locale, TranslationSet> = {
       exchangeLabel: 'Exchange',
       minWithdrawalLabel: 'Retiro mínimo',
       feeLabel: 'Comisión',
+    },
+    footer: {
+      protocol: 'Protocolo',
+      resources: 'Recursos',
+      bridge: 'Puente G → C',
+      onramp: 'Rampa Fiat',
+      cex: 'Retiro de CEX',
+      soroban_docs: 'Documentación de Soroban',
+      github: 'GitHub',
+      stellar: 'Stellar',
+      language: 'Idioma',
+      disclaimer: 'Creado para el ecosistema Stellar Soroban. No es asesoramiento financiero.',
+      description: 'La capa de incorporación para dApps de Soroban. Financia cualquier dirección C directamente desde un CEX, rampa fiat o dirección G existente.',
     },
   },
   fr: {
@@ -555,6 +594,19 @@ const translations: Record<Locale, TranslationSet> = {
       minWithdrawalLabel: 'Retrait minimum',
       feeLabel: 'Frais',
     },
+    footer: {
+      protocol: 'Protocole',
+      resources: 'Ressources',
+      bridge: 'Pont G → C',
+      onramp: 'Passerelle Fiat',
+      cex: 'Retrait CEX',
+      soroban_docs: 'Documentation Soroban',
+      github: 'GitHub',
+      stellar: 'Stellar',
+      language: 'Langue',
+      disclaimer: "Conçu pour l'écosystème Stellar Soroban. Ceci n'est pas un conseil financier.",
+      description: "La couche d'intégration pour les dApps Soroban. Financez n'importe quelle adresse C directement depuis un CEX, une passerelle fiat ou une adresse G existante.",
+    },
   },
   pt: {
     common: {
@@ -690,6 +742,19 @@ const translations: Record<Locale, TranslationSet> = {
       exchangeLabel: 'Corretora',
       minWithdrawalLabel: 'Saque mínimo',
       feeLabel: 'Taxa',
+    },
+    footer: {
+      protocol: 'Protocolo',
+      resources: 'Recursos',
+      bridge: 'Ponte G → C',
+      onramp: 'Rampa Fiat',
+      cex: 'Saque CEX',
+      soroban_docs: 'Documentação do Soroban',
+      github: 'GitHub',
+      stellar: 'Stellar',
+      language: 'Idioma',
+      disclaimer: 'Criado para o ecossistema Stellar Soroban. Não é aconselhamento financeiro.',
+      description: 'A camada de integração para dApps Soroban. Financie qualquer endereço C diretamente de uma CEX, rampa fiduciária ou endereço G existente.',
     },
   },
 };

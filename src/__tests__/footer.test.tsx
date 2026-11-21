@@ -3,6 +3,7 @@ import React, { act } from "react";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { createRoot, Root } from "react-dom/client";
 import Footer from "@/components/footer";
+import { setLocale } from "@/lib/i18n";
 
 /**
  * Footer unit tests.
@@ -117,5 +118,39 @@ describe("Footer", () => {
       expect(link.getAttribute("rel")).toContain("noopener");
       expect(link.getAttribute("rel")).toContain("noreferrer");
     }
+  });
+
+  it("points GitHub and Soroban Docs links to correct destinations (#1121)", async () => {
+    await renderFooter();
+
+    const sorobanLink = anchors().find((a) => a.textContent === "Soroban Docs");
+    expect(sorobanLink?.getAttribute("href")).toBe(
+      "https://developers.stellar.org/docs/build/smart-contracts"
+    );
+
+    const githubLink = anchors().find((a) => a.textContent === "GitHub");
+    expect(githubLink?.getAttribute("href")).toBe(
+      process.env.NEXT_PUBLIC_REPO_URL ||
+        "https://github.com/C-Address-Onboarding-Bridge/C-Address-Onboarding-Bridge--Frontend-"
+    );
+  });
+
+  it("renders footer headings and strings in Spanish after setLocale('es') (#1121)", async () => {
+    act(() => {
+      setLocale("es");
+    });
+    await renderFooter();
+
+    expect(container?.textContent).toContain("Protocolo");
+    expect(container?.textContent).toContain("Recursos");
+    expect(container?.textContent).toContain("Idioma");
+    expect(container?.textContent).toContain("Creado para el ecosistema Stellar Soroban");
+    expect(container?.textContent).toContain("Puente G → C");
+    expect(container?.textContent).toContain("Rampa Fiat");
+    expect(container?.textContent).toContain("Retiro de CEX");
+
+    act(() => {
+      setLocale("en");
+    });
   });
 });
