@@ -25,7 +25,7 @@ import React, {
 } from 'react';
 import { useHydrated } from '@/hooks/useHydrated';
 
-export type Theme = 'light' | 'dark';
+export type Theme = 'light' | 'dark' | 'system';
 
 export const THEME_STORAGE_KEY = 'ui:theme';
 
@@ -33,6 +33,7 @@ interface ThemeContextValue {
   theme: Theme;
   toggleTheme: () => void;
   setTheme: (theme: Theme) => void;
+  setSystemTheme?: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -58,16 +59,17 @@ function readStoredTheme(): Theme | null {
 
 function writeStoredTheme(theme: Theme): void {
   try {
-    getStorage()?.setItem(THEME_STORAGE_KEY, theme);
+    if (theme === 'system') {
+      getStorage()?.removeItem(THEME_STORAGE_KEY);
+    } else {
+      getStorage()?.setItem(THEME_STORAGE_KEY, theme);
+    }
   } catch {
     // Quota or privacy-mode failure: in-memory state still works.
   }
 }
 
-/** Resolve the theme from storage, then OS preference, then dark as default. */
-function resolveInitialTheme(): Theme {
-  const stored = readStoredTheme();
-  if (stored) return stored;
+function resolveOsTheme(): 'light' | 'dark' {
   if (
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
@@ -78,10 +80,18 @@ function resolveInitialTheme(): Theme {
   return 'dark';
 }
 
+/** Resolve the theme from storage, then OS preference, then dark as default. */
+function resolveInitialTheme(): 'light' | 'dark' {
+  const stored = readStoredTheme();
+  if (stored) return stored as 'light' | 'dark';
+  return resolveOsTheme();
+}
+
 /** Apply/remove the `.dark` class on `<html>`. */
 function applyTheme(theme: Theme): void {
   if (typeof document === 'undefined') return;
-  if (theme === 'dark') {
+  const target = theme === 'system' ? resolveOsTheme() : theme;
+  if (target === 'dark') {
     document.documentElement.classList.add('dark');
   } else {
     document.documentElement.classList.remove('dark');
@@ -121,18 +131,47 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
-  const setTheme = useCallback((next: Theme) => {
-    applyTheme(next);
-    writeStoredTheme(next);
-    setThemeState(next);
+  // Multi-tab synchronization: listen for storage events on THEME_STORAGE_KEY
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key !== THEME_STORAGE_KEY) return;
+      if (e.newValue === 'light' || e.newValue === 'dark') {
+        applyTheme(e.newValue);
+        setThemeState(e.newValue);
+      } else {
+        const next = resolveOsTheme();
+        applyTheme(next);
+        setThemeState(next);
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
   }, []);
+
+  const setTheme = useCallback((next: Theme) => {
+    if (next === 'system') {
+      writeStoredTheme('system');
+      const os = resolveOsTheme();
+      applyTheme(os);
+      setThemeState('system');
+    } else {
+      applyTheme(next);
+      writeStoredTheme(next);
+      setThemeState(next);
+    }
+  }, []);
+
+  const setSystemTheme = useCallback(() => {
+    setTheme('system');
+  }, [setTheme]);
 
   const toggleTheme = useCallback(() => {
     setTheme(theme === 'dark' ? 'light' : 'dark');
   }, [theme, setTheme]);
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, setTheme, setSystemTheme }}>
       {children}
     </ThemeContext.Provider>
   );
