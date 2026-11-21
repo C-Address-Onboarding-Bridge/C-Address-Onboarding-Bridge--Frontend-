@@ -262,9 +262,16 @@ export async function switchWalletNetwork(target: StellarNetwork): Promise<Switc
   return "cancelled";
 }
 
-export async function getHorizonServer(network: StellarNetwork): Promise<Horizon.Server> {
+export async function getHorizonServer(network: StellarNetwork = "TESTNET"): Promise<Horizon.Server> {
   const { Horizon } = await import("@stellar/stellar-sdk");
-  return new Horizon.Server(HORIZON_URL[network]);
+  const url = HORIZON_URL[network] ?? "https://horizon-testnet.stellar.org";
+  let allowHttp = false;
+  try {
+    allowHttp = new URL(url).protocol === "http:";
+  } catch {
+    allowHttp = false;
+  }
+  return new Horizon.Server(url, { allowHttp });
 }
 
 /**
@@ -273,7 +280,7 @@ export async function getHorizonServer(network: StellarNetwork): Promise<Horizon
  * Throws a descriptive error if no RPC URL is configured for the network
  * (see `NEXT_PUBLIC_SOROBAN_RPC_URL_<NETWORK>`).
  */
-export async function getSorobanRpcServer(network: StellarNetwork): Promise<rpc.Server> {
+export async function getSorobanRpcServer(network: StellarNetwork = "TESTNET"): Promise<rpc.Server> {
   const url = SOROBAN_RPC_URL[network];
   if (!url) {
     throw new Error(
@@ -281,7 +288,13 @@ export async function getSorobanRpcServer(network: StellarNetwork): Promise<rpc.
     );
   }
   const { rpc } = await import("@stellar/stellar-sdk");
-  return new rpc.Server(url);
+  let allowHttp = false;
+  try {
+    allowHttp = new URL(url).protocol === "http:";
+  } catch {
+    allowHttp = false;
+  }
+  return new rpc.Server(url, { allowHttp });
 }
 
 /** The network passphrase Horizon/Soroban RPC requests for `network` must sign with. */
@@ -510,8 +523,9 @@ interface HorizonCollection<T> {
 }
 
 /** Make lightweight Horizon reads without loading the Stellar SDK client. */
-async function fetchHorizonJson<T>(network: StellarNetwork, path: string): Promise<T> {
-  const response = await fetch(`${HORIZON_URL[network].replace(/\/+$/, "")}${path}`);
+async function fetchHorizonJson<T>(network: StellarNetwork = "TESTNET", path: string): Promise<T> {
+  const url = HORIZON_URL[network] ?? HORIZON_URL.TESTNET ?? "https://horizon-testnet.stellar.org";
+  const response = await fetch(`${url.replace(/\/+$/, "")}${path}`);
   if (!response.ok) {
     const error = new Error(`Horizon request failed (${response.status})`) as Error & {
       response: { status: number };
@@ -710,7 +724,7 @@ async function withBalanceFallback(
 
 export async function getAccountBalances(
   address: string,
-  network: "PUBLIC" | "TESTNET"
+  network: "PUBLIC" | "TESTNET" = "TESTNET"
 ): Promise<AccountBalances> {
   // Reject structurally invalid addresses before hitting the network.
   // An empty or malformed address would produce an opaque Horizon 400/404
