@@ -1964,11 +1964,20 @@ export function subscribeToTransactionStatus(params: {
   let fellBack = false;
   let source: EventSource | null = null;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollGeneration = 0;
+  let inFlightController: AbortController | null = null;
+  let backoffDelayMs = pollIntervalMs;
+  const MAX_BACKOFF_MS = 60_000;
 
   const stopPolling = () => {
+    pollGeneration++;
     if (pollTimer !== null) {
       clearTimeout(pollTimer);
       pollTimer = null;
+    }
+    if (inFlightController !== null) {
+      inFlightController.abort();
+      inFlightController = null;
     }
   };
 
@@ -1995,25 +2004,76 @@ export function subscribeToTransactionStatus(params: {
     if (status === "confirmed" || status === "failed") cleanup();
   };
 
-  const poll = async () => {
+  const poll = async (gen: number) => {
+    if (stopped || gen !== pollGeneration) return;
+
+    let nextDelayMs = pollIntervalMs;
+    const controller = new AbortController();
+    inFlightController = controller;
+
     try {
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
-      if (!res.ok) throw new Error(`Transaction status request failed (${res.status})`);
+      const res = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+
+      if (gen !== pollGeneration || stopped) return;
+
+      if (res.status === 429) {
+        const retryAfterHeader = res.headers.get("Retry-After");
+        let retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader, 10) : NaN;
+        if (!Number.isFinite(retryAfterSec) || retryAfterSec <= 0) {
+          retryAfterSec = Math.ceil(pollIntervalMs / 1000);
+        }
+        nextDelayMs = retryAfterSec * 1000;
+        throw new Error(`Transaction status request rate-limited (429)`);
+      }
+
+      if (res.status >= 500) {
+        backoffDelayMs = Math.min(backoffDelayMs * 2, MAX_BACKOFF_MS);
+        nextDelayMs = backoffDelayMs;
+        throw new Error(`Transaction status request failed (${res.status})`);
+      }
+
+      if (!res.ok) {
+        throw new Error(`Transaction status request failed (${res.status})`);
+      }
+
+      // Success resets exponential backoff
+      backoffDelayMs = pollIntervalMs;
+      nextDelayMs = pollIntervalMs;
+
       const payload = (await res.json()) as { status?: BridgeTransactionStatus };
       if (payload.status) emit(payload.status);
     } catch (e) {
-      if (!stopped) onError?.(e instanceof Error ? e : new Error(String(e)));
+      if (e instanceof Error && e.name === "AbortError") {
+        return;
+      }
+      if (e instanceof Error && !e.message.includes("429") && !e.message.includes("failed (5")) {
+        // Network errors or other exceptions also trigger exponential backoff
+        backoffDelayMs = Math.min(backoffDelayMs * 2, MAX_BACKOFF_MS);
+        nextDelayMs = backoffDelayMs;
+      }
+      if (!stopped && gen === pollGeneration) {
+        onError?.(e instanceof Error ? e : new Error(String(e)));
+      }
     } finally {
-      // Don't reschedule while the tab is hidden; focus restarts the timer.
-      const visible =
-        typeof document === "undefined" || document.visibilityState !== "hidden";
-      if (!stopped && visible) pollTimer = setTimeout(() => void poll(), pollIntervalMs);
+      if (inFlightController === controller) {
+        inFlightController = null;
+      }
+      if (!stopped && gen === pollGeneration) {
+        // Don't reschedule while the tab is hidden; focus restarts the timer.
+        const visible =
+          typeof document === "undefined" || document.visibilityState !== "hidden";
+        if (visible) pollTimer = setTimeout(() => void poll(gen), nextDelayMs);
+      }
     }
   };
 
   const startPolling = () => {
     stopPolling();
-    void poll();
+    const gen = pollGeneration;
+    void poll(gen);
   };
 
   // An EventSource failure is permanent — polling takes over from then on.
