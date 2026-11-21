@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import {
   simulateBridgeTransaction,
   type SimulatePaymentInput,
+  isGAddress,
+  isValidStellarAddress,
 } from "@/lib/stellar";
 import type { StellarNetwork } from "@/lib/types";
 import {
@@ -28,6 +30,10 @@ import {
  */
 const RATE_LIMIT = 30;
 const RATE_LIMIT_WINDOW_MS = 60_000;
+
+export const MAX_ADDRESS_LENGTH = 56;
+export const MAX_AMOUNT_LENGTH = 32;
+export const MAX_ASSET_CODE_LENGTH = 12;
 
 export async function POST(request: Request) {
   const limit = checkRateLimit(`simulate:${getClientIp(request)}`, {
@@ -71,6 +77,36 @@ export async function POST(request: Request) {
     (network !== "PUBLIC" && network !== "TESTNET")
   ) {
     return NextResponse.json({ error: "Invalid simulation parameters" }, { status: 400 });
+  }
+
+  if (
+    sourceAddress.length === 0 ||
+    sourceAddress.length > MAX_ADDRESS_LENGTH ||
+    destinationAddress.length === 0 ||
+    destinationAddress.length > MAX_ADDRESS_LENGTH ||
+    amount.length === 0 ||
+    amount.length > MAX_AMOUNT_LENGTH ||
+    assetCode.length === 0 ||
+    assetCode.length > MAX_ASSET_CODE_LENGTH
+  ) {
+    return NextResponse.json(
+      { error: "Parameter exceeds maximum allowed length or is empty" },
+      { status: 400 }
+    );
+  }
+
+  if (!isGAddress(sourceAddress)) {
+    return NextResponse.json(
+      { error: "Invalid source address: must be a valid G-address" },
+      { status: 400 }
+    );
+  }
+
+  if (!isValidStellarAddress(destinationAddress)) {
+    return NextResponse.json(
+      { error: "Invalid destination address: must be a valid Stellar address" },
+      { status: 400 }
+    );
   }
 
   const input: SimulatePaymentInput = {
