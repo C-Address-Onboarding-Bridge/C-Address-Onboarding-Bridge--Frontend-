@@ -81,6 +81,25 @@ Horizon and Soroban RPC responses are **not** HTTP-cached; the only layer in fro
 4. **Export a `clear…Cache()` function.** Tests need to reset module-level state between cases; module `Map`s persist for the lifetime of the module.
 5. **Reset it in `beforeEach`** in any suite that exercises it, or a passing test will leak into the next one.
 
+## Service Worker Retirement & Emergency Kill Switch (#1118)
+
+Service worker registration is controlled by the `NEXT_PUBLIC_ENABLE_SW` environment variable (`true` to enable, `false` or absent to disable).
+
+### Normal Decommission (Flag-off)
+When `NEXT_PUBLIC_ENABLE_SW` is false or unset:
+- `registerServiceWorker()` automatically calls `unregisterServiceWorkers()`.
+- Any existing active or waiting registrations with script `/sw.js` are unregistered via `registration.unregister()`.
+- All Cache Storage entries with prefix `c-address-bridge-` are deleted.
+
+### Emergency Kill Switch (`sw-kill.js`)
+If a broken worker is permanently intercepting user fetches and serving stale or corrupted chunks, operators can deploy the emergency kill switch:
+1. Copy `public/sw-kill.js` over `public/sw.js` in the deployment artifact.
+2. When client browsers fetch the updated `/sw.js`:
+   - It takes over immediately on install via `skipWaiting()`.
+   - On activate, it purges all `c-address-bridge-*` caches.
+   - It invokes `self.registration.unregister()` to delete its registration from the browser.
+   - It prompts all open client windows to refresh and resume clean network fetches.
+
 ## Verifying cache behaviour
 
 ```bash

@@ -211,6 +211,64 @@ describe("registerServiceWorker", () => {
     await expect(registerServiceWorker(undefined)).resolves.toBeNull();
     await expect(registerServiceWorker({})).resolves.toBeNull();
   });
+
+  it("actively unregisters /sw.js when flag is off (#1118)", async () => {
+    delete process.env.NEXT_PUBLIC_ENABLE_SW;
+    let unregisterCalled = false;
+    let registerCalled = false;
+
+    const mockRegistration = {
+      active: { scriptURL: "https://bridge.example/sw.js" },
+      unregister: async () => {
+        unregisterCalled = true;
+        return true;
+      },
+    } as unknown as ServiceWorkerRegistration;
+
+    const mockNav = {
+      serviceWorker: {
+        register: async () => {
+          registerCalled = true;
+          return {} as ServiceWorkerRegistration;
+        },
+        getRegistrations: async () => [mockRegistration],
+      },
+    };
+
+    const res = await registerServiceWorker(mockNav);
+    expect(res).toBeNull();
+    expect(registerCalled).toBe(false);
+    expect(unregisterCalled).toBe(true);
+  });
+
+  it("registers and does not unregister when flag is on (#1118)", async () => {
+    process.env.NEXT_PUBLIC_ENABLE_SW = "true";
+    let unregisterCalled = false;
+    let registerCalled = false;
+
+    const mockRegistration = {
+      active: { scriptURL: "https://bridge.example/sw.js" },
+      unregister: async () => {
+        unregisterCalled = true;
+        return true;
+      },
+    } as unknown as ServiceWorkerRegistration;
+
+    const mockNav = {
+      serviceWorker: {
+        register: async () => {
+          registerCalled = true;
+          return mockRegistration;
+        },
+        getRegistrations: async () => [mockRegistration],
+      },
+    };
+
+    const res = await registerServiceWorker(mockNav);
+    expect(res).toBe(mockRegistration);
+    expect(registerCalled).toBe(true);
+    expect(unregisterCalled).toBe(false);
+  });
 });
 
 describe("public/sw.js stays in sync with the shared constants", () => {
