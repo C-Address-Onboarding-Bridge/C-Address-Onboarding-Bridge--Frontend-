@@ -8,7 +8,7 @@
  *                denied, non-secure context, browser without Clipboard API)
  *
  * Showing "Copy failed" in the error state instead of a success checkmark
- * prevents misleading feedback when the write silently fails. (#300)
+ * prevents misleading feedback when the write silently fails. (#300, #1108)
  *
  * @example
  *   const { status, copy } = useCopyToClipboard();
@@ -20,7 +20,7 @@
 
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 export type CopyStatus = "idle" | "copied" | "error";
 
@@ -48,46 +48,75 @@ export function useCopyToClipboard(resetAfterMs = COPY_FEEDBACK_DURATION_MS): Us
   const [status, setStatus] = useState<CopyStatus>("idle");
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const scheduleReset = useCallback(() => {
+    if (resetAfterMs > 0) {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => {
+        setStatus("idle");
+      }, resetAfterMs);
+    }
+  }, [resetAfterMs]);
+
   const reset = useCallback(() => {
     setStatus("idle");
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
   }, []);
 
   const copy = useCallback(
     async (text: string): Promise<boolean> => {
       try {
         if (!navigator?.clipboard?.writeText) {
+          // Fallback to hidden textarea + execCommand('copy') if document is available
+          try {
+            if (typeof document !== "undefined") {
+              const textarea = document.createElement("textarea");
+              textarea.value = text;
+              textarea.style.position = "fixed";
+              textarea.style.opacity = "0";
+              textarea.style.left = "-9999px";
+              document.body.appendChild(textarea);
+              textarea.focus();
+              textarea.select();
+              const successful = document.execCommand("copy");
+              document.body.removeChild(textarea);
+              if (successful) {
+                setStatus("copied");
+                scheduleReset();
+                return true;
+              }
+            }
+          } catch {
+            // execCommand fallback failed, proceed with error
+          }
+
           setStatus("error");
+          scheduleReset();
           return false;
         }
 
         await navigator.clipboard.writeText(text);
         setStatus("copied");
-
-        if (resetAfterMs > 0) {
-          if (timeoutRef.current) clearTimeout(timeoutRef.current);
-          timeoutRef.current = setTimeout(() => {
-            setStatus("idle");
-          }, resetAfterMs);
-        }
-
+        scheduleReset();
         return true;
       } catch {
         setStatus("error");
-
-        if (resetAfterMs > 0) {
-          if (timeoutRef.current) clearTimeout(timeoutRef.current);
-          timeoutRef.current = setTimeout(() => {
-            setStatus("idle");
-          }, resetAfterMs);
-        }
-
+        scheduleReset();
         return false;
       }
     },
-    [resetAfterMs]
+    [scheduleReset]
   );
 
   return { status, copy, reset };
