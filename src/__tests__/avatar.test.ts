@@ -4,6 +4,7 @@ import {
   ACCEPTED_AVATAR_TYPES,
   AVATAR_ACCEPT_ATTR,
   AVATAR_MAX_BYTES,
+  avatarColor,
   avatarInitials,
   avatarStorageKey,
   formatBytes,
@@ -112,10 +113,31 @@ describe("avatar storage", () => {
 });
 
 describe("presentation helpers", () => {
-  it("derives two-character initials from an address", () => {
-    expect(avatarInitials(ADDRESS_A)).toBe("GA");
-    expect(avatarInitials(ADDRESS_B)).toBe("CA");
+  it("derives variable initials and distinct colors from addresses (#1116)", () => {
+    // Two real Stellar G-addresses sharing the same "GA" prefix
+    const ADDR_1 = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
+    const ADDR_2 = "GABCMXN6ODL4X5V6ZVRVYW6I5P2K7JBLW4ZTY6K6XQ2GZZJ6L2D4EEMK";
+
+    // Characters 2..4 vary ("AZ" vs "BC"), unlike slice(0, 2) which was identical ("GA")
+    expect(avatarInitials(ADDR_1)).toBe("AZ");
+    expect(avatarInitials(ADDR_2)).toBe("BC");
+    expect(avatarInitials(ADDR_1)).not.toBe(avatarInitials(ADDR_2));
+
+    expect(avatarInitials(ADDRESS_A)).toBe("BC");
+    expect(avatarInitials(ADDRESS_B)).toBe("BC");
+    expect(avatarInitials("")).toBe("?");
     expect(avatarInitials(null)).toBe("?");
+    expect(avatarInitials(undefined)).toBe("?");
+    expect(avatarInitials("G")).toBe("G");
+    expect(avatarInitials("GA")).toBe("GA");
+  });
+
+  it("derives deterministic background colors from addresses", () => {
+    const color1 = avatarColor("GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7");
+    const color2 = avatarColor("GABCMXN6ODL4X5V6ZVRVYW6I5P2K7JBLW4ZTY6K6XQ2GZZJ6L2D4EEMK");
+    expect(color1).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(color2).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(avatarColor(null)).toBe("var(--surface-2)");
   });
 
   it("formats byte counts", () => {

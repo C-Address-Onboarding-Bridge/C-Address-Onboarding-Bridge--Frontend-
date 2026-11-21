@@ -5,6 +5,7 @@ import { Camera, Loader2, Trash2 } from "lucide-react";
 import {
   AVATAR_ACCEPT_ATTR,
   AVATAR_SAVE_ERRORS,
+  avatarColor,
   avatarInitials,
   downscaleAvatar,
   isRenderableAvatar,
@@ -96,8 +97,11 @@ export default function AvatarUpload({ address, size = 56 }: AvatarUploadProps) 
     <div className="flex items-center gap-3">
       <div className="relative shrink-0" style={boxStyle}>
         <div
-          className="w-full h-full rounded-full overflow-hidden bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center"
-          style={boxStyle}
+          className="w-full h-full rounded-full overflow-hidden border border-[var(--border)] flex items-center justify-center transition-colors"
+          style={{
+            ...boxStyle,
+            backgroundColor: avatar ? "var(--surface-2)" : avatarColor(address),
+          }}
         >
           {avatar ? (
             // A data URL, not a remote asset: next/image cannot optimise it and
@@ -113,7 +117,7 @@ export default function AvatarUpload({ address, size = 56 }: AvatarUploadProps) 
           ) : (
             <span
               aria-hidden="true"
-              className="text-sm font-semibold font-mono text-[var(--text-muted)]"
+              className="text-sm font-semibold font-mono text-white"
             >
               {avatarInitials(address)}
             </span>

@@ -267,11 +267,48 @@ export function removeAvatar(address: string | null | undefined): void {
   }
 }
 
+/** Accessible background palette for fallback avatars. */
+export const AVATAR_PALETTE = [
+  "#2563eb", // blue
+  "#7c3aed", // violet
+  "#db2777", // pink
+  "#ea580c", // orange
+  "#16a34a", // green
+  "#0891b2", // cyan
+  "#4f46e5", // indigo
+  "#c026d3", // fuchsia
+];
+
 /**
- * Two-character fallback shown when no avatar is set. Stellar addresses are
- * base32 so the leading characters ("GA", "CB", …) are stable and readable.
+ * Deterministically derives an accessible background color from an address.
+ */
+export function avatarColor(address: string | null | undefined): string {
+  if (!address) return "var(--surface-2)";
+  let hash = 0;
+  for (let i = 0; i < address.length; i++) {
+    hash = (hash << 5) - hash + address.charCodeAt(i);
+    hash |= 0;
+  }
+  const index = Math.abs(hash) % AVATAR_PALETTE.length;
+  return AVATAR_PALETTE[index];
+}
+
+/**
+ * Two-character fallback shown when no avatar is set.
+ *
+ * Stellar addresses encode version bytes in the first character ('G' for public key,
+ * 'C' for contract) and the second character is restricted to 'A'-'D'. Taking the
+ * first two characters makes almost all accounts share identical fallbacks (GA/GB/GC/GD).
+ * To ensure fallbacks actually distinguish accounts, we derive initials from the first
+ * two variable payload characters following the version prefix (slice 2..4), with
+ * graceful handling for shorter inputs. (#1116)
  */
 export function avatarInitials(address: string | null | undefined): string {
   if (!address) return "?";
-  return address.slice(0, 2).toUpperCase();
+  const trimmed = address.trim();
+  if (trimmed.length < 2) return trimmed.toUpperCase() || "?";
+  if (trimmed.length >= 4) {
+    return trimmed.slice(2, 4).toUpperCase();
+  }
+  return trimmed.slice(0, 2).toUpperCase();
 }

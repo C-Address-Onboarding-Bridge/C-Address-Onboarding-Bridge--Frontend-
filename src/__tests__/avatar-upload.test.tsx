@@ -3,7 +3,7 @@ import React, { act } from "react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createRoot, Root } from "react-dom/client";
 import AvatarUpload from "@/components/avatar-upload";
-import { avatarStorageKey } from "@/lib/avatar";
+import { avatarStorageKey, avatarInitials } from "@/lib/avatar";
 
 /**
  * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
@@ -87,7 +87,7 @@ describe("AvatarUpload", () => {
   it("falls back to the address initials when no avatar is stored", async () => {
     await render(ADDRESS);
 
-    expect(container?.textContent).toContain("GA");
+    expect(container?.textContent).toContain(avatarInitials(ADDRESS));
     expect(container?.querySelector("img")).toBeNull();
   });
 
