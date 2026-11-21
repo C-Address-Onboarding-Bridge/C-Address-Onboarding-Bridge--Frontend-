@@ -7,7 +7,7 @@ import {
   getBreadcrumbs,
 } from '../routes';
 
-describe('Routing (#362)', () => {
+describe('Routing (#362, #1120)', () => {
   describe('ROUTES', () => {
     it('defines all expected routes', () => {
       expect(ROUTES.HOME).toBe('/');
@@ -15,6 +15,10 @@ describe('Routing (#362)', () => {
       expect(ROUTES.BRIDGE).toBe('/bridge');
       expect(ROUTES.ONRAMP).toBe('/onramp');
       expect(ROUTES.CEX).toBe('/cex');
+      expect(ROUTES.PROFILE).toBe('/profile');
+      expect(ROUTES.SCHEDULES).toBe('/schedules');
+      expect(ROUTES.ADDRESS_BOOK).toBe('/address-book');
+      expect(ROUTES.REFERRALS).toBe('/referrals');
     });
   });
 
@@ -24,13 +28,18 @@ describe('Routing (#362)', () => {
       const paths = items.map((i) => i.path);
       expect(paths).not.toContain(ROUTES.DASHBOARD);
       expect(paths).not.toContain(ROUTES.BRIDGE);
+      expect(paths).not.toContain(ROUTES.ADDRESS_BOOK);
+      expect(paths).not.toContain(ROUTES.SCHEDULES);
+      expect(paths).not.toContain(ROUTES.PROFILE);
       expect(paths).toContain(ROUTES.ONRAMP);
       expect(paths).toContain(ROUTES.CEX);
+      expect(paths).toContain(ROUTES.REFERRALS);
     });
 
     it('returns all routes when wallet is connected', () => {
       const items = getNavItems(true);
       expect(items.length).toBe(ROUTE_CONFIGS.length);
+      expect(items.length).toBe(8);
     });
   });
 
@@ -42,6 +51,8 @@ describe('Routing (#362)', () => {
 
     it('matches prefix routes', () => {
       expect(isActiveRoute('/bridge/status', '/bridge')).toBe(true);
+      expect(isActiveRoute('/address-book/contact/1', '/address-book')).toBe(true);
+      expect(isActiveRoute('/schedules/create', '/schedules')).toBe(true);
     });
 
     it('home only matches exactly', () => {

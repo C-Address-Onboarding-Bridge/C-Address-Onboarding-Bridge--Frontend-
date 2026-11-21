@@ -18,17 +18,16 @@ import React, { memo } from "react";
 import { Wallet, Globe } from "lucide-react";
 import { PrefetchLink } from "./prefetch-link";
 import { useLocale, SUPPORTED_LOCALES, type Locale } from "@/contexts/LocaleContext";
+import { ROUTE_CONFIGS } from "@/lib/routes";
 
 // Internal destinations must go through the router, not a raw <a>. A bare
 // anchor triggers a full document load, which remounts WalletProvider and
 // wipes its in-memory session refs — most visibly re-connecting a wallet the
 // user had explicitly disconnected (#288) and re-showing a dismissed
 // network-mismatch banner (#289). External links below stay plain anchors.
-const protocolLinks = [
-  { href: "/bridge", label: "G → C Bridge" },
-  { href: "/onramp", label: "Fiat Onramp" },
-  { href: "/cex", label: "CEX Withdrawal" },
-];
+const protocolLinks = ROUTE_CONFIGS
+  .filter((route) => route.footerLabel)
+  .map((route) => ({ href: route.path, label: route.footerLabel! }));
 
 const LOCALE_FULL_LABELS: Record<Locale, string> = {
   en: "English",

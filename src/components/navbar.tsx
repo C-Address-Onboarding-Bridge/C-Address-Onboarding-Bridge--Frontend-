@@ -14,14 +14,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Wallet,
-  ArrowLeftRight,
-  CreditCard,
-  Building2,
-  LayoutDashboard,
-  UserRound,
-  BookUser,
-  CalendarClock,
-  Share2,
   Menu,
   X,
   AlertTriangle,
@@ -39,17 +31,7 @@ import { useHelp } from "@/contexts/HelpContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLocale, SUPPORTED_LOCALES, type Locale } from "@/contexts/LocaleContext";
 import { APP_NETWORK, type StellarNetwork, type WalletNetworkState } from "@/lib/types";
-
-const navLinks = [
-  { href: "/bridge", label: "Bridge", icon: ArrowLeftRight },
-  { href: "/onramp", label: "Onramp", icon: CreditCard },
-  { href: "/cex", label: "CEX", icon: Building2 },
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/address-book", label: "Address Book", icon: BookUser },
-  { href: "/schedules", label: "Schedules", icon: CalendarClock },
-  { href: "/referrals", label: "Referrals", icon: Share2 },
-  { href: "/profile", label: "Profile", icon: UserRound },
-];
+import { ROUTE_CONFIGS, isActiveRoute } from "@/lib/routes";
 
 /** Human-readable labels for each locale. */
 const LOCALE_LABELS: Record<Locale, string> = {
@@ -356,20 +338,20 @@ const Navbar = () => {
           </Link>
 
           <div className="hidden md:flex items-center gap-1">
-            {navLinks.map((link) => {
+            {ROUTE_CONFIGS.map((link) => {
               const Icon = link.icon;
-              const isActive = pathname === link.href;
+              const isActive = isActiveRoute(pathname, link.path);
               return (
                 <PrefetchLink
-                  key={link.href}
-                  href={link.href}
+                  key={link.path}
+                  href={link.path}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                     isActive
                       ? "bg-[var(--primary)]/10 text-[var(--primary-light)]"
                       : "text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)]"
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  {Icon && <Icon className="w-4 h-4" />}
                   {link.label}
                 </PrefetchLink>
               );
@@ -546,13 +528,13 @@ const Navbar = () => {
           className="md:hidden border-t border-[var(--border)] bg-[var(--background)]"
         >
           <div className="px-4 py-3 space-y-1">
-            {navLinks.map((link) => {
+            {ROUTE_CONFIGS.map((link) => {
               const Icon = link.icon;
-              const isActive = pathname === link.href;
+              const isActive = isActiveRoute(pathname, link.path);
               return (
                 <PrefetchLink
-                  key={link.href}
-                  href={link.href}
+                  key={link.path}
+                  href={link.path}
                   onClick={closeMobile}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                     isActive
@@ -560,7 +542,7 @@ const Navbar = () => {
                       : "text-[var(--text-muted)] hover:text-[var(--foreground)]"
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  {Icon && <Icon className="w-4 h-4" />}
                   {link.label}
                 </PrefetchLink>
               );
