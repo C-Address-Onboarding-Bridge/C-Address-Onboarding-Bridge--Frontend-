@@ -137,18 +137,23 @@ export function isSupportedNetwork(state: WalletNetworkState): state is AppNetwo
 // configured explicitly; getSorobanRpcServer throws a clear error if it's
 // unset rather than resolving to a non-existent hostname. TESTNET defaults to
 // the official SDF endpoint but can still be overridden per-environment.
-export const SOROBAN_RPC_URL = {
+// Soroban RPC endpoints can be overridden via NEXT_PUBLIC_SOROBAN_RPC_URL_PUBLIC /
+// NEXT_PUBLIC_SOROBAN_RPC_URL_TESTNET. Plain http:// endpoints (e.g. local quickstart
+// on http://localhost:8000) are supported via allowHttp in getSorobanRpcServer. (#689, #1104)
+export const SOROBAN_RPC_URL: { PUBLIC: string; TESTNET: string } = {
   PUBLIC: process.env.NEXT_PUBLIC_SOROBAN_RPC_URL_PUBLIC ?? "",
   TESTNET: process.env.NEXT_PUBLIC_SOROBAN_RPC_URL_TESTNET ?? "https://soroban-testnet.stellar.org",
-} as const;
+};
 
 // Horizon endpoints default to SDF's public hosts but can be overridden per
 // environment via NEXT_PUBLIC_HORIZON_URL_PUBLIC / NEXT_PUBLIC_HORIZON_URL_TESTNET
 // so operators can point the app at their own Horizon instance. (#689)
-export const HORIZON_URL = {
+// Note: plain http:// endpoints (e.g. local stellar/quickstart on http://localhost:8000)
+// are supported via allowHttp in getHorizonServer. (#1104)
+export const HORIZON_URL: { PUBLIC: string; TESTNET: string } = {
   PUBLIC: process.env.NEXT_PUBLIC_HORIZON_URL_PUBLIC ?? "https://horizon.stellar.org",
   TESTNET: process.env.NEXT_PUBLIC_HORIZON_URL_TESTNET ?? "https://horizon-testnet.stellar.org",
-} as const;
+};
 
 // Optional transaction-status service (stellar.ts). When set, its origin must
 // be allowed by the CSP connect-src or status polling is blocked. (#882)
@@ -222,6 +227,6 @@ export const CEX_LIST = [
     supportedNetworks: ["Stellar"],
     minWithdrawal: "15 USDC",
     fee: "0.15 USDC",
-    withdrawalUrl: "https://www.kraken.com/wi
-
-/* … truncated 57 chars — edit only what you need near the top … */
+    withdrawalUrl: "https://www.kraken.com/withdraw",
+  },
+];

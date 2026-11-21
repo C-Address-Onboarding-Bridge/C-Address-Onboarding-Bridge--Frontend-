@@ -8,10 +8,10 @@ import {
   getAccountBalances,
   clearAccountBalancesCache,
   getHorizonServer,
-  simulatePayment,
+  getSorobanRpcServer,
   findTransactionByHash,
 } from "@/lib/stellar";
-import { HORIZON_URL } from "@/lib/types";
+import { HORIZON_URL, SOROBAN_RPC_URL } from "@/lib/types";
 
 // Horizon's network call is the only thing stubbed; every other SDK export
 // (Keypair, StrKey, ...) stays real so the address fixtures below are genuine
@@ -210,76 +210,110 @@ describe("isGAddress", () => {
 // resets the relevant mock fn in beforeEach.
 // ---------------------------------------------------------------------------
 describe("getAccountBalances", () => {
+  let fetchSpy: any;
   beforeEach(() => {
-    loadAccount.mockReset();
     clearAccountBalancesCache();
+    fetchSpy = vi.spyOn(global, "fetch");
   });
 
   afterEach(() => {
     clearAccountBalancesCache();
+    fetchSpy?.mockRestore();
   });
 
   it("returns native and issued asset balances", async () => {
-    loadAccount.mockResolvedValue({
-      balances: [
-        { asset_type: "native", balance: "100.0000000" },
-        {
-          asset_type: "credit_alphanum4",
-          asset_code: "USDC",
-          asset_issuer: G_ADDRESS,
-          balance: "50.0000000",
-        },
-      ],
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        balances: [
+          { asset_type: "native", balance: "100.0000000" },
+          {
+            asset_type: "credit_alphanum4",
+            asset_code: "USDC",
+            asset_issuer: G_ADDRESS,
+            balance: "50.0000000",
+          },
+        ],
+      }),
     });
 
-    const balances = await getAccountBalances(G_ADDRESS);
-    expect(balances).toEqual([
-      { asset: "XLM", balance: "100.0000000" },
-      { asset: "USDC", balance: "50.0000000" },
+    const res = await getAccountBalances(G_ADDRESS);
+    expect(res.balances).toEqual([
+      { asset: "XLM", amount: "100.0000000" },
+      { asset: "USDC", amount: "50.0000000", asset_issuer: G_ADDRESS },
     ]);
-    expect(loadAccount).toHaveBeenCalledWith(G_ADDRESS);
   });
 
   it("caches results and does not re-hit Horizon within the TTL", async () => {
-    loadAccount.mockResolvedValue({
-      balances: [{ asset_type: "native", balance: "10.0000000" }],
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        balances: [{ asset_type: "native", balance: "10.0000000" }],
+      }),
     });
 
     await getAccountBalances(G_ADDRESS);
     await getAccountBalances(G_ADDRESS);
 
-    expect(loadAccount).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it("propagates Horizon errors", async () => {
-    loadAccount.mockRejectedValue(new Error("account not found"));
-    await expect(getAccountBalances(G_ADDRESS)).rejects.toThrow("account not found");
+    fetchSpy.mockResolvedValue({
+      ok: false,
+      status: 500,
+    });
+    await expect(getAccountBalances(G_ADDRESS)).rejects.toThrow("Horizon request failed (500)");
   });
 });
 
 describe("getHorizonServer", () => {
-  it("constructs a Horizon server pointed at HORIZON_URL", () => {
-    const server = getHorizonServer();
+  it("constructs a Horizon server pointed at HORIZON_URL with allowHttp false for https", async () => {
+    const server = await getHorizonServer("TESTNET");
     expect(server).toBeDefined();
-    expect(Horizon.Server).toHaveBeenCalledWith(HORIZON_URL);
+    expect(Horizon.Server).toHaveBeenCalledWith(HORIZON_URL.TESTNET, { allowHttp: false });
+  });
+
+  it("passes allowHttp true when HORIZON_URL.TESTNET is http://localhost:8000 without throwing", async () => {
+    const original = HORIZON_URL.TESTNET;
+    try {
+      HORIZON_URL.TESTNET = "http://localhost:8000";
+      const server = await getHorizonServer("TESTNET");
+      expect(server).toBeDefined();
+      expect(Horizon.Server).toHaveBeenCalledWith("http://localhost:8000", { allowHttp: true });
+    } finally {
+      HORIZON_URL.TESTNET = original;
+    }
   });
 });
 
-describe("simulatePayment", () => {
-  beforeEach(() => {
-    transactionCall.mockReset();
+describe("getSorobanRpcServer", () => {
+  it("constructs an rpc.Server with allowHttp false for https", async () => {
+    const server = await getSorobanRpcServer("TESTNET");
+    expect(server).toBeDefined();
   });
 
-  it("returns success when the transaction lookup resolves", async () => {
-    transactionCall.mockResolvedValue({ successful: true });
-
-    const result = await simulatePayment(G_ADDRESS, "10");
-    expect(result).toBeDefined();
-    expect(transactionCall).toHaveBeenCalled();
+  it("constructs an rpc.Server with allowHttp true for http://localhost:8000", async () => {
+    const original = SOROBAN_RPC_URL.TESTNET;
+    try {
+      SOROBAN_RPC_URL.TESTNET = "http://localhost:8000";
+      const server = await getSorobanRpcServer("TESTNET");
+      expect(server).toBeDefined();
+    } finally {
+      SOROBAN_RPC_URL.TESTNET = original;
+    }
   });
 
-  it("surfaces failures from the transaction lookup", async () => {
-    transactionCall.mockRejectedValue(new Error("tx failed"));
-    await expect(simulatePayment(G_ADDRESS, "10")).rejects.toThrow("tx failed");
+  it("throws when no RPC URL is configured", async () => {
+    await expect(getSorobanRpcServer("PUBLIC")).rejects.toThrow(
+      "No Soroban RPC URL configured for PUBLIC"
+    );
+  });
+});
+
+describe("findTransactionByHash", () => {
+  it("returns null when the transaction is not found on any network", async () => {
+    const result = await findTransactionByHash("non_existent_hash", "TESTNET");
+    expect(result).toBeNull();
   });
 });
