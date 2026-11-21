@@ -7,6 +7,8 @@
         !window.matchMedia("(prefers-color-scheme: light)").matches)
     ) {
       document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
     }
   } catch {}
 })();

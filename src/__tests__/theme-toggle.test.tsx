@@ -366,4 +366,102 @@ describe("ThemeToggle button", () => {
 
     expect(btn.getAttribute("aria-label")).toBe("Switch to dark theme");
   });
+
+  describe("Issue #1119 — system setting and cross-tab storage sync", () => {
+    it("choosing system clears ui:theme and follows matchMedia OS change", async () => {
+      let changeHandler: ((e: { matches: boolean }) => void) | null = null;
+      window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+        matches: true, // prefers light initially
+        media: query,
+        addEventListener: vi.fn((event, handler) => {
+          if (event === "change") changeHandler = handler;
+        }),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+
+      function Consumer() {
+        const { theme, setTheme } = useTheme();
+        return (
+          <div>
+            <span data-testid="current-theme">{theme}</span>
+            <button onClick={() => setTheme("dark")} data-testid="set-dark-btn">
+              Dark
+            </button>
+            <button onClick={() => setTheme("system")} data-testid="set-system-btn">
+              System
+            </button>
+          </div>
+        );
+      }
+
+      await act(async () => {
+        render(
+          <ThemeProvider>
+            <Consumer />
+          </ThemeProvider>
+        );
+      });
+
+      // User first sets explicit dark theme
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("set-dark-btn"));
+      });
+      expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
+      expect(document.documentElement.classList.contains("dark")).toBe(true);
+
+      // Now user switches to system setting
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("set-system-btn"));
+      });
+      expect(localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
+      // Since OS prefers light (matches: true), dark class is removed
+      expect(document.documentElement.classList.contains("dark")).toBe(false);
+
+      // OS preference now flips to dark (matches: false for prefers-color-scheme: light)
+      await act(async () => {
+        changeHandler?.({ matches: false });
+      });
+      expect(document.documentElement.classList.contains("dark")).toBe(true);
+    });
+
+    it("switches theme in response to storage events from other tabs", async () => {
+      function Consumer() {
+        const { theme } = useTheme();
+        return <span data-testid="current-theme">{theme}</span>;
+      }
+
+      await act(async () => {
+        render(
+          <ThemeProvider>
+            <Consumer />
+          </ThemeProvider>
+        );
+      });
+
+      // Other tab toggles to light
+      await act(async () => {
+        window.dispatchEvent(
+          new StorageEvent("storage", {
+            key: THEME_STORAGE_KEY,
+            newValue: "light",
+          })
+        );
+      });
+      expect(document.documentElement.classList.contains("dark")).toBe(false);
+
+      // Other tab toggles to dark
+      await act(async () => {
+        window.dispatchEvent(
+          new StorageEvent("storage", {
+            key: THEME_STORAGE_KEY,
+            newValue: "dark",
+          })
+        );
+      });
+      expect(document.documentElement.classList.contains("dark")).toBe(true);
+    });
+  });
 });
