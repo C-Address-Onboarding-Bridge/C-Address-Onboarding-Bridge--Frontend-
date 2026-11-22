@@ -2,12 +2,9 @@
  * CSV/JSON formatting and date-range validation for the transaction export
  * flow (#470).
  *
- * The CSV builder here intentionally mirrors `buildTransactionsCsv` in
- * `transaction-history.tsx` (same columns, same escaping) rather than
- * importing it — that copy belongs to the half-merged #486 bulk-export
- * scaffold (see the TODO comment in that file, which asks for it to be
- * re-integrated from a specific commit later) and is left untouched so this
- * feature doesn't add a cross-dependency that complicates that re-merge.
+ * Provides `buildTransactionsCsv` (same columns, RFC-compliant escaping)
+ * used both here for transaction exports and shared by `transaction-history.tsx`
+ * for bulk CSV export (#486, #1111).
  */
 import type { BridgeTransactionData } from "./types";
 
