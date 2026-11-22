@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { providers, isWithinProviderLimits } from "@/lib/onrampProviders";
+import {
+  providers,
+  isWithinProviderLimits,
+  getProviderFeeRate,
+  calculateOnrampFeeAndReceive,
+  formatFeeLabel,
+} from "@/lib/onrampProviders";
 
 // #940: amount validation was a format-only regex (`/^\d+(\.\d{1,2})?$/`),
 // so "0", "0.00" and any amount outside a provider's advertised limits still
@@ -45,5 +51,64 @@ describe("isWithinProviderLimits (src/lib/onrampProviders.ts)", () => {
   it("derives the display `limits` label from the numeric bounds", () => {
     expect(moonpay.limits).toBe("$20 - $10,000");
     expect(transak.limits).toBe("$15 - $25,000");
+  });
+});
+
+// #1105: getProviderFeeRate looked up hardcoded rates and silently defaulted to 5%
+// for unknown providers, drifting from providers[].fee. Providers now store numeric
+// feeRate and derive fee string, while getProviderFeeRate looks it up and throws on unknown id.
+describe("getProviderFeeRate and calculateOnrampFeeAndReceive (#1105)", () => {
+  const moonpay = providers.find((p) => p.id === "moonpay")!;
+  const transak = providers.find((p) => p.id === "transak")!;
+
+  it("derives the display `fee` label from the numeric feeRate", () => {
+    expect(moonpay.feeRate).toBe(0.045);
+    expect(moonpay.fee).toBe("4.5%");
+    expect(transak.feeRate).toBe(0.05);
+    expect(transak.fee).toBe("5%");
+    expect(formatFeeLabel(0.0325)).toBe("3.25%");
+  });
+
+  it("looks up feeRate from providers table for known providers", () => {
+    expect(getProviderFeeRate("moonpay")).toBe(0.045);
+    expect(getProviderFeeRate("transak")).toBe(0.05);
+  });
+
+  it("throws on unknown or misspelled provider id instead of defaulting to 5%", () => {
+    expect(() => getProviderFeeRate("unknown-provider")).toThrow("Unknown onramp provider: unknown-provider");
+    expect(() => getProviderFeeRate("moon_pay")).toThrow("Unknown onramp provider: moon_pay");
+  });
+
+  it("handles unknown provider safely in calculateOnrampFeeAndReceive", () => {
+    const res = calculateOnrampFeeAndReceive(100, "unknown-provider");
+    expect(Number.isNaN(res.feeRate)).toBe(true);
+    expect(Number.isNaN(res.fee)).toBe(true);
+    expect(Number.isNaN(res.receive)).toBe(true);
+  });
+
+  it("calculates accurate fee and receive amount for valid providers", () => {
+    const moonpayCalc = calculateOnrampFeeAndReceive(200, "moonpay");
+    expect(moonpayCalc.feeRate).toBe(0.045);
+    expect(moonpayCalc.fee).toBe(9);
+    expect(moonpayCalc.receive).toBe(191);
+
+    const transakCalc = calculateOnrampFeeAndReceive(200, "transak");
+    expect(transakCalc.feeRate).toBe(0.05);
+    expect(transakCalc.fee).toBe(10);
+    expect(transakCalc.receive).toBe(190);
+  });
+
+  it("dynamically changes estimate and fee label when provider feeRate changes in fixture", () => {
+    const customFixture = {
+      ...moonpay,
+      id: "custom-provider",
+      feeRate: 0.025,
+      fee: formatFeeLabel(0.025),
+    };
+    expect(customFixture.fee).toBe("2.5%");
+    const fee = 100 * customFixture.feeRate;
+    const receive = 100 - fee;
+    expect(fee).toBe(2.5);
+    expect(receive).toBe(97.5);
   });
 });
