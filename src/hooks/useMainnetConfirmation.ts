@@ -32,11 +32,39 @@ export function useMainnetConfirmation(
   recentlyChangedNetwork: boolean
 ): MainnetConfirmation {
   const [acknowledgedSwitch, setAcknowledgedSwitch] = useState(false);
+  const [prevRecent, setPrevRecent] = useState(recentlyChangedNetwork);
+  const [prevNetwork, setPrevNetwork] = useState(network);
+
+  // Reset acknowledgedSwitch whenever a new network change is detected:
+  // when recentlyChangedNetwork transitions from false -> true, or when the
+  // network itself changes (#1107).
+  if (recentlyChangedNetwork !== prevRecent || network !== prevNetwork) {
+    const isNewRecentSwitch = !prevRecent && recentlyChangedNetwork;
+    const isNetworkChange = network !== prevNetwork;
+    setPrevRecent(recentlyChangedNetwork);
+    setPrevNetwork(network);
+    if (isNewRecentSwitch || isNetworkChange) {
+      setAcknowledgedSwitch(false);
+    }
+  }
+
   const [prompt, setPrompt] = useState<MainnetConfirmationReason | null>(null);
   const pending = useRef<{
     reason: MainnetConfirmationReason;
     resolve: (confirmed: boolean) => void;
   } | null>(null);
+
+  const prevProps = useRef({ network, recentlyChangedNetwork });
+  useEffect(() => {
+    const prev = prevProps.current;
+    if (
+      (!prev.recentlyChangedNetwork && recentlyChangedNetwork) ||
+      prev.network !== network
+    ) {
+      setAcknowledgedSwitch(false);
+    }
+    prevProps.current = { network, recentlyChangedNetwork };
+  }, [network, recentlyChangedNetwork]);
 
   // An unanswered prompt counts as a cancel if the page goes away. The ref
   // is read at cleanup on purpose: it holds whichever prompt is pending then.

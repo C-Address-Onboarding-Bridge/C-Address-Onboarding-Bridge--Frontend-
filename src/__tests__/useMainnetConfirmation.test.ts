@@ -106,4 +106,60 @@ describe("useMainnetConfirmation (#759)", () => {
     await expect(second).resolves.toBe(false);
     expect(hasConfirmedMainnetThisSession()).toBe(false);
   });
+
+  it("warns again on a second network switch after the first was acknowledged (#1107)", async () => {
+    const { result, rerender } = setup("PUBLIC");
+    let pending!: Promise<boolean>;
+
+    // First switch to mainnet
+    rerender({ net: "PUBLIC", recent: true });
+    act(() => {
+      pending = result.current.request();
+    });
+    expect(result.current.prompt).toBe("network_switch");
+    act(() => result.current.answer(true));
+    await expect(pending).resolves.toBe(true);
+
+    // Switch acknowledged: same switch does not prompt again
+    await expect(result.current.request()).resolves.toBe(true);
+    expect(result.current.prompt).toBeNull();
+
+    // User switches away or recent flag clears
+    rerender({ net: "TESTNET", recent: false });
+    await expect(result.current.request()).resolves.toBe(true);
+
+    // User switches back to Mainnet
+    rerender({ net: "PUBLIC", recent: true });
+    act(() => {
+      pending = result.current.request();
+    });
+    expect(result.current.prompt).toBe("network_switch");
+    act(() => result.current.answer(true));
+    await expect(pending).resolves.toBe(true);
+  });
+
+  it("resets acknowledged switch when recentlyChangedNetwork toggles false then true (#1107)", async () => {
+    const { result, rerender } = setup("PUBLIC", true);
+    let pending!: Promise<boolean>;
+
+    act(() => {
+      pending = result.current.request();
+    });
+    expect(result.current.prompt).toBe("network_switch");
+    act(() => result.current.answer(true));
+    await expect(pending).resolves.toBe(true);
+
+    // recent flag clears after duration
+    rerender({ net: "PUBLIC", recent: false });
+    await expect(result.current.request()).resolves.toBe(true);
+
+    // Later another network switch occurs
+    rerender({ net: "PUBLIC", recent: true });
+    act(() => {
+      pending = result.current.request();
+    });
+    expect(result.current.prompt).toBe("network_switch");
+    act(() => result.current.answer(true));
+    await expect(pending).resolves.toBe(true);
+  });
 });
