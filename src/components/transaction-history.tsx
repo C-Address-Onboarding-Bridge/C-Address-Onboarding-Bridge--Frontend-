@@ -1,5 +1,5 @@
 import React, { memo, useMemo, useState, useEffect, useRef } from "react";
-import { ArrowLeftRight, CreditCard, Building2, ExternalLink, Loader2, Copy, Check, X, Search } from "lucide-react";
+import { ArrowLeftRight, CreditCard, Building2, ExternalLink, Copy, Check, X, Search } from "lucide-react";
 import type { BridgeTransactionData, BridgeTransactionStatus } from "@/lib/types";
 import { getExplorerUrl } from "@/lib/stellar";
 import type { StellarNetwork } from "@/lib/types";
@@ -7,6 +7,9 @@ import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { useDelayedLoading } from "@/hooks/useDelayedLoading";
 import LiveRegion from "@/components/live-region";
 import TransactionExportControl from "@/components/transaction-export";
+import { buildTransactionsCsv } from "@/lib/transactionExport";
+
+export { buildTransactionsCsv };
 
 /** Placeholder rows shown while `useDelayedLoading` gates the skeleton's visibility. */
 const SKELETON_ROW_COUNT = 3;
@@ -28,7 +31,7 @@ const statusConfig: Record<string, { label: string; color: string }> = {
   failed: { label: "Failed", color: "text-[var(--error)]" },
 };
 
-const STATUS_FILTERS: Array<{ value: "all" | BridgeTransactionStatus; label: string }> = [
+const _STATUS_FILTERS: Array<{ value: "all" | BridgeTransactionStatus; label: string }> = [
   { value: "all", label: "All statuses" },
   { value: "pending", label: "Pending" },
   { value: "confirmed", label: "Confirmed" },
@@ -46,30 +49,6 @@ const STATUS_FILTERS: Array<{ value: "all" | BridgeTransactionStatus; label: str
  */
 function isClaimEligible(tx: BridgeTransactionData): boolean {
   return tx.type === "g-to-c" && tx.status === "confirmed";
-}
-
-/** Minimal CSV escaping: quote any field containing a comma, quote or newline. */
-function csvField(value: string): string {
-  if (/[",\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
-  return value;
-}
-
-/** Builds CSV text for a bulk export. Exported for direct unit testing. */
-export function buildTransactionsCsv(transactions: BridgeTransactionData[]): string {
-  const header = ["id", "type", "status", "amount", "asset", "toAddress", "hash", "timestamp"];
-  const rows = transactions.map((tx) =>
-    [
-      tx.id,
-      tx.type,
-      tx.status,
-      tx.amount,
-      tx.asset,
-      tx.toAddress,
-      tx.hash ?? "",
-      new Date(tx.timestamp).toISOString(),
-    ].map((v) => csvField(String(v)))
-  );
-  return [header.join(","), ...rows.map((r) => r.join(","))].join("\n");
 }
 
 /** Triggers a browser download of the CSV. Swallows environments (older test
@@ -106,11 +85,10 @@ interface Props {
   onClaim?: (ids: string[]) => Promise<void>;
 }
 
-// TODO(next-bounty): the bulk-actions feature (#486) was only half-merged into
-// main -- this component kept the selection UI while the parent's selection
-// state and claim handlers were lost in the merge. The orphaned pieces are
-// commented out below so the rest of the history view (search, filtering,
-// date range) keeps working. Re-integrate from commit 4237d8e.
+// NOTE(#1111): The bulk-actions feature (#486) selection state, select-all,
+// bulk CSV export, and claim confirmation modal are fully integrated. The bulk
+// Claim button remains hidden when onClaim is omitted; wiring onClaim to the
+// real timelocked lock-claim API is tracked in #919.
 const TransactionItem = memo(function TransactionItem({
   tx,
   network,
