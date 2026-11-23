@@ -31,11 +31,48 @@ describe("Route metadata has its own canonical and no example.com (#942)", () =>
     expect(JSON.stringify(onrampMetadata)).not.toContain("example.com");
   });
 
-  it("confirm/[hash] layout: canonical is /confirm/<hash>, not inherited from root", async () => {
+  it("confirm/[hash] layout: canonical is /confirm/<hash>?network=..., not inherited from root", async () => {
     const hash = "a".repeat(64);
-    const meta = await confirmGenerateMetadata({ params: Promise.resolve({ hash }) });
-    expect(meta.alternates?.canonical).toBe(`/confirm/${hash}`);
+    const meta = await confirmGenerateMetadata({
+      params: Promise.resolve({ hash }),
+      searchParams: Promise.resolve({}),
+    });
+    expect(meta.alternates?.canonical).toBe(`/confirm/${hash}?network=TESTNET`);
     expect(JSON.stringify(meta)).not.toContain("example.com");
+  });
+
+  it("confirm/[hash] layout: mainnet canonical and og:url keep ?network=PUBLIC (#1016)", async () => {
+    const hash = "b".repeat(64);
+    const meta = await confirmGenerateMetadata({
+      params: Promise.resolve({ hash }),
+      searchParams: Promise.resolve({ network: "PUBLIC" }),
+    });
+    expect(meta.alternates?.canonical).toBe(`/confirm/${hash}?network=PUBLIC`);
+    expect(meta.openGraph?.url).toBe(`/confirm/${hash}?network=PUBLIC`);
+  });
+
+  it("confirm/[hash] layout: invalid hash is noindex (#1016)", async () => {
+    const meta = await confirmGenerateMetadata({
+      params: Promise.resolve({ hash: "not-a-hash" }),
+      searchParams: Promise.resolve({}),
+    });
+    expect(meta.robots).toMatchObject({ index: false, follow: false });
+    expect(meta.alternates?.canonical).toBeNull();
+  });
+
+  it("transactions/[hash], receipt/[hash] and widget layouts are noindex with no canonical (#1016)", async () => {
+    const { metadata: transactionMetadata } = await import(
+      "@/app/transactions/[hash]/layout"
+    );
+    const { metadata: receiptMetadata } = await import(
+      "@/app/receipt/[hash]/layout"
+    );
+    const { metadata: widgetMetadata } = await import("@/app/widget/layout");
+
+    for (const meta of [transactionMetadata, receiptMetadata, widgetMetadata]) {
+      expect(meta.robots).toMatchObject({ index: false, follow: false });
+      expect(meta.alternates?.canonical).toBeNull();
+    }
   });
 
   it("root layout source sets metadataBase from NEXT_PUBLIC_SITE_URL and uses only relative URLs", () => {
