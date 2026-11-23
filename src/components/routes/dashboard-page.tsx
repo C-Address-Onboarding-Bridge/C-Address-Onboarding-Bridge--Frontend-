@@ -274,8 +274,12 @@ export function AnalyticsSection({ transactions }: { transactions: BridgeTransac
 export default function DashboardPage() {
   const { isConnected, address, network, networkStatus, walletNetworkName, isNetworkSupported, connect } = useWallet();
   const { status: copyStatus, copy: copyToClipboard } = useCopyToClipboard();
-  const [balance, setBalance] = useState<string | null>(null);
-  const [transactions, setTransactions] = useState<BridgeTransactionData[]>([]);
+  // Fetched chain data is tagged with the `${address}:${network}` key it was
+  // fetched for, so a failed fetch after an account/network switch can never
+  // render the previous account's balance or transactions. (#1042)
+  const dataKey = address ? `${address}:${network}` : null;
+  const [balance, setBalance] = useState<{ key: string; value: string } | null>(null);
+  const [transactions, setTransactions] = useState<{ key: string; value: BridgeTransactionData[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [faucetLoading, setFaucetLoading] = useState(false);
@@ -295,6 +299,7 @@ export default function DashboardPage() {
     // re-ran (e.g. a rapid network switch). Without this, a slow response
     // for the previous network could overwrite fresh data for the current one.
     let cancelled = false;
+    const fetchKey = `${address}:${network}`;
     // isInitial distinguishes the first load from background poll ticks.
     // We only show the loading spinner on the initial fetch so that the UI
     // does not flash back to a skeleton state on every 30-second poll. (#292)
@@ -307,7 +312,7 @@ export default function DashboardPage() {
       // stuck instead of showing 0 XLM / 0 transactions. getFeeTierPreview
       // never throws (it resolves null on any failure). (#653)
       getFeeTierPreview(address, network).then((tierResult) => {
-        if (!cancelled) setFeeTierStatus(tierResult);
+        if (!cancelled) setFeeTierStatus({ key: fetchKey, value: tierResult });
       });
       try {
         // Fetches enough history to cover the longest selectable analytics
@@ -321,10 +326,14 @@ export default function DashboardPage() {
           fetchTransactionsForRange(address, network, 90),
         ]);
         if (cancelled) return;
-        setBalance(balResult.total);
+        setBalance({ key: fetchKey, value: balResult.total });
         // Reuse the previous reference when nothing changed so React bails out
         // of re-rendering the memoized transaction list.
-        setTransactions((prev) => (areTransactionsEqual(prev, txResult) ? prev : txResult));
+        setTransactions((prev) =>
+          prev && prev.key === fetchKey && areTransactionsEqual(prev.value, txResult)
+            ? prev
+            : { key: fetchKey, value: txResult },
+        );
       } catch (e: unknown) {
         if (cancelled) return;
         setError(toSafeErrorMessage(e, "Failed to fetch data. Please try again."));
