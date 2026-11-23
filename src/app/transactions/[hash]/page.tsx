@@ -65,7 +65,9 @@ export default function TransactionDetailPage({
   const hydrated = useHydrated();
   const [transportOverride, setTransportOverride] = useState<"polling" | null>(null);
   const liveTransport = transportOverride ?? (hydrated && typeof EventSource === "undefined" ? "polling" : "sse");
-  const requestKey = `${hash}:${linkNetwork ?? walletNetwork}:${tick}`;
+  // The tick is deliberately not part of the request key: a background refresh
+  // must keep the last details rendered instead of blanking to the spinner. (#1005)
+  const requestKey = `${hash}:${linkNetwork ?? walletNetwork}`;
   const currentLoadState = loadedRequestKey === requestKey ? loadState : "loading";
 
   useEffect(() => {
@@ -90,16 +92,18 @@ export default function TransactionDetailPage({
 
   // A well-formed hash that Horizon hasn't ingested yet is still in flight —
   // keep polling until it lands or the user leaves, but only when SSE is unavailable. (#474)
+  // Gated on the polling transport so it never runs alongside a live SSE stream. (#1005)
   useEffect(() => {
+    if (liveTransport !== "polling") return;
     if (currentLoadState !== "found" || details?.status !== "pending") return;
     const timer = setTimeout(() => setTick((t) => t + 1), IN_FLIGHT_POLL_MS);
     return () => clearTimeout(timer);
-  }, [currentLoadState, details?.status, tick]);
+  }, [liveTransport, currentLoadState, details?.status, tick]);
 
   // Live status via the SSE stream (#471). The subscription closes itself on a
   // terminal state, falls back to polling when SSE is unavailable/failing, and
-  // pauses while the tab is hidden. The tick poll above stays as a safety net
-  // that also refreshes the full record while the tx is in flight.
+  // pauses while the tab is hidden. Its terminal-state tick is the single
+  // refresh while SSE is live; the 5 s poll only runs on the polling transport.
   useEffect(() => {
     if (details?.status !== "pending") return;
     const subscription = subscribeToTransactionStatus({
