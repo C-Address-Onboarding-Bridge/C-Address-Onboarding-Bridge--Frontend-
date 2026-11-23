@@ -13,6 +13,7 @@
  * threading it through request headers.
  */
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { TelemetryProvider } from "@/contexts/TelemetryContext";
 import { WalletProvider } from "@/components/wallet-provider";
 import { HelpProvider } from "@/contexts/HelpContext";
@@ -25,9 +26,25 @@ import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
 import { OfflineBanner } from "@/components/offline-banner";
 import { ReauthGate } from "@/components/reauth-gate";
 import { ReferralCapture } from "@/components/referral-capture";
+import { isReauthRequired } from "@/lib/inactivityTimeout";
 
 export function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  // While re-auth is required the ReauthGate dialog owns the page: the rest
+  // of the app is marked inert so nothing behind it is focusable or
+  // clickable. (#1027)
+  const [reauthRequired, setReauthRequired] = useState(false);
+
+  useEffect(() => {
+    const sync = () => setReauthRequired(isReauthRequired());
+    sync();
+    const interval = window.setInterval(sync, 1000);
+    window.addEventListener("focus", sync);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", sync);
+    };
+  }, []);
 
   if (pathname?.startsWith("/widget")) {
     return <>{children}</>;
