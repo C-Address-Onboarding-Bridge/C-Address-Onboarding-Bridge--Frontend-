@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { HelpCenter } from '@/components/HelpCenter';
+import { useLocale } from '@/contexts/LocaleContext';
 
 interface HelpContextType {
   openHelp: () => void;
@@ -10,7 +11,8 @@ interface HelpContextType {
 
 const HelpContext = createContext<HelpContextType | null>(null);
 
-export function HelpProvider({ children, locale }: { children: ReactNode; locale?: string }) {
+export function HelpProvider({ children }: { children: ReactNode }) {
+  const { locale } = useLocale();
   const [isOpen, setIsOpen] = useState(false);
   const openHelp = useCallback(() => setIsOpen(true), []);
   const closeHelp = useCallback(() => setIsOpen(false), []);
@@ -38,7 +40,7 @@ export function HelpProvider({ children, locale }: { children: ReactNode; locale
   return (
     <HelpContext.Provider value={{ openHelp, closeHelp }}>
       {children}
-      <HelpCenter isOpen={isOpen} onClose={closeHelp} locale={(locale as 'en' | 'es' | 'fr' | 'pt') || 'en'} />
+      <HelpCenter isOpen={isOpen} onClose={closeHelp} locale={locale} />
     </HelpContext.Provider>
   );
 }
