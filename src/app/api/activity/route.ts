@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { StrKey } from "@stellar/stellar-sdk";
-import { isCAddress } from "@/lib/stellar";
+import { Asset, Networks, StrKey } from "@stellar/stellar-sdk";
+import { CANONICAL_ISSUERS, isCAddress } from "@/lib/stellar";
+import type { StellarNetwork } from "@/lib/types";
 import { truncateAddress, type FundingActivityEvent } from "@/lib/activityFeed";
 
 /**
@@ -76,21 +77,73 @@ function decodeTopicAddress(raw: unknown): string | null {
   return null;
 }
 
-/** Maps contract addresses to human-readable asset names. */
-function mapAssetToName(assetAddress: string): string {
-  const usdcContract = process.env.NEXT_PUBLIC_USDC_CONTRACT_ID;
-  if (usdcContract && assetAddress === usdcContract) {
-    return "USDC";
-  }
-  return "XLM";
+const NETWORK_PASSPHRASE: Record<StellarNetwork, string> = {
+  PUBLIC: Networks.PUBLIC,
+  TESTNET: Networks.TESTNET,
+};
+
+/**
+ * The network the indexer is indexing. Server-side only (no `NEXT_PUBLIC_`):
+ * the indexer URL itself is server-side, so the network it serves must be too.
+ * Defaults to TESTNET, matching the rest of the app's defaults.
+ */
+function getIndexerNetwork(): StellarNetwork {
+  return process.env.INDEXER_NETWORK === "PUBLIC" ? "PUBLIC" : "TESTNET";
 }
 
-/** Formats a Soroban i128 amount (stroops) to a decimal string. */
-function formatSorobanAmount(stroops: number): string {
-  const decimals = 7;
-  const divisor = Math.pow(10, decimals);
-  const decimal = stroops / divisor;
-  return decimal.toFixed(7).replace(/\.?0+$/, "");
+/**
+ * Known Stellar Asset Contract IDs per network, keyed by asset code. Native
+ * XLM's SAC ID is derived from the network passphrase; USDC's from Circle's
+ * canonical issuer for that network (see CANONICAL_ISSUERS).
+ */
+function knownSacIds(network: StellarNetwork): Record<string, string> {
+  const ids: Record<string, string> = {
+    XLM: Asset.native().contractId(NETWORK_PASSPHRASE[network]),
+  };
+  const usdcIssuer = CANONICAL_ISSUERS.USDC[network];
+  if (usdcIssuer) {
+    ids.USDC = new Asset("USDC", usdcIssuer).contractId(NETWORK_PASSPHRASE[network]);
+  }
+  return ids;
+}
+
+/**
+ * Maps a contract address to a human-readable asset name. Unknown contracts
+ * fall back to a truncated ID rather than being mislabelled as XLM (#1008).
+ */
+function mapAssetToName(assetAddress: string, network: StellarNetwork): string {
+  for (const [code, sacId] of Object.entries(knownSacIds(network))) {
+    if (assetAddress === sacId) return code;
+  }
+  return truncateAddress(assetAddress);
+}
+
+/**
+ * Formats a Soroban i128 amount (stroops) to a decimal string using BigInt
+ * math, so values beyond Number.MAX_SAFE_INTEGER stay exact (#1008).
+ */
+function formatSorobanAmount(stroops: bigint): string {
+  const DECIMALS = 7n;
+  const divisor = 10n ** DECIMALS;
+  const whole = stroops / divisor;
+  const fraction = (stroops % divisor).toString().padStart(Number(DECIMALS), "0");
+  const trimmed = fraction.replace(/0+$/, "");
+  return trimmed ? `${whole}.${trimmed}` : whole.toString();
+}
+
+/** Parses an i128 amount that may arrive as a string, bigint or number. */
+function parseAmount(raw: unknown): bigint | null {
+  if (typeof raw === "bigint") return raw > 0n ? raw : null;
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    return BigInt(Math.trunc(raw));
+  }
+  if (typeof raw === "string") {
+    if (!/^\d+$/.test(raw)) return null;
+    const value = BigInt(raw);
+    return value > 0n ? value : null;
+  }
+  return null;
 }
 
 /**
@@ -126,7 +179,8 @@ function mapCAddressFunded(event: IndexedEvent): FundingActivityEvent | null {
   if (!assetAddress) return null;
 
   const rawAmount = Array.isArray(data.value) ? data.value[0] : data.value;
-  if (typeof rawAmount !== "number" || !Number.isFinite(rawAmount) || rawAmount <= 0) return null;
+  const amount = parseAmount(rawAmount);
+  if (amount === null) return null;
 
   const timestampMs = Date.parse(event.timestamp);
   if (!Number.isFinite(timestampMs)) return null;
@@ -134,8 +188,8 @@ function mapCAddressFunded(event: IndexedEvent): FundingActivityEvent | null {
   return {
     id: event.id,
     address: truncateAddress(target),
-    amount: formatSorobanAmount(rawAmount),
-    asset: mapAssetToName(assetAddress),
+    amount: formatSorobanAmount(amount),
+    asset: mapAssetToName(assetAddress, getIndexerNetwork()),
     timestamp: timestampMs,
   };
 }
