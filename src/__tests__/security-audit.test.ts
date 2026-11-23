@@ -242,6 +242,7 @@ describe("Content-Security-Policy (src/proxy.ts)", () => {
 
   it.each([
     ["X-Frame-Options", "DENY"],
+    ["X-Content-Type-Options", "nosniff"],
     ["Referrer-Policy", "strict-origin-when-cross-origin"],
     ["Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()"],
   ])("sends %s", (key, value) => {
@@ -252,6 +253,44 @@ describe("Content-Security-Policy (src/proxy.ts)", () => {
       expect(strict, "strict header entry not found").toBeTruthy();
       expect(strict!.headers).toContainEqual({ key, value });
     });
+  });
+
+  it("sends X-Content-Type-Options: nosniff on the widget route too", async () => {
+    const entries = await nextConfigModule.headers!();
+    const widgetEntries = entries.filter((entry) => entry.source.startsWith("/widget"));
+    expect(widgetEntries).toHaveLength(2);
+    for (const entry of widgetEntries) {
+      expect(entry.headers).toContainEqual({
+        key: "X-Content-Type-Options",
+        value: "nosniff",
+      });
+    }
+  });
+
+  it("sends Strict-Transport-Security in production only", async () => {
+    const original = process.env.NODE_ENV;
+    const hsts = {
+      key: "Strict-Transport-Security",
+      value: "max-age=63072000; includeSubDomains",
+    };
+    try {
+      process.env.NODE_ENV = "production";
+      const prodEntries = await nextConfigModule.headers!();
+      expect(prodEntries.length).toBeGreaterThan(0);
+      for (const entry of prodEntries) {
+        expect(entry.headers).toContainEqual(hsts);
+      }
+
+      process.env.NODE_ENV = "development";
+      const devEntries = await nextConfigModule.headers!();
+      for (const entry of devEntries) {
+        expect(entry.headers).not.toContainEqual(
+          expect.objectContaining({ key: "Strict-Transport-Security" }),
+        );
+      }
+    } finally {
+      process.env.NODE_ENV = original;
+    }
   });
 
   it("applies the header set to every route except the embeddable widget", async () => {
