@@ -73,12 +73,21 @@ describe("CSP connect-src (issue #700)", () => {
 });
 
 describe("CSP framing for /widget (issue #699)", () => {
-  it("widget policy allows framing and keeps other directives", () => {
+  it("widget policy denies framing when no embedder is registered", () => {
     const csp = buildWidgetCsp({});
-    expect(csp).toContain("frame-ancestors *");
-    expect(csp).not.toContain("frame-ancestors 'none'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).not.toContain("frame-ancestors *");
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("base-uri 'self'");
+  });
+
+  it("widget policy allows only the registered embedder origins", () => {
+    const csp = buildWidgetCsp({
+      NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS: "https://host.example, https://other.example",
+    });
+    expect(csp).toContain("frame-ancestors https://host.example https://other.example");
+    expect(csp).not.toContain("frame-ancestors 'none'");
+    expect(csp).not.toContain("frame-ancestors *");
   });
 
   it("selects the widget policy only for /widget paths", () => {
@@ -92,7 +101,7 @@ describe("CSP framing for /widget (issue #699)", () => {
     const app = proxy(new NextRequest("http://localhost/"));
     const widget = proxy(new NextRequest("http://localhost/widget"));
     expect(app.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
-    expect(widget.headers.get("Content-Security-Policy")).toContain("frame-ancestors *");
+    expect(widget.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
   });
 });
 
@@ -109,6 +118,19 @@ describe("CSP nonce (issue #876)", () => {
       /'nonce-([^']+)'/.exec(r.headers.get("Content-Security-Policy") ?? "")?.[1];
     expect(nonce(a)).toBeTruthy();
     expect(nonce(a)).not.toBe(nonce(b));
+  });
+
+  it("forwards the same CSP on the request headers as on the response (#1020)", () => {
+    const res = proxy(new NextRequest("http://localhost/"));
+    const responseCsp = res.headers.get("Content-Security-Policy");
+    const forwarded = res.headers.get("x-middleware-request-content-security-policy");
+    const overrides = res.headers.get("x-middleware-override-headers") ?? "";
+    expect(forwarded).toBe(responseCsp);
+    expect(overrides.split(",")).toContain("content-security-policy");
+    expect(overrides.split(",")).toContain("x-nonce");
+    const nonce = /'nonce-([^']+)'/.exec(responseCsp ?? "")?.[1];
+    expect(nonce).toBeTruthy();
+    expect(forwarded).toContain(`'nonce-${nonce}'`);
   });
 });
 

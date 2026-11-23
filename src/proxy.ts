@@ -133,16 +133,20 @@ export function proxy(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set(NONCE_HEADER_NAME, nonce);
 
+  const csp = isWidgetPath(request.nextUrl.pathname)
+    ? buildWidgetCsp(process.env, nonce)
+    : buildCsp(process.env, nonce);
+
+  // Next.js reads the CSP from the *request* headers to nonce its own inline
+  // RSC/bootstrap scripts under 'strict-dynamic' (#1020). It must be the exact
+  // same string as the response header, otherwise the nonce won't match.
+  requestHeaders.set(CSP_HEADER_NAME, csp);
+
   const response = NextResponse.next({
     request: { headers: requestHeaders },
   });
 
-  response.headers.set(
-    CSP_HEADER_NAME,
-    isWidgetPath(request.nextUrl.pathname)
-      ? buildWidgetCsp(process.env, nonce)
-      : buildCsp(process.env, nonce),
-  );
+  response.headers.set(CSP_HEADER_NAME, csp);
 
   return response;
 }
