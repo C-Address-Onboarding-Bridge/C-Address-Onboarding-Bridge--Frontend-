@@ -15,23 +15,31 @@ import { useInactivityTimeout } from "@/hooks/useInactivityTimeout";
 import { clearReauthRequired } from "@/lib/inactivityTimeout";
 
 export function ReauthGate() {
-  const { isConnected, connect } = useWallet();
+  const { isConnected, address, connect } = useWallet();
   const { inactivityState, extend } = useInactivityTimeout();
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
 
   const handleReconfirm = useCallback(async () => {
     setIsReconnecting(true);
+    setCancelled(false);
     try {
       // Require an explicit wallet re-confirmation before clearing the
       // flag - a reload or background timer must never clear it on its
       // own (that's the bug this component exists to close).
-      await connect();
+      const confirmedAddress = await connect();
+      // A dismissed wallet modal (null) is not a re-confirmation: keep the
+      // gate open and the flag in place. (#1026)
+      if (!confirmedAddress || (address && confirmedAddress !== address)) {
+        setCancelled(true);
+        return;
+      }
       clearReauthRequired();
       extend();
     } finally {
       setIsReconnecting(false);
     }
-  }, [connect, extend]);
+  }, [address, connect, extend]);
 
   if (!isConnected || !inactivityState?.reauthRequired) {
     return null;
@@ -60,6 +68,11 @@ export function ReauthGate() {
         >
           {isReconnecting ? "Reconnecting..." : "Reconnect wallet"}
         </button>
+        {cancelled && (
+          <p role="status" className="mt-3 text-sm text-[var(--text-muted)]">
+            Re-confirmation cancelled
+          </p>
+        )}
       </div>
     </div>
   );
