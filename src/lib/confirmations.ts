@@ -61,7 +61,7 @@ export function isValidHash(hash: string): boolean {
 export function getConfirmationUrl(
   hash: string,
   network: StellarNetwork,
-  baseUrl: string = "https://c-address-bridge.example.com"
+  baseUrl: string = process.env.NEXT_PUBLIC_SITE_URL ?? ""
 ): string {
   return `${baseUrl}/confirm/${hash}?network=${network}`;
 }
@@ -77,7 +77,7 @@ export function generateMetadata(confirmation: PublicConfirmation) {
       title,
       description,
       type: "article" as const,
-      url: `https://c-address-bridge.example.com/confirm/${confirmation.hash}`,
+      url: `/confirm/${confirmation.hash}`,
     },
     twitter: {
       card: "summary" as const,

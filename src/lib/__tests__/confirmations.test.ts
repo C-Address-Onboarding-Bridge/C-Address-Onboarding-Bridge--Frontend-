@@ -92,6 +92,19 @@ describe("confirmations", () => {
       expect(getConfirmationUrl(SAMPLE_HASH, "PUBLIC")).toContain("network=PUBLIC");
     });
 
+    it("defaults to NEXT_PUBLIC_SITE_URL instead of a placeholder host (#1015)", () => {
+      const previous = process.env.NEXT_PUBLIC_SITE_URL;
+      process.env.NEXT_PUBLIC_SITE_URL = "https://bridge.example.org";
+      try {
+        expect(getConfirmationUrl(SAMPLE_HASH, "TESTNET")).toBe(
+          `https://bridge.example.org/confirm/${SAMPLE_HASH}?network=TESTNET`
+        );
+      } finally {
+        if (previous === undefined) delete process.env.NEXT_PUBLIC_SITE_URL;
+        else process.env.NEXT_PUBLIC_SITE_URL = previous;
+      }
+    });
+
     it("uses custom base URL", () => {
       const custom = "https://mybridge.com";
       const url = getConfirmationUrl(SAMPLE_HASH, "TESTNET", custom);
@@ -117,6 +130,7 @@ describe("confirmations", () => {
       expect(metadata.title).toContain("USDC");
       expect(metadata.description).toContain(SAMPLE_HASH.slice(0, 8));
       expect(metadata.openGraph?.url).toContain(`/confirm/${SAMPLE_HASH}`);
+      expect(metadata.openGraph?.url).not.toContain("example.com");
       expect(metadata.twitter?.card).toBe("summary");
     });
   });

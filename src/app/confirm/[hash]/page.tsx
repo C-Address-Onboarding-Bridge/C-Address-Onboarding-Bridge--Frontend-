@@ -60,7 +60,13 @@ function ConfirmationPageInner({ params }: ConfirmationPageProps) {
   }, [hash, network]);
 
   const handleCopyLink = () => {
-    const url = getConfirmationUrl(hash, network);
+    // Share the URL of the origin the user is actually on (or the configured
+    // site URL) rather than a hard-coded placeholder host. (#1015)
+    const baseUrl =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : process.env.NEXT_PUBLIC_SITE_URL ?? "";
+    const url = getConfirmationUrl(hash, network, baseUrl);
     copy(url);
   };
 
@@ -74,7 +80,7 @@ function ConfirmationPageInner({ params }: ConfirmationPageProps) {
       await navigator.share({
         title: `Transaction Confirmed: ${confirmation?.amount} ${confirmation?.asset}`,
         text: `Check out my transaction confirmation: ${confirmation?.amount} ${confirmation?.asset}`,
-        url: window.location.href,
+        url: getConfirmationUrl(hash, network, window.location.origin),
       });
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
