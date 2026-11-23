@@ -510,7 +510,7 @@ export async function getFeeTierPreview(
  *
  * Goes through the same-origin proxy route
  * (`src/app/api/backend/referrals/stats/route.ts`), which attaches the
- * backend's X-API-Key server-side and forwards to `GET /referrals/stats`.
+ * backend's X-API-Key server-side and forwards to `GET /api/v1/referrals/stats`.
  * Calling `API_BASE_URL` from the browser would have no key and always fail
  * (#843).
  *

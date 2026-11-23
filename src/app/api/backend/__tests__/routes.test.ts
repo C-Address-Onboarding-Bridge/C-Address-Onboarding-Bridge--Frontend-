@@ -31,39 +31,39 @@ describe("backend proxy route wiring", () => {
     expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/batch-fund");
   });
 
-  it("POST /api/backend/locks -> /locks", async () => {
+  it("POST /api/backend/locks -> /api/v1/fund/timelocked", async () => {
     const { POST } = await import("../locks/route");
     const request = makeRequest("http://localhost/api/backend/locks", "POST");
     await POST(request);
-    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/locks");
+    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/api/v1/fund/timelocked");
   });
 
-  it("GET /api/backend/locks?... -> /locks?... (query string preserved)", async () => {
+  it("GET /api/backend/locks?... -> /api/v1/fund/timelocked?... (query string preserved)", async () => {
     const { GET } = await import("../locks/route");
     const request = makeRequest("http://localhost/api/backend/locks?recipient=G123&network=TESTNET");
     await GET(request);
-    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/locks?recipient=G123&network=TESTNET");
+    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/api/v1/fund/timelocked?recipient=G123&network=TESTNET");
   });
 
-  it("POST /api/backend/locks/:id/claim -> /locks/:id/claim", async () => {
+  it("POST /api/backend/locks/:id/claim -> /api/v1/fund/timelocked/:id/claim", async () => {
     const { POST } = await import("../locks/[id]/claim/route");
     const request = makeRequest("http://localhost/api/backend/locks/lock-1/claim", "POST");
     await POST(request, { params: Promise.resolve({ id: "lock-1" }) });
-    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/locks/lock-1/claim");
+    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/api/v1/fund/timelocked/lock-1/claim");
   });
 
   it("encodes the lock id in the claim route path", async () => {
     const { POST } = await import("../locks/[id]/claim/route");
     const request = makeRequest("http://localhost/api/backend/locks/weird%20id/claim", "POST");
     await POST(request, { params: Promise.resolve({ id: "weird id" }) });
-    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/locks/weird%20id/claim");
+    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/api/v1/fund/timelocked/weird%20id/claim");
   });
 
-  it("GET /api/backend/referrals/stats?... -> /referrals/stats?...", async () => {
+  it("GET /api/backend/referrals/stats?... -> /api/v1/referrals/stats?...", async () => {
     const { GET } = await import("../referrals/stats/route");
     const request = makeRequest("http://localhost/api/backend/referrals/stats?address=G1&network=TESTNET");
     await GET(request);
-    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/referrals/stats?address=G1&network=TESTNET");
+    expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/api/v1/referrals/stats?address=G1&network=TESTNET");
   });
 
   it("GET /api/backend/transactions/export?... -> /transactions/export?...", async () => {
