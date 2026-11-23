@@ -58,6 +58,20 @@ describe("public/aframp-widget.js", () => {
     expect(typeof win.AframpWidget.mount).toBe("function");
   });
 
+  it("matches the script filename and global name documented in its header comment (#1002)", () => {
+    const headerComment = scriptSource.match(/\/\*\*[\s\S]*?\*\//)?.[0] ?? "";
+    const scriptPathMatch = headerComment.match(/<script src="https:\/\/<this-app-origin>(\/[^"]+)"><\/script>/);
+    const globalMountMatch = headerComment.match(/([A-Za-z0-9_$]+)\.mount\(/);
+
+    expect(scriptPathMatch?.[1]).toBe("/aframp-widget.js");
+    expect(globalMountMatch?.[1]).toBeTruthy();
+
+    const documentedGlobal = globalMountMatch![1];
+    const exposed = (win as unknown as Record<string, { mount?: unknown }>)[documentedGlobal];
+    expect(exposed).toBeDefined();
+    expect(typeof exposed.mount).toBe("function");
+  });
+
   describe("buildWidgetUrl", () => {
     it("builds a /widget URL carrying the config and the host's own origin as parentOrigin", () => {
       const url = win.AframpWidget.buildWidgetUrl({

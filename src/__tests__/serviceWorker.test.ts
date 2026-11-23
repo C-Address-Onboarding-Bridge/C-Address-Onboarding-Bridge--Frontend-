@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 import {
   CACHEABLE_EXTENSIONS,
   NEVER_CACHE_ORIGINS,
@@ -219,6 +220,38 @@ describe("public/sw.js stays in sync with the shared constants", () => {
   it("uses the same cache version and prefix", () => {
     expect(swSource).toContain(`const CACHE_VERSION = "${SW_CACHE_VERSION}";`);
     expect(swSource).toContain(`const CACHE_PREFIX = "${SW_CACHE_PREFIX}";`);
+    expect(swSource).not.toContain("Date.now()");
+  });
+
+  it("derives the same CACHE_NAME across repeated worker wake-ups (#998)", () => {
+    function evaluateWorkerCacheName(fakeNow: number): string {
+      const selfObj = {
+        addEventListener: () => {},
+        skipWaiting: () => {},
+        clients: { claim: () => {} },
+        location: { origin: ORIGIN },
+      };
+      const context = vm.createContext({
+        self: selfObj,
+        URL,
+        Date: { now: () => fakeNow },
+        caches: {
+          keys: async () => [],
+          open: async () => ({ keys: async () => [], put: async () => {}, delete: async () => true }),
+          match: async () => undefined,
+          delete: async () => true,
+        },
+        fetch: async () => new Response(),
+      });
+      vm.runInContext(`${swSource}\n;self.__EVALUATED_CACHE_NAME__ = CACHE_NAME;`, context);
+      return (context.self as { __EVALUATED_CACHE_NAME__: string }).__EVALUATED_CACHE_NAME__;
+    }
+
+    const firstWake = evaluateWorkerCacheName(1_700_000_000_000);
+    const secondWake = evaluateWorkerCacheName(1_700_000_060_000);
+
+    expect(firstWake).toBe(SW_CACHE_NAME);
+    expect(secondWake).toBe(firstWake);
   });
 
   it("lists every never-cache origin", () => {

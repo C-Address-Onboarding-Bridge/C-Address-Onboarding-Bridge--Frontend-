@@ -15,6 +15,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AlertCircle, Check, Loader2, Wallet } from "lucide-react";
 import {
+  bridgeViaContract,
   connectWallet,
   getEstimatedFeeXLM,
   getExplorerUrl,
