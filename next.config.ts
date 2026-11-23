@@ -19,7 +19,7 @@ import bundleAnalyzer from "@next/bundle-analyzer";
  *      no longer sent.
  *
  * NOTE (#879): the Content-Security-Policy itself is emitted by
- * `src/middleware.ts`, which needs a per-request nonce and env-driven
+ * `src/proxy.ts`, which needs a per-request nonce and env-driven
  * connect-src. This file only carries the static headers, so there is exactly
  * one CSP on every response.
  */
