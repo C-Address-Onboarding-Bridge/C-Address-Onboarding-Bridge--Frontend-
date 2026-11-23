@@ -84,10 +84,12 @@ export function OnboardingModal({
   };
 
   // Persist progress on every step change so a skip + reopen resumes here.
-  // Writing "completed" on finish is what keeps the flow from auto-reopening.
+  // Writing "completed" on finish is what keeps the flow from auto-reopening,
+  // so never downgrade a stored "completed" value back to a step index. (#1040)
   useEffect(() => {
     if (!hydrated || !storageKey || !isOpen || typeof localStorage === 'undefined') return;
     try {
+      if (localStorage.getItem(storageKey) === 'completed') return;
       localStorage.setItem(storageKey, String(currentStep));
     } catch {
       // Storage unavailable (private mode, quota) — persistence is best-effort.

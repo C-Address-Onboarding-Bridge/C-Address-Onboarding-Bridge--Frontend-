@@ -121,4 +121,21 @@ describe('OnboardingModal', () => {
     expect(screen.getByTestId('step-indicator')).toHaveTextContent('Step 2 of 3');
     expect(localStorage.getItem('onboarding:test-resume')).toBe('1');
   });
+
+  it('does not downgrade a stored "completed" value when reopened and closed (#1040)', () => {
+    localStorage.setItem('onboarding:test-completed', 'completed');
+    const onClose = vi.fn();
+    render(
+      <OnboardingModal
+        {...defaultProps}
+        onClose={onClose}
+        storageKey="onboarding:test-completed"
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId('onboarding-modal'), { key: 'Escape' });
+
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(localStorage.getItem('onboarding:test-completed')).toBe('completed');
+  });
 });
