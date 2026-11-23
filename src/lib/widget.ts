@@ -129,6 +129,12 @@ export function buildFrameAncestorsCsp(allowedOrigins: string[]): string {
  * allowlist AND, when the browser exposes framing info, it agrees with the
  * declaration. A page that merely sets `parentOrigin` in the URL can't pass
  * this check unless it is genuinely the registered embedder.
+ *
+ * `ancestorOrigins` is ordered from the top-level ancestor to the immediate
+ * parent, so `ancestorOrigins[0]` is the immediate parent (the frame that
+ * embeds the widget). When neither `ancestorOrigins` nor `document.referrer`
+ * provides any evidence of the embedder, the check fails closed: this guards
+ * funds-moving UI, so an unverifiable embed is treated as untrusted.
  */
 export function isTrustedParentOrigin(
   parentOrigin: string,
@@ -138,20 +144,26 @@ export function isTrustedParentOrigin(
   if (!allowedOrigins.includes(parentOrigin)) return false;
 
   const ancestors = evidence.ancestorOrigins;
-  if (ancestors && ancestors.length > 0) {
-    // The immediate parent is the last entry in ancestorOrigins.
-    const immediateParent = ancestors[ancestors.length - 1];
+  const hasAncestorEvidence = !!ancestors && ancestors.length > 0;
+  if (hasAncestorEvidence) {
+    // ancestorOrigins is ordered top-level ancestor first, so index 0 is the
+    // immediate parent — the frame that actually embeds the widget.
+    const immediateParent = ancestors[0];
     if (immediateParent && immediateParent !== parentOrigin) return false;
   }
 
   const referrer = evidence.referrer;
-  if (referrer) {
+  const hasReferrerEvidence = !!referrer;
+  if (hasReferrerEvidence) {
     try {
       if (new URL(referrer).origin !== parentOrigin) return false;
     } catch {
       return false;
     }
   }
+
+  // No evidence at all: fail closed for funds-moving UI.
+  if (!hasAncestorEvidence && !hasReferrerEvidence) return false;
 
   return true;
 }
