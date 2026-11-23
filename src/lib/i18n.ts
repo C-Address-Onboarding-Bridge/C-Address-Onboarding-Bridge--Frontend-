@@ -62,7 +62,14 @@ export interface TranslationSet {
   };
   help: {
     title: string;
+    search_label: string;
     search_placeholder: string;
+    c_address_title: string;
+    g_address_title: string;
+    fee_title: string;
+    bridge_title: string;
+    onramp_title: string;
+    cex_title: string;
     c_address_explanation: string;
     g_address_explanation: string;
     fee_explanation: string;
@@ -200,7 +207,14 @@ const translations: Record<Locale, TranslationSet> = {
     },
     help: {
       title: 'Help Centre',
+      search_label: 'Search help articles',
       search_placeholder: 'Search for help...',
+      c_address_title: 'What is a C-address?',
+      g_address_title: 'What is a G-address?',
+      fee_title: 'How do fees work?',
+      bridge_title: 'How does the G → C Bridge work?',
+      onramp_title: 'How does the Fiat Onramp work?',
+      cex_title: 'How do CEX withdrawals work?',
       c_address_explanation: 'A C-address is a Soroban smart account. It starts with C and is 56 characters long. Unlike a G-address, it is a smart contract that can hold assets and execute logic on the Soroban network.',
       g_address_explanation: 'A G-address is a classic Stellar account. It starts with G and is 56 characters long. It is the standard account type on Stellar and can fund C-addresses.',
       fee_explanation: 'Fees are paid in XLM to cover the transaction cost on the Stellar network. Soroban smart contract operations require a small fee to compensate network nodes.',
