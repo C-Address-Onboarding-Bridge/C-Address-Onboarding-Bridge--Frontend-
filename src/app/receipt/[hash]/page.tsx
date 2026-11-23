@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 
 interface ReceiptParty {
   label: string;
@@ -18,8 +18,6 @@ interface Receipt {
   from: ReceiptParty;
   to: ReceiptParty;
   timestamp: string;
-  signature?: string;
-  signatureVerified?: boolean;
 }
 
 function formatAmount(value: string, asset: string): string {
@@ -41,6 +39,8 @@ function formatTimestamp(value: string): string {
 export default function ReceiptPage() {
   const params = useParams<{ hash: string }>();
   const hash = typeof params?.hash === 'string' ? params.hash : '';
+  const searchParams = useSearchParams();
+  const network = searchParams?.get('network') ?? '';
 
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,7 +59,7 @@ export default function ReceiptPage() {
     setNotFound(false);
     setError(null);
 
-    fetch(`/api/receipts/${encodeURIComponent(hash)}`)
+    fetch(`/api/receipts/${encodeURIComponent(hash)}${network ? `?network=${encodeURIComponent(network)}` : ''}`)
       .then(async (response) => {
         if (response.status === 404) {
           if (!cancelled) {
@@ -91,7 +91,7 @@ export default function ReceiptPage() {
     return () => {
       cancelled = true;
     };
-  }, [hash]);
+  }, [hash, network]);
 
   const handleDownload = () => {
     if (typeof window !== 'undefined') {
