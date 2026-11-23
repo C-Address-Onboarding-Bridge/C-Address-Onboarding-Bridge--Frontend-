@@ -291,10 +291,20 @@ export default function BridgePage() {
     };
   }, [address, network, isNetworkSupported, feeTierKey]);
 
-  // Parse funding-link query params (target, amount, asset, network) and pre-fill the form.
-  // If the wallet is on a different network than the link specifies, store the mismatch
-  // so we can warn the user. (#895)
+  // Restore the sessionStorage snapshot after hydration (never in the
+  // useState initialisers, which would break SSR/hydration parity), then let
+  // funding-link params override it. Runs once on mount. (#1012)
   useEffect(() => {
+    const persisted = readPersistedFormState();
+    if (persisted) {
+      setToAddress(persisted.toAddress);
+      setRawAmount(persisted.amount);
+      setAsset(persisted.asset);
+      setStep(persisted.step);
+    }
+    // Parse funding-link query params (target, amount, asset, network) and pre-fill the form.
+    // If the wallet is on a different network than the link specifies, store the mismatch
+    // so we can warn the user. (#895) Funding-link params win over the snapshot.
     if (hasFundingLinkParams(searchParams)) {
       const result = parseFundingLink(searchParams);
       if (result.ok) {
@@ -304,7 +314,21 @@ export default function BridgePage() {
         setFundingLinkNetwork(result.params.network);
       }
     }
-  }, [searchParams]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Mirror the in-progress form into sessionStorage so a mobile wallet
+  // hand-off (app switch / tab reload) doesn't lose it. Only "form" and
+  // "review" are persisted. (#487, #1012)
+  useEffect(() => {
+    if (step !== "form" && step !== "review") return;
+    writePersistedFormState({ toAddress, amount: rawAmount, asset, step });
+  }, [toAddress, rawAmount, asset, step]);
+
+  // A disconnected wallet has no in-progress hand-off to resume. (#1012)
+  useEffect(() => {
+    if (!isConnected) clearPersistedFormState();
+  }, [isConnected]);
 
   // Warn if the wallet is on a different network than the funding link specified.
   const networkMismatch = fundingLinkNetwork && fundingLinkNetwork !== network;
