@@ -1,10 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { getHealthStatus, unreachableHealthStatus, type HealthStatus } from '@/lib/api';
 
-const POLL_INTERVAL = 30_000;
-const INITIAL_DELAY = 2_000;
-const RETAIN_TIME = 5_000;
-
 interface UseHealthStatusOptions {
   pollInterval?: number;
   initialDelay?: number;
@@ -15,19 +11,23 @@ const DEFAULT_POLL_INTERVAL = 30000; // 30 seconds
 const DEFAULT_INITIAL_DELAY = 2000; // Start polling after 2 seconds
 const DEFAULT_RETAIN_TIME = 5000; // Keep degraded status for 5 seconds after recovery
 
-export function useHealthStatus(options: UseHealthStatusOptions = {}) {
+export interface UseHealthStatusResult {
+  /** Latest health snapshot; `null` until the first check completes. */
+  health: HealthStatus | null;
+  isDegraded: boolean;
+  isLoading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+}
+
+export function useHealthStatus(options: UseHealthStatusOptions = {}): UseHealthStatusResult {
   const {
     pollInterval = DEFAULT_POLL_INTERVAL,
     initialDelay = DEFAULT_INITIAL_DELAY,
     retainTime = DEFAULT_RETAIN_TIME,
   } = options;
 
-export function useHealthStatus(
-  pollInterval: number = POLL_INTERVAL,
-  initialDelay: number = INITIAL_DELAY,
-  retainTime: number = RETAIN_TIME,
-): UseHealthStatusResult {
-  const [status, setStatus] = useState<HealthStatus | null>(null);
+  const [health, setHealth] = useState<HealthStatus | null>(null);
   const [isDegraded, setIsDegraded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
