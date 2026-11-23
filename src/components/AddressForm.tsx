@@ -84,10 +84,14 @@ export function AddressForm({
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
-    const result = validateStellarAddress(address);
+    // Trim before validating/submitting (#1035): submitting via Enter never
+    // fires blur, so a trailing space would otherwise reach onSubmit as-is.
+    const trimmed = address.trim();
+    if (trimmed !== address) setAddress(trimmed);
+    const result = validateStellarAddress(trimmed);
     if (result.valid) {
       setError(undefined);
-      onSubmit(address);
+      onSubmit(trimmed);
     } else {
       setError(result.error);
     }

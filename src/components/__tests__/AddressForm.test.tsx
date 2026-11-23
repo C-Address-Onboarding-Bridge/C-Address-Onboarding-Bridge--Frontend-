@@ -128,6 +128,17 @@ describe('AddressForm (#352)', () => {
     fireEvent.blur(input);
     expect(screen.getByTestId('address-confirmation')).toHaveTextContent('GAAAAAAA');
   });
+
+  it('submits the trimmed address when Enter is pressed without blurring (#1035)', () => {
+    const onSubmit = vi.fn();
+    const validAddr = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
+    render(<AddressForm onSubmit={onSubmit} />);
+    const input = screen.getByTestId('address-input');
+    fireEvent.change(input, { target: { value: `${validAddr} ` } });
+    fireEvent.submit(screen.getByTestId('address-form'));
+    expect(onSubmit).toHaveBeenCalledWith(validAddr);
+    expect(input).toHaveValue(validAddr);
+  });
 });
 
 describe('AddressForm — recipient autocomplete (#466)', () => {
