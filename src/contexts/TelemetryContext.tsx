@@ -55,11 +55,8 @@ export function TelemetryProvider({ children }: TelemetryProviderProps) {
     captureEvent,
   };
 
-  // Don't render children until hydrated to avoid hydration mismatch
-  if (!hydrated) {
-    return <>{children}</>;
-  }
-
+  // Always render the provider so the tree shape is stable across hydration.
+  // Only storage-derived values and the consent prompt are gated on `hydrated`.
   return (
     <TelemetryContext.Provider value={value}>
       {children}
