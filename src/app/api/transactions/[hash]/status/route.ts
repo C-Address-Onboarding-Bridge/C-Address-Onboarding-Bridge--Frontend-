@@ -14,6 +14,13 @@ const ALLOWED_NETWORKS: StellarNetwork[] = ["PUBLIC", "TESTNET"];
 const POLL_INTERVAL_MS = 3_000;
 /** Hard cap for a single SSE connection before it closes. */
 const MAX_DURATION_MS = 30_000;
+/** One Stellar ledger close, in ms (~5s). */
+const LEDGER_CLOSE_MS = 5_000;
+/**
+ * How long a hash with no `until` may stay unknown on Horizon before it is
+ * reported as `not_found` instead of `pending` forever. (#1023)
+ */
+const NOT_FOUND_WINDOW_MS = 5 * 60_000;
 
 /** Per-IP rate limit for this public route (#697). */
 const RATE_LIMIT_MAX = 30;
@@ -90,9 +97,21 @@ function isNotFound(error: unknown): boolean {
   );
 }
 
+/**
+ * Resolves the status of a transaction, turning a Horizon 404 into a terminal
+ * state once the transaction can no longer land:
+ *
+ * - with `until` (the tx's maxTime, unix seconds): `expired` once Horizon still
+ *   404s after `until` + one ledger close;
+ * - without `until`: `not_found` once `firstSeenAt` is older than
+ *   NOT_FOUND_WINDOW_MS.
+ *
+ * Otherwise the 404 is still `pending`. (#1023)
+ */
 async function fetchCurrentStatus(
   hash: string,
-  network: StellarNetwork
+  network: StellarNetwork,
+  options: { until?: number | null; firstSeenAt?: number } = {}
 ): Promise<StatusResponse> {
   const server = new Horizon.Server(HORIZON_URL[network]);
   try {
@@ -106,11 +125,28 @@ async function fetchCurrentStatus(
     };
   } catch (error) {
     if (isNotFound(error)) {
+      const now = Date.now();
+      const { until, firstSeenAt = now } = options;
+      if (typeof until === "number" && Number.isFinite(until)) {
+        if (now > until * 1000 + LEDGER_CLOSE_MS) {
+          return { hash, network, status: "expired", ledger: null, createdAt: null };
+        }
+      } else if (now - firstSeenAt >= NOT_FOUND_WINDOW_MS) {
+        return { hash, network, status: "not_found", ledger: null, createdAt: null };
+      }
       // Not on Horizon yet (still in flight).
       return { hash, network, status: "pending", ledger: null, createdAt: null };
     }
     throw error;
   }
+}
+
+/** Parses the optional `?until=<unix seconds>` (the tx's maxTime). */
+function parseUntil(raw: string | null): number | null | undefined {
+  if (raw === null || raw.trim() === "") return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return undefined;
+  return Math.floor(value);
 }
 
 function jsonError(message: string, status: number): Response {
@@ -162,10 +198,15 @@ export async function GET(
   }
   const network: StellarNetwork = (networkParam as StellarNetwork) ?? "TESTNET";
 
+  const until = parseUntil(url.searchParams.get("until"));
+  if (until === undefined) {
+    return jsonError("Invalid until", 400);
+  }
+
   const accept = request.headers.get("accept") ?? "";
   if (!accept.includes("text/event-stream")) {
     try {
-      const payload = await fetchCurrentStatus(hash, network);
+      const payload = await fetchCurrentStatus(hash, network, { until });
       return new Response(JSON.stringify(payload), {
         headers: {
           "Content-Type": "application/json",
