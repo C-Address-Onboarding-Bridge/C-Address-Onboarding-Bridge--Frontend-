@@ -88,13 +88,17 @@ function isStellarNetwork(value: string | null): value is StellarNetwork {
 
 /**
  * Registered embedder origins allowed to frame the widget. Read from the
- * `NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS` env var (comma-separated absolute
+ * server-only `WIDGET_ALLOWED_ORIGINS` env var (comma-separated absolute
  * origins). When unset/empty the allowlist is empty, which means no origin
  * is trusted — the widget refuses to run framed by an unregistered host.
+ *
+ * This is the single source of truth for the allowlist (#1019): the proxy
+ * builds `frame-ancestors` from it and the widget page receives the same
+ * parsed list as a prop from its server layout, so the two can't disagree.
  */
 export function getAllowedEmbedderOrigins(
   raw: string | undefined = typeof process !== "undefined"
-    ? process.env.NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS
+    ? process.env.WIDGET_ALLOWED_ORIGINS
     : undefined
 ): string[] {
   if (!raw) return [];

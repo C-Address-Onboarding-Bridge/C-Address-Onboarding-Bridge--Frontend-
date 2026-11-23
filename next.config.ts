@@ -64,13 +64,14 @@ const securityHeaders = [
 
 /**
  * The embeddable widget (#558) exists specifically to be framed by
- * third-party host pages, so it can't ship the blanket `X-Frame-Options: DENY`
- * above — that would break every embed. There's no "any origin may frame me"
- * value for X-Frame-Options (ALLOW-FROM is deprecated and ignored by current
- * browsers), so it's omitted here rather than set to something misleading; the
- * middleware's `frame-ancestors *` is the actual, modern equivalent. The real
- * security boundary for the widget isn't "who can put us in an iframe" — it's
- * the postMessage origin check in src/lib/widget.ts, since the widget never
+ * registered third-party host pages, so it can't ship the blanket
+ * `X-Frame-Options: DENY` above — that would break every embed. There's no
+ * "these origins may frame me" value for X-Frame-Options (ALLOW-FROM is
+ * deprecated and ignored by current browsers), so it's omitted here rather
+ * than set to something misleading; the middleware's `frame-ancestors`
+ * directive, built from the `WIDGET_ALLOWED_ORIGINS` allowlist, is the
+ * modern equivalent (#1019). The postMessage origin check in
+ * src/lib/widget.ts is the second line of defence, since the widget never
  * trusts a message (or reveals a result) without validating the declared
  * parent origin.
  */
