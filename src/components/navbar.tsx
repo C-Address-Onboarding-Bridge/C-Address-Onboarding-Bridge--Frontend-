@@ -111,6 +111,52 @@ const LanguageSwitcher = memo(function LanguageSwitcher() {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  // Move focus to the selected option when the listbox opens.
+  useEffect(() => {
+    if (!open) return;
+    const index = Math.max(0, SUPPORTED_LOCALES.indexOf(locale));
+    optionRefs.current[index]?.focus();
+  }, [open, locale]);
+
+  const closeAndRestoreFocus = useCallback(() => {
+    setOpen(false);
+    btnRef.current?.focus();
+  }, []);
+
+  const handleListboxKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const count = SUPPORTED_LOCALES.length;
+      const current = optionRefs.current.findIndex(
+        (el) => el === document.activeElement,
+      );
+      const from = current === -1 ? Math.max(0, SUPPORTED_LOCALES.indexOf(locale)) : current;
+      let next: number | null = null;
+      switch (e.key) {
+        case "ArrowDown":
+          next = (from + 1) % count;
+          break;
+        case "ArrowUp":
+          next = (from - 1 + count) % count;
+          break;
+        case "Home":
+          next = 0;
+          break;
+        case "End":
+          next = count - 1;
+          break;
+        case "Tab":
+          setOpen(false);
+          return;
+        default:
+          return;
+      }
+      e.preventDefault();
+      optionRefs.current[next]?.focus();
+    },
+    [locale],
+  );
 
   // Close on outside click.
   useEffect(() => {
@@ -142,8 +188,15 @@ const LanguageSwitcher = memo(function LanguageSwitcher() {
       <button
         ref={btnRef}
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            setOpen(true);
+          }
+        }}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls="language-listbox"
         aria-label={`Language: ${LOCALE_FULL_LABELS[locale]}`}
         title="Change language"
         className="flex items-center gap-1 p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
@@ -154,20 +207,34 @@ const LanguageSwitcher = memo(function LanguageSwitcher() {
 
       {open && (
         <div
+          id="language-listbox"
           role="listbox"
           aria-label="Select language"
+          onKeyDown={handleListboxKeyDown}
           className="absolute right-0 top-full mt-1 w-36 rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-lg z-50 py-1"
         >
-          {SUPPORTED_LOCALES.map((l) => (
+          {SUPPORTED_LOCALES.map((l, i) => (
             <button
               key={l}
+              ref={(el) => {
+                optionRefs.current[i] = el;
+              }}
               role="option"
+              type="button"
+              tabIndex={l === locale ? 0 : -1}
               aria-selected={l === locale}
               onClick={() => {
                 setLocale(l);
-                setOpen(false);
+                closeAndRestoreFocus();
               }}
-              className={`w-full flex items-center justify-between px-3 py-2 text-sm transition-colors hover:bg-[var(--surface-2)] ${
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+                  e.preventDefault();
+                  setLocale(l);
+                  closeAndRestoreFocus();
+                }
+              }}
+              className={`w-full flex items-center justify-between px-3 py-2 text-sm transition-colors hover:bg-[var(--surface-2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--primary)] ${
                 l === locale
                   ? "text-[var(--primary-light)] font-medium"
                   : "text-[var(--text-muted)] hover:text-[var(--foreground)]"
