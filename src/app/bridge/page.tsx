@@ -1004,6 +1004,53 @@ export default function BridgePage() {
 
                 <FeeTierDisplay status={feeTierStatus} amount={Number(amount)} asset={asset} />
 
+                {/* Simulation result from /api/simulate. A real predicted
+                    failure blocks signing; "simulation_unavailable" only warns
+                    and keeps Confirm enabled. (#1013) */}
+                {simulating && (
+                  <div className="p-4 rounded-lg bg-[var(--surface-2)] flex items-center gap-3">
+                    <Loader2 className="w-5 h-5 animate-spin text-[var(--text-muted)] flex-shrink-0" />
+                    <p className="text-sm text-[var(--text-muted)]">Simulating transaction…</p>
+                  </div>
+                )}
+
+                {!simulating && simulation?.ok === true && (
+                  <div className="p-4 rounded-lg bg-[var(--surface-2)] space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-[var(--text-muted)]">Predicted fee</span>
+                      <span className="text-sm font-semibold">{simulation.feeXlm} XLM</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-[var(--text-muted)]">Net amount</span>
+                      <span className="text-sm font-semibold">{simulation.netXlm} XLM</span>
+                    </div>
+                  </div>
+                )}
+
+                {!simulating && simulation?.ok === false && simulation.reason === "simulation_unavailable" && (
+                  <div role="alert" className="p-4 rounded-lg bg-[var(--warning)]/10 border border-[var(--warning)]/20 flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-[var(--warning)] flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-[var(--warning)]">Simulation unavailable</p>
+                      <p className="text-xs text-[var(--text-muted)] mt-1">
+                        {simulation.message ?? "The transaction couldn't be simulated right now. Review the details and try again."}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {!simulating && simulation?.ok === false && simulation.reason !== "simulation_unavailable" && (
+                  <div role="alert" className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-[var(--error)]">Simulation failed</p>
+                      <p className="text-xs text-[var(--text-muted)] mt-1">
+                        {simulation.message ?? "This transaction is predicted to fail."}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {txError && (
                   <div className="p-4 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20 flex items-start gap-3">
                     <AlertCircle className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
