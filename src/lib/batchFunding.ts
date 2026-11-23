@@ -27,6 +27,11 @@ export interface BatchRow {
   amount: string;
   addressError?: string;
   amountError?: string;
+  /**
+   * 1-based line number of an earlier row with the same (trimmed) address.
+   * Set when this row repeats a recipient already listed above it (#1033).
+   */
+  duplicateOf?: number;
 }
 
 export interface ParsedBatch {
@@ -147,6 +152,8 @@ export function parseBatchInput(text: string): ParsedBatch {
 
   const lines = text.split(/\r\n|\r|\n/);
   let sawDataRow = false;
+  // First line number seen for each trimmed address, to flag repeats (#1033).
+  const firstLineByAddress = new Map<string, number>();
 
   lines.forEach((rawLine, index) => {
     const line = rawLine.trim();
@@ -169,12 +176,18 @@ export function parseBatchInput(text: string): ParsedBatch {
     }
 
     const [address, amount] = fields;
+    const addressKey = address.trim();
+    const duplicateOf = addressKey ? firstLineByAddress.get(addressKey) : undefined;
+    if (addressKey && duplicateOf === undefined) {
+      firstLineByAddress.set(addressKey, index + 1);
+    }
     rows.push({
       line: index + 1,
       address,
       amount,
       addressError: validateBatchAddress(address),
       amountError: validateBatchAmount(amount),
+      ...(duplicateOf !== undefined ? { duplicateOf } : {}),
     });
   });
 
@@ -191,6 +204,11 @@ export function getValidRows(parsed: ParsedBatch): BatchRow[] {
 
 export function getInvalidRows(parsed: ParsedBatch): BatchRow[] {
   return parsed.rows.filter((row) => !isRowValid(row));
+}
+
+/** Rows that repeat an address already listed on an earlier row (#1033). */
+export function getDuplicateRows(parsed: ParsedBatch): BatchRow[] {
+  return parsed.rows.filter((row) => row.duplicateOf !== undefined);
 }
 
 /**
