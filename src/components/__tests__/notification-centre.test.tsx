@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
 import NotificationCentre from "@/components/notification-centre";
 import { addNotification, loadNotifications } from "@/lib/notifications";
 
@@ -51,6 +51,18 @@ describe("NotificationCentre", () => {
     fireEvent.click(screen.getByRole("button", { name: /mark all read/i }));
 
     expect(button.getAttribute("aria-label")).toBe("Notifications, no unread items");
+  });
+
+  it("updates the bell when a notification is added after mount (#1038)", () => {
+    render(<NotificationCentre />);
+    const button = screen.getByRole("button", { name: /notifications/i });
+    expect(button.getAttribute("aria-label")).toBe("Notifications, no unread items");
+
+    act(() => {
+      addNotification({ kind: "transaction", title: "Tx A", message: "msg", href: "/bridge" });
+    });
+
+    expect(button.getAttribute("aria-label")).toBe("Notifications, 1 unread");
   });
 
   it("lists notifications with their title, message, and age", () => {
