@@ -248,6 +248,7 @@ export default function BridgePage() {
     (!isLocked || unlockValidation?.ok === true) &&
     debouncedToAddress === toAddress &&
     debouncedAmount === amount &&
+    !simulating &&
     txStatus === "idle";
 
   // Balances follow the connected account: no manual "use connected wallet"
@@ -309,7 +310,9 @@ export default function BridgePage() {
   const networkMismatch = fundingLinkNetwork && fundingLinkNetwork !== network;
 
   const handleSubmit = async () => {
-    if (!canProceed) return;
+    // Guard against double clicks: a second submit while the simulation is in
+    // flight would fire a duplicate /api/simulate request. (#1011)
+    if (simulating || !canProceed) return;
     setTxError(null);
     setSimulation(null);
     setSimulating(true);
@@ -943,8 +946,16 @@ export default function BridgePage() {
                   title={!isOnline ? "Reconnect to the network to continue" : undefined}
                   className="w-full flex items-center justify-center gap-2 px-6 py-3 min-h-[44px] rounded-xl bg-[var(--primary)] text-white font-medium hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-light)]"
                 >
-                  <Send className="w-4 h-4" />
-                  {isLocked ? "Review Locked Transfer" : "Review Bridge Transaction"}
+                  {simulating ? (
+                    <Loader2 className="w-4 h-4 animate-spin motion-reduce:animate-none" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                  {simulating
+                    ? "Simulating…"
+                    : isLocked
+                      ? "Review Locked Transfer"
+                      : "Review Bridge Transaction"}
                 </button>
               </div>
             )}
