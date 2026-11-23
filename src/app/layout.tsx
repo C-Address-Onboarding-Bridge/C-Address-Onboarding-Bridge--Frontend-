@@ -107,7 +107,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   };
 
   return (
-    <html lang="en" className={`${geist.variable} ${jetbrainsMono.variable}`}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${geist.variable} ${jetbrainsMono.variable}`}
+    >
       <head>
         <Script
           id="theme-init"

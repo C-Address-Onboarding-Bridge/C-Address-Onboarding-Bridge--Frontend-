@@ -105,6 +105,13 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     setActiveLocale(locale);
   }, [locale]);
 
+  // Keep the document language in sync with the active locale so assistive
+  // tech and translation tooling see the right language (#1021).
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.lang = locale;
+  }, [locale]);
+
   const tBound = useCallback((key: string) => rawT(locale, key), [locale]);
 
   const value: LocaleContextValue = {
