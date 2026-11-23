@@ -19,6 +19,9 @@ beforeEach(() => {
   proxyToBackendMock.mockClear();
 });
 
+// A real ed25519 StrKey (checksum-valid), required by the export route (#1024).
+const VALID_ADDRESS = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H";
+
 function makeRequest(url: string, method = "GET"): Request {
   return new Request(url, { method });
 }
@@ -66,13 +69,58 @@ describe("backend proxy route wiring", () => {
     expect(proxyToBackendMock).toHaveBeenCalledWith(request, "/referrals/stats?address=G1&network=TESTNET");
   });
 
-  it("GET /api/backend/transactions/export?... -> /transactions/export?...", async () => {
+  it("GET /api/backend/transactions/export never proxies the platform-wide list (#1024)", async () => {
     const { GET } = await import("../transactions/export/route");
-    const request = makeRequest("http://localhost/api/backend/transactions/export?address=G1&network=TESTNET&from=0&to=1&limit=200");
-    await GET(request);
-    expect(proxyToBackendMock).toHaveBeenCalledWith(
-      request,
-      "/transactions/export?address=G1&network=TESTNET&from=0&to=1&limit=200"
+    const request = makeRequest(
+      `http://localhost/api/backend/transactions/export?address=${VALID_ADDRESS}&network=TESTNET&from=0&to=1&limit=200`
     );
+    const response = await GET(request);
+    expect(response.status).toBe(501);
+    expect(proxyToBackendMock).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/backend/transactions/export renames from/to and drops unknown params (#1024)", async () => {
+    const { buildExportQuery } = await import("../transactions/export/route");
+    const query = buildExportQuery(
+      new URLSearchParams({
+        address: VALID_ADDRESS,
+        network: "testnet",
+        from: "1700000000",
+        to: "1800000000",
+        limit: "200",
+        cursor: "abc",
+        admin: "true",
+      })
+    );
+    expect(query).toBe(`address=${VALID_ADDRESS}&network=TESTNET&fromDate=1700000000&toDate=1800000000`);
+  });
+
+  it("GET /api/backend/transactions/export returns 400 on missing address (#1024)", async () => {
+    const { GET } = await import("../transactions/export/route");
+    const response = await GET(makeRequest("http://localhost/api/backend/transactions/export?network=TESTNET"));
+    expect(response.status).toBe(400);
+    expect(proxyToBackendMock).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/backend/transactions/export returns 400 on invalid address (#1024)", async () => {
+    const { GET } = await import("../transactions/export/route");
+    const response = await GET(
+      makeRequest("http://localhost/api/backend/transactions/export?address=G1&network=TESTNET")
+    );
+    expect(response.status).toBe(400);
+    expect(proxyToBackendMock).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/backend/transactions/export returns 400 on missing or invalid network (#1024)", async () => {
+    const { GET } = await import("../transactions/export/route");
+    const missing = await GET(
+      makeRequest(`http://localhost/api/backend/transactions/export?address=${VALID_ADDRESS}`)
+    );
+    expect(missing.status).toBe(400);
+    const invalid = await GET(
+      makeRequest(`http://localhost/api/backend/transactions/export?address=${VALID_ADDRESS}&network=FUTURENET`)
+    );
+    expect(invalid.status).toBe(400);
+    expect(proxyToBackendMock).not.toHaveBeenCalled();
   });
 });
