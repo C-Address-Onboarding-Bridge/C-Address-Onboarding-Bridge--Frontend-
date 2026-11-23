@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Keypair, StrKey } from "@stellar/stellar-sdk";
 import { GET } from "../route";
+import { resetRateLimits } from "@/lib/rateLimit";
 
 const C_ADDRESS = StrKey.encodeContract(Keypair.random().rawPublicKey());
 
@@ -18,6 +19,7 @@ const originalFetch = global.fetch;
 describe("GET /api/onramp/quotes (#678)", () => {
   beforeEach(() => {
     process.env.NEXT_PUBLIC_API_URL = "https://backend.example.com";
+    resetRateLimits();
   });
 
   afterEach(() => {
