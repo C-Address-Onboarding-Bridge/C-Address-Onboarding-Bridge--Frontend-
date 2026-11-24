@@ -1086,14 +1086,6 @@ export function isTxTooLateError(error: unknown): boolean {
   return msg.includes("tx_too_late");
 }
 
-/** The abort raised when the wallet isn't on the network a transaction was built for. */
-function networkChangedError(expected: StellarNetwork, actual: string): Error {
-  return new Error(
-    `Network changed in Freighter — please retry. ` +
-      `Transaction was built for ${expected} but Freighter is now on ${actual}.`
-  );
-}
-
 /** Shortens an address for display in error messages: GABCDEFG…WXYZ. */
 function truncateAddress(address: string): string {
   return address.length > 12
@@ -1913,6 +1905,8 @@ export async function simulateBridgeTransaction(
 /** Default polling interval (ms) used when Server-Sent Events are not
  * available (e.g. offline first-load, jsdom, older browsers). */
 const TRANSACTION_STATUS_POLL_MS = 5_000;
+/** Number of consecutive SSE errors before permanently falling back to polling. (#952) */
+const MAX_CONSECUTIVE_SSE_ERRORS = 3;
 
 export interface TransactionStatusSubscription {
   /** True while the stream (EventSource) is connected. */
@@ -1938,16 +1932,10 @@ function getTransactionStatusUrl(hash: string, network: StellarNetwork): string 
 /**
  * Subscribes to live status updates for a submitted transaction.
  *
- * Prefers an SSE stream (`/api/transactions/[hash]/status`). If EventSource is
- * unavailable or the stream errors, it transparently falls back to polling the
- * same endpoint every `pollIntervalMs`.
- *
- * While the tab is hidden the stream pauses (there is nobody to notify) and
- * resumes on focus, so a background tab never keeps an EventSource
- * reconnecting forever. The returned subscription is already active; call
- * `unsubscribe()` to close it. The stream also closes itself (and stops
- * polling) once the transaction reaches a terminal state ("confirmed" or
- * "failed"). (#471)
+ * Prefers an SSE stream (`/api/transactions/[hash]/status`). When the server
+ * closes a stream window with `event: timeout`, the client transparently
+ * reconnects over SSE rather than falling back to polling; polling only
+ * takes over if EventSource is unavailable or fails repeatedly. (#471, #952)
  */
 export function subscribeToTransactionStatus(params: {
   hash: string;
@@ -1962,6 +1950,7 @@ export function subscribeToTransactionStatus(params: {
 
   let stopped = false;
   let fellBack = false;
+  let consecutiveErrors = 0;
   let source: EventSource | null = null;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -2016,9 +2005,9 @@ export function subscribeToTransactionStatus(params: {
     void poll();
   };
 
-  // An EventSource failure is permanent — polling takes over from then on.
-  // Pausing for a hidden tab is *not* a failure, so it doesn't set `fellBack`
-  // and the stream can be re-created when the tab is focused again.
+  // Permanent fallback to polling after repeated consecutive SSE errors.
+  // Pausing for a hidden tab or reconnecting on `event: timeout` does not
+  // trigger fallback. (#952)
   const fallbackToPolling = () => {
     if (fellBack) return;
     fellBack = true;
@@ -2029,8 +2018,10 @@ export function subscribeToTransactionStatus(params: {
   const startSource = () => {
     if (stopped) return;
     try {
-      source = new EventSource(url);
-      source.onmessage = (event: MessageEvent<string>) => {
+      const es = new EventSource(url);
+      source = es;
+      es.onmessage = (event: MessageEvent<string>) => {
+        consecutiveErrors = 0;
         try {
           const payload = JSON.parse(event.data) as { status?: BridgeTransactionStatus };
           if (payload.status) emit(payload.status);
@@ -2038,10 +2029,21 @@ export function subscribeToTransactionStatus(params: {
           // Malformed frame — ignore; the next event may still be valid.
         }
       };
-      // EventSource fires onerror for transient network failures too. Falling
-      // back to polling on the *first* error keeps a broken stream from
-      // silently stalling while it retries forever.
-      source.onerror = () => fallbackToPolling();
+      // Server sends `event: timeout` at the 30s cap before closing the stream;
+      // reconnect cleanly over SSE instead of treating the close as an error. (#952)
+      es.addEventListener("timeout", () => {
+        if (stopped || fellBack) return;
+        consecutiveErrors = 0;
+        stopSource();
+        startSource();
+      });
+      es.onerror = () => {
+        if (stopped || fellBack || source !== es) return;
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= MAX_CONSECUTIVE_SSE_ERRORS) {
+          fallbackToPolling();
+        }
+      };
     } catch {
       source = null;
       fallbackToPolling();
@@ -2070,14 +2072,25 @@ export function subscribeToTransactionStatus(params: {
 
   if (typeof EventSource === "undefined") {
     startPolling();
-    return { connected: false, transport: "polling", unsubscribe: cleanup };
+    return {
+      get connected() {
+        return false;
+      },
+      get transport() {
+        return "polling" as const;
+      },
+      unsubscribe: cleanup,
+    };
   }
 
   startSource();
-  const connected = source !== null && !fellBack;
   return {
-    connected,
-    transport: connected ? "sse" : "polling",
+    get connected() {
+      return source !== null && !fellBack && !stopped;
+    },
+    get transport() {
+      return source !== null && !fellBack ? ("sse" as const) : ("polling" as const);
+    },
     unsubscribe: cleanup,
   };
 }
@@ -2172,6 +2185,7 @@ export async function getTransactionByHash(
       type?: string;
       transaction_successful?: boolean;
     }>>(network, `${basePath}/operations?limit=200`);
+    const { extractTransferFromOps } = await import("./operationTransfer");
     const transfer = extractTransferFromOps(operations._embedded?.records ?? []);
     if (transfer) {
       fromAddress = transfer.fromAddress;

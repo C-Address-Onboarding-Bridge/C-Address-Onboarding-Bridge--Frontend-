@@ -127,7 +127,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   // Date.now() during render (react-hooks/purity). (#480)
   const [networkChangedRecently, setNetworkChangedRecently] = useState(false);
   const recentChangeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const previousNetworkStatusRef = useRef<WalletNetworkState>(APP_NETWORK);
+  // Initialized to null so the first network read from the wallet establishes
+  // the baseline rather than counting as a mid-session network switch. (#950)
+  const previousNetworkStatusRef = useRef<WalletNetworkState | null>(null);
   /**
    * The network that was active at connection time. Used to detect changes.
    * null means no connection has been established yet this session.
@@ -234,7 +236,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   // Connectivity awareness: keep `isOnline` in sync and replay safe operations
   // when the connection returns. (#475)
-  useEffect(() => {    const sync = () => {
+  useEffect(() => {
+    const sync = () => {
       const online = typeof navigator === "undefined" ? true : navigator.onLine;
       isOnlineRef.current = online;
       setIsOnline(online);
@@ -282,10 +285,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
    */
   const applyNetwork = useCallback((status: WalletNetworkState, name: string | null) => {
     // Record the moment the active network changes so callers can warn on
-    // mainnet actions initiated right after a switch (#480). Uses a ref
-    // comparison rather than an updater so the timestamp write stays out of
-    // the state updater.
-    if (previousNetworkStatusRef.current !== status) {
+    // mainnet actions initiated right after a switch (#480). When
+    // previousNetworkStatusRef.current is null, this is the first wallet read
+    // (baseline), not a user-initiated switch (#950).
+    if (previousNetworkStatusRef.current === null) {
+      previousNetworkStatusRef.current = status;
+    } else if (previousNetworkStatusRef.current !== status) {
       previousNetworkStatusRef.current = status;
       setNetworkChangedAt(Date.now());
       // Flag the change as recent for the mainnet-action warning window, and
@@ -318,7 +323,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setNetworkMismatch(false);
       setNetworkStatus(APP_NETWORK);
       setWalletNetworkName(null);
-      previousNetworkStatusRef.current = APP_NETWORK;
+      previousNetworkStatusRef.current = null;
       setNetworkChangedAt(null);
       setNetworkChangedRecently(false);
       if (recentChangeTimerRef.current) clearTimeout(recentChangeTimerRef.current);
@@ -417,7 +422,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setNetworkMismatch(false);
     setNetworkStatus(APP_NETWORK);
     setWalletNetworkName(null);
-    previousNetworkStatusRef.current = APP_NETWORK;
+    previousNetworkStatusRef.current = null;
     setNetworkChangedAt(null);
     setNetworkChangedRecently(false);
     if (recentChangeTimerRef.current) clearTimeout(recentChangeTimerRef.current);
