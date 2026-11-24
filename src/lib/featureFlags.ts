@@ -7,8 +7,8 @@ export interface FeatureFlag {
 }
 
 /**
- * Define all feature flags here.
- * Add new features behind flags in this list.
+- Define all feature flags here.
+- Add new features behind flags in this list.
  */
 export const FEATURE_FLAGS: FeatureFlag[] = [
   {
@@ -63,13 +63,6 @@ function writeCachedRemoteFlags(flags: FeatureFlag[]): void {
   }
 }
 
-/**
- * Fetches flag definitions from the backend so they can be changed without a
- * client redeploy. Falls back to the last-known-good cache on failure, and
- * populates `remoteFlagsMemo` so subsequent `isFeatureEnabled` calls in this
- * session use it without refetching. Never throws — a flag source that can
- * fail must not be able to crash the app that reads it.
- */
 export async function fetchRemoteFlags(): Promise<FeatureFlag[]> {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
   const timeout = controller
@@ -89,8 +82,6 @@ export async function fetchRemoteFlags(): Promise<FeatureFlag[]> {
       remoteFlagsMemo = cached;
       return cached;
     }
-    // No remote and no cache: fail safe rather than trusting the bundled
-    // defaults, since a future flag could default to enabled.
     remoteFlagsMemo = FEATURE_FLAGS.map((f) => ({ ...f, defaultEnabled: false, rolloutPercentage: 0 }));
     return remoteFlagsMemo;
   } finally {
@@ -103,19 +94,6 @@ function getFlagDef(key: string): FeatureFlag | undefined {
   return (source ?? FEATURE_FLAGS).find((f) => f.key === key);
 }
 
-/**
- * Determines if a feature flag is enabled for the current user/session.
- * Priority order:
- * 1. Developer override (localStorage) — highest priority, dev panel only
- * 2. Environment variable override (NEXT_PUBLIC_FEATURE_FLAGS)
- * 3. Rollout percentage (deterministic based on the given user/session id,
- *    so the same user consistently lands on the same side of a gradual
- *    rollout instead of flipping on every evaluation)
- * 4. Default value
- *
- * Until {@link fetchRemoteFlags} has resolved at least once, definitions
- * fall back to the last cached response, then to the bundled defaults.
- */
 export function isFeatureEnabled(
   key: string,
   sessionId?: string,
@@ -142,9 +120,6 @@ export function isFeatureEnabled(
   return bucket < flag.rolloutPercentage;
 }
 
-/**
- * Deterministic hash function for consistent rollout behavior.
- */
 function deterministicHash(str: string): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -154,14 +129,8 @@ function deterministicHash(str: string): number {
   return Math.abs(hash);
 }
 
-/**
- * Get or create a stable bucketing id for deterministic rollout.
- *
- * Uses localStorage (not sessionStorage) so the same user lands in the same
- * rollout bucket across tabs and across new sessions. Falls back to an
- * in-memory id when storage is unavailable so evaluation stays deterministic
- * within the page lifetime.
- */
+const memoryBucketId = Math.random().toString(36).slice(2);
+
 function getBucketId(): string {
   if (typeof window === 'undefined') return 'server';
 
@@ -173,24 +142,21 @@ function getBucketId(): string {
     }
     return id;
   } catch {
-    // Storage unavailable — fall back to a per-page id.
     return memoryBucketId;
   }
 }
 
-let memoryBucketId = Math.random().toString(36).slice(2);
+/**
+- Whether the developer feature-flag panel may be rendered.
+- Strictly gated on `NODE_ENV === 'development'` and never trusts a client-side
+- `localStorage` token. (#706, #949)
+ */
+export function isFeatureFlagPanelEnabled(): boolean {
+  return process.env.NODE_ENV === 'development';
+}
 
 const DEV_OVERRIDES_KEY = 'ff_dev_overrides';
 
-/**
- * Get all dev overrides from localStorage.
- *
- * Defensively validates the parsed value: if localStorage contains anything
- * other than a plain object whose values are all booleans (e.g. a JSON array,
- * a bare string, or an object with non-boolean values written by a third-party
- * script), the function degrades to `{}` rather than propagating unexpected
- * shapes into the feature-flag evaluation path. (#240)
- */
 export function getDevOverrides(): Record<string, boolean> {
   if (typeof window === 'undefined') return {};
   try {
@@ -213,13 +179,6 @@ export function getDevOverrides(): Record<string, boolean> {
   }
 }
 
-/**
- * Set a dev override for a feature flag.
- *
- * Defense-in-depth: no-ops outside of the development environment regardless
- * of which call site invokes it, so callers don't need to re-add their own
- * NODE_ENV guard. (#240)
- */
 export function setDevOverride(key: string, enabled: boolean): void {
   if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
   try {
@@ -233,12 +192,6 @@ export function setDevOverride(key: string, enabled: boolean): void {
   }
 }
 
-/**
- * Clear a dev override for a feature flag.
- *
- * Defense-in-depth: no-ops outside of the development environment regardless
- * of which call site invokes it. (#240)
- */
 export function clearDevOverride(key: string): void {
   if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
   try {
@@ -256,10 +209,6 @@ export function clearDevOverride(key: string): void {
   }
 }
 
-/**
- * Parse feature flags from environment variables.
- * Format: flag1=true,flag2=false
- */
 function parseEnvFlags(): Record<string, boolean> {
   const raw = process.env.NEXT_PUBLIC_FEATURE_FLAGS ?? '';
   if (!raw) return {};

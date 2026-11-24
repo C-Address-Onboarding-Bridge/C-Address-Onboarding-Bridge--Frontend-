@@ -1,7 +1,7 @@
 /**
- * Localization system for C-Address Onboarding Bridge.
- * Supports en, es, fr, pt with RTL-safe layout handling.
- * #361
+- Localization system for C-Address Onboarding Bridge.
+- Supports en, es, fr, pt with RTL-safe layout handling.
+- #361
  */
 import { useCallback, useSyncExternalStore } from 'react';
 
@@ -723,10 +723,10 @@ function lookup(locale: Locale, key: string): string {
 }
 
 /**
- * Translate a dot-path key, falling back to the key itself.
+- Translate a dot-path key, falling back to the key itself.
  *
- * `t(locale, key, vars?)` translates in an explicit locale. `t(key, vars?)`
- * uses the active locale (see {@link setLocale}).
+- `t(locale, key, vars?)` translates in an explicit locale. `t(key, vars?)`
+- uses the active locale (see {@link setLocale}).
  */
 export function t(key: string, vars?: TranslationVars): string;
 export function t(locale: Locale, key: string, vars?: TranslationVars): string;
@@ -736,23 +736,35 @@ export function t(a: string, b?: string | TranslationVars, c?: TranslationVars):
 }
 
 /**
- * Detect locale from browser or fallback to default.
+- Detect locale from browser (`navigator.languages` / `navigator.language`) or fallback to default.
+- SSR-safe when `navigator` is unavailable.
  */
 export function detectLocale(): Locale {
-  if (typeof window === 'undefined') return DEFAULT_LOCALE;
-  const browser = window.navigator.language?.slice(0, 2).toLowerCase() ?? DEFAULT_LOCALE;
-  return SUPPORTED_LOCALES.includes(browser as Locale) ? (browser as Locale) : DEFAULT_LOCALE;
+  if (typeof navigator === 'undefined') return DEFAULT_LOCALE;
+  const candidates: readonly string[] =
+    Array.isArray(navigator.languages) && navigator.languages.length > 0
+      ? navigator.languages
+      : navigator.language
+        ? [navigator.language]
+        : [];
+  for (const raw of candidates) {
+    const code = raw?.slice(0, 2).toLowerCase();
+    if (code && SUPPORTED_LOCALES.includes(code as Locale)) {
+      return code as Locale;
+    }
+  }
+  return DEFAULT_LOCALE;
 }
 
 /**
- * Format a number for the given locale.
+- Format a number for the given locale.
  */
 export function formatNumber(value: number, locale: Locale = DEFAULT_LOCALE): string {
   return new Intl.NumberFormat(locale).format(value);
 }
 
 /**
- * Format a currency amount for the given locale.
+- Format a currency amount for the given locale.
  */
 export function formatCurrency(
   value: number,
