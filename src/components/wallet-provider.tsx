@@ -436,6 +436,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     let slowTimer: ReturnType<typeof setTimeout> | null = null;
     let backoffTimer: ReturnType<typeof setTimeout> | null = null;
     let isFast = true;
+    // Guards against a visibility change starting a second concurrent
+    // updateConnection() while a poll is still in flight. (#1032)
+    let inFlight = false;
 
     const clearAllTimers = () => {
       if (fastTimer) clearTimeout(fastTimer);
@@ -445,9 +448,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
     const scheduleNext = () => {
       clearAllTimers();
+      if (cancelled || document.hidden) return;
       const delay = isFast ? FAST_INTERVAL : SLOW_INTERVAL;
       const timer = setTimeout(() => {
-        updateConnection().finally(scheduleNext);
+        // Only reschedule when the poller is still live and the tab is
+        // visible, so an in-flight check cannot revive polling after
+        // unmount or tab hide. (#1032)
+        updateConnection().finally(() => {
+          if (!cancelled && !document.hidden) scheduleNext();
+        });
       }, delay);
       if (isFast) {
         fastTimer = timer;
@@ -471,10 +480,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         clearAllTimers();
       } else {
         // Tab visible again: reset to fast interval, check immediately,
-        // then start the backoff timer fresh.
+        // then start the backoff timer fresh. Skip if a check is already
+        // in flight so we don't run two concurrent updates. (#1032)
         isFast = true;
+        if (inFlight) return;
+        inFlight = true;
         updateConnection().finally(() => {
-          if (cancelled) return;
+          inFlight = false;
+          if (cancelled || document.hidden) return;
           startBackoff();
           scheduleNext();
         });
@@ -484,8 +497,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     // Initial check + start fast polling
     queueMicrotask(() => {
       if (cancelled) return;
+      inFlight = true;
       updateConnection().finally(() => {
-        if (cancelled) return;
+        inFlight = false;
+        if (cancelled || document.hidden) return;
         startBackoff();
         scheduleNext();
       });
