@@ -3,6 +3,7 @@ import { Keypair } from "@stellar/stellar-sdk";
 import {
   RECIPIENT_LABEL_MAX_LENGTH,
   addressBookStorageKey,
+  currentNetwork,
   deleteRecipient,
   exportAddressBook,
   importAddressBook,
@@ -13,23 +14,10 @@ import {
   validateRecipient,
 } from "../addressBook";
 
-/**
- * Unit tests for the address book store (#466).
- *
- * Mirrors `src/lib/__tests__/profile.test.ts`'s structure: the interesting
- * cases are values that arrive from user-writable `localStorage` (or an
- * imported JSON file) in a shape the UI would render badly, and the failure
- * paths where storage is unavailable or full. SSR behaviour is covered
- * separately in `addressBook.ssr.test.ts`, which runs in a real
- * window-less environment.
- */
-
 const VALID_ADDRESS = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
-// A second, genuinely checksum-valid address — hand-writing one is not
-// possible since the checksum is a real CRC16 over the payload bytes.
 const VALID_ADDRESS_2 = Keypair.random().publicKey();
 
-describe("address book store (#466)", () => {
+describe("address book store (#466, #951)", () => {
   beforeEach(() => {
     window.localStorage.clear();
   });
@@ -37,11 +25,38 @@ describe("address book store (#466)", () => {
   afterEach(() => {
     window.localStorage.clear();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
-  describe("addressBookStorageKey", () => {
-    it("returns a stable, namespaced key", () => {
+  describe("addressBookStorageKey & network scoping (#951)", () => {
+    it("defaults to testnet when NEXT_PUBLIC_STELLAR_NETWORK is unset or TESTNET", () => {
+      vi.stubEnv("NEXT_PUBLIC_STELLAR_NETWORK", "");
+      expect(currentNetwork()).toBe("testnet");
+      expect(addressBookStorageKey()).toBe("addressBook:recipients:testnet");
+
+      vi.stubEnv("NEXT_PUBLIC_STELLAR_NETWORK", "TESTNET");
+      expect(currentNetwork()).toBe("testnet");
+      expect(addressBookStorageKey()).toBe("addressBook:recipients:testnet");
+    });
+
+    it("scopes to mainnet only when NEXT_PUBLIC_STELLAR_NETWORK is PUBLIC or wallet network is PUBLIC", () => {
+      vi.stubEnv("NEXT_PUBLIC_STELLAR_NETWORK", "PUBLIC");
+      expect(currentNetwork()).toBe("mainnet");
       expect(addressBookStorageKey()).toBe("addressBook:recipients:mainnet");
+
+      expect(addressBookStorageKey("PUBLIC")).toBe("addressBook:recipients:mainnet");
+      expect(addressBookStorageKey("TESTNET")).toBe("addressBook:recipients:testnet");
+    });
+
+    it("isolates TESTNET and PUBLIC recipients from each other", () => {
+      const testnetSaved = saveRecipient("Testnet Bob", VALID_ADDRESS, "TESTNET");
+      const mainnetSaved = saveRecipient("Mainnet Alice", VALID_ADDRESS_2, "PUBLIC");
+
+      expect(testnetSaved?.network).toBe("testnet");
+      expect(mainnetSaved?.network).toBe("mainnet");
+
+      expect(loadAddressBook("TESTNET")).toEqual([testnetSaved]);
+      expect(loadAddressBook("PUBLIC")).toEqual([mainnetSaved]);
     });
   });
 
@@ -93,7 +108,7 @@ describe("address book store (#466)", () => {
       label: "Alice",
       address: VALID_ADDRESS,
       createdAt: 1700000000000,
-      network: "mainnet" as const,
+      network: "testnet" as const,
     };
 
     it("accepts a well-formed recipient", () => {
@@ -220,29 +235,29 @@ describe("address book store (#466)", () => {
     });
 
     it("drops an entry with a missing field instead of crashing", () => {
-      const good = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000, network: "mainnet" };
-      const bad = { id: "2", label: "Bob", address: VALID_ADDRESS_2, network: "mainnet" };
+      const good = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000, network: "testnet" };
+      const bad = { id: "2", label: "Bob", address: VALID_ADDRESS_2, network: "testnet" };
       window.localStorage.setItem(addressBookStorageKey(), JSON.stringify([good, bad]));
       expect(loadAddressBook()).toHaveLength(1);
       expect(loadAddressBook()[0].label).toBe("Alice");
     });
 
     it("drops an entry with an invalid address instead of crashing", () => {
-      const good = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000, network: "mainnet" };
-      const bad = { id: "2", label: "Bob", address: "not-an-address", createdAt: 1700000000000, network: "mainnet" };
+      const good = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000, network: "testnet" };
+      const bad = { id: "2", label: "Bob", address: "not-an-address", createdAt: 1700000000000, network: "testnet" };
       window.localStorage.setItem(addressBookStorageKey(), JSON.stringify([good, bad]));
       expect(loadAddressBook()).toHaveLength(1);
       expect(loadAddressBook()[0].label).toBe("Alice");
     });
 
     it("drops an entry with an over-long label instead of crashing", () => {
-      const good = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000, network: "mainnet" };
+      const good = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000, network: "testnet" };
       const bad = {
         id: "2",
         label: "x".repeat(RECIPIENT_LABEL_MAX_LENGTH + 1),
         address: VALID_ADDRESS_2,
         createdAt: 1700000000000,
-        network: "mainnet",
+        network: "testnet",
       };
       window.localStorage.setItem(addressBookStorageKey(), JSON.stringify([good, bad]));
       expect(loadAddressBook()).toHaveLength(1);
@@ -250,7 +265,7 @@ describe("address book store (#466)", () => {
     });
 
     it("drops an entry with an unknown network instead of crashing", () => {
-      const good = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000, network: "mainnet" };
+      const good = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000, network: "testnet" };
       const bad = { id: "2", label: "Bob", address: VALID_ADDRESS_2, createdAt: 1700000000000, network: "futurenet" };
       window.localStorage.setItem(addressBookStorageKey(), JSON.stringify([good, bad]));
       expect(loadAddressBook()).toHaveLength(1);

@@ -1,58 +1,54 @@
 /**
- * Local (client-only) address book of saved recipients (#466).
+- Local (client-only) address book of saved recipients (#466).
  *
- * There is no backend, so saved recipients live in `localStorage` as a single
- * JSON array. Unlike `src/lib/profile.ts`/`src/lib/avatar.ts` — which store
- * one value *about* the connected wallet's own address — recipients are
- * addresses the user sends *to*, so this is one shared list rather than a
- * value keyed per address.
- *
- * Same two defences as the profile/avatar stores:
- *   1. **SSR** — `localStorage` does not exist on the server, so every
- *      accessor no-ops instead of throwing during prerender.
- *   2. **Untrusted storage** — localStorage is user-writable, and the JSON
- *      import feature accepts a file from disk, so every entry is
- *      re-validated on read; a corrupted, hand-edited, or malicious entry is
- *      dropped instead of breaking the whole list or being rendered as-is.
- *
- * Entries are scoped per network (#693): a testnet recipient must not appear
- * (or be acted on) while the app is on mainnet, and vice versa. The legacy
- * unscoped key is migrated once into the current network's bucket.
+- Entries are scoped per network (#693, #951): derived from the wallet's
+- `StellarNetwork` (`"PUBLIC"` / `"TESTNET"`) or `APP_NETWORK` by default.
  */
 import { validateStellarAddress } from "@/lib/addressValidation";
+import { APP_NETWORK, type StellarNetwork } from "@/lib/types";
 import { hasControlChars } from "./profile";
 
 /** 32 characters — same budget as a profile display name (`DISPLAY_NAME_MAX_LENGTH`). */
 export const RECIPIENT_LABEL_MAX_LENGTH = 32;
 
 /**
- * Upper bound on the size of an imported JSON file, in bytes. A larger file is
- * rejected before parsing so a huge upload can't freeze the page while it is
- * validated or fill the storage quota for the whole origin.
+- Upper bound on the size of an imported JSON file, in bytes.
  */
 export const IMPORT_MAX_FILE_BYTES = 256 * 1024;
 
 /**
- * Upper bound on the number of entries accepted from a single import. Entries
- * beyond this cap are skipped and reported rather than silently dropped.
+- Upper bound on the number of entries accepted from a single import.
  */
 export const IMPORT_MAX_ENTRIES = 500;
 
 const STORAGE_KEY = "addressBook:recipients";
 
 /**
- * Networks the address book can be scoped to. Kept as a plain string union so
- * this module stays free of any Stellar SDK import.
+- Networks the address book can be scoped to in storage.
  */
 export type AddressBookNetwork = "mainnet" | "testnet";
 
+/** Accepted network inputs: either the app's `StellarNetwork` or normalized `AddressBookNetwork`. */
+export type AddressBookNetworkInput = AddressBookNetwork | StellarNetwork;
+
 /**
- * Resolves the network the address book should be scoped to. Defaults to
- * `mainnet` when nothing is configured, matching the app's default network.
+- Maps `StellarNetwork` (`"PUBLIC" | "TESTNET"`) or `AddressBookNetwork`
+- onto the canonical `"mainnet" | "testnet"` scope used in `SavedRecipient`. (#951)
+ */
+export function toAddressBookNetwork(network: AddressBookNetworkInput): AddressBookNetwork {
+  if (network === "PUBLIC" || network === "mainnet") return "mainnet";
+  return "testnet";
+}
+
+/**
+- Resolves the network the address book should be scoped to when no wallet
+- network is explicitly supplied. Reads `NEXT_PUBLIC_STELLAR_NETWORK` with the
+- exact same `"PUBLIC"` vs default `"TESTNET"` rule as `APP_NETWORK`. (#951)
  */
 export function currentNetwork(): AddressBookNetwork {
-  const raw = process.env.NEXT_PUBLIC_STELLAR_NETWORK;
-  return raw === "testnet" ? "testnet" : "mainnet";
+  const configured: StellarNetwork =
+    process.env.NEXT_PUBLIC_STELLAR_NETWORK === "PUBLIC" ? "PUBLIC" : APP_NETWORK;
+  return toAddressBookNetwork(configured);
 }
 
 export interface SavedRecipient {
@@ -75,8 +71,10 @@ export interface ImportResult {
 }
 
 /** Storage key for the address book. Exported so tests and docs can reference it. */
-export function addressBookStorageKey(network: AddressBookNetwork = currentNetwork()): string {
-  return `${STORAGE_KEY}:${network}`;
+export function addressBookStorageKey(
+  network: AddressBookNetworkInput = currentNetwork()
+): string {
+  return `${STORAGE_KEY}:${toAddressBookNetwork(network)}`;
 }
 
 /** Legacy unscoped key, kept only so existing data can be migrated once. */
@@ -89,17 +87,10 @@ function storage(): Storage | null {
   try {
     return window.localStorage;
   } catch {
-    // Access itself throws in some privacy modes.
     return null;
   }
 }
 
-/**
- * Validates and normalises a label + address pair before it is saved.
- * Address validation is delegated to `validateStellarAddress` from
- * `src/lib/addressValidation.ts` rather than re-implemented here, so the address book and
- * the funding form always agree on what counts as a valid address.
- */
 export function validateRecipient(rawLabel: string, rawAddress: string): RecipientValidation {
   const label = rawLabel.trim();
   if (!label) {
@@ -173,12 +164,10 @@ function createRecipientId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-/**
- * One-time migration of the legacy unscoped address book into the current
- * network's bucket (#693). Existing entries are preserved and tagged with the
- * current network; the legacy key is removed so the migration runs once.
- */
-export function migrateLegacyAddressBook(network: AddressBookNetwork = currentNetwork()): void {
+export function migrateLegacyAddressBook(
+  network: AddressBookNetworkInput = currentNetwork()
+): void {
+  const scoped = toAddressBookNetwork(network);
   const store = storage();
   if (!store) return;
 
@@ -200,14 +189,14 @@ export function migrateLegacyAddressBook(network: AddressBookNetwork = currentNe
   if (Array.isArray(parsed)) {
     const migrated = parsed
       .filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null)
-      .map((entry) => ({ ...entry, network }))
+      .map((entry) => ({ ...entry, network: scoped }))
       .filter(isRenderableRecipient);
 
     if (migrated.length > 0) {
-      const existing = readRaw(network).filter(isRenderableRecipient);
+      const existing = readRaw(scoped).filter(isRenderableRecipient);
       const existingIds = new Set(existing.map((r) => r.id));
       const merged = [...existing, ...migrated.filter((r) => !existingIds.has(r.id))];
-      persist(merged, network);
+      persist(merged, scoped);
     }
   }
 
@@ -218,20 +207,123 @@ export function migrateLegacyAddressBook(network: AddressBookNetwork = currentNe
   }
 }
 
-/**
- * Reads the saved address book for the current network, dropping any entries
- * that fail re-validation (see module docs) instead of surfacing or throwing
- * on them.
- */
-export function loadAddressBook(network: AddressBookNetwork = currentNetwork()): SavedRecipient[] {
-  migrateLegacyAddressBook(network);
-  return readRaw(network).filter(isRenderableRecipient).filter((r) => r.network === network);
+export function loadAddressBook(
+  network: AddressBookNetworkInput = currentNetwork()
+): SavedRecipient[] {
+  const scoped = toAddressBookNetwork(network);
+  migrateLegacyAddressBook(scoped);
+  return readRaw(scoped).filter(isRenderableRecipient).filter((r) => r.network === scoped);
 }
 
-/**
- * Saves a new recipient. Validates and normalises label/address first;
- * returns null when either is invalid or the write failed (most likely a
- * quota error), so callers can surface a message instead of silently losing
- * th
+export function saveRecipient(
+  rawLabel: string,
+  rawAddress: string,
+  network: AddressBookNetworkInput = currentNetwork()
+): SavedRecipient | null {
+  const scoped = toAddressBookNetwork(network);
+  const validated = validateRecipient(rawLabel, rawAddress);
+  if (!validated.ok) return null;
 
-/* … truncated 4384 chars — edit only what you need near the top … */
+  const entry: SavedRecipient = {
+    id: createRecipientId(),
+    label: validated.label,
+    address: validated.address,
+    createdAt: Date.now(),
+    network: scoped,
+  };
+
+  const existing = loadAddressBook(scoped);
+  if (!persist([...existing, entry], scoped)) return null;
+  return entry;
+}
+
+export function updateRecipient(
+  id: string,
+  rawLabel: string,
+  rawAddress: string,
+  network: AddressBookNetworkInput = currentNetwork()
+): boolean {
+  const scoped = toAddressBookNetwork(network);
+  const validated = validateRecipient(rawLabel, rawAddress);
+  if (!validated.ok) return false;
+
+  const existing = loadAddressBook(scoped);
+  const index = existing.findIndex((r) => r.id === id);
+  if (index === -1) return false;
+
+  const updated = [...existing];
+  updated[index] = {
+    ...updated[index],
+    label: validated.label,
+    address: validated.address,
+  };
+  return persist(updated, scoped);
+}
+
+export function deleteRecipient(
+  id: string,
+  network: AddressBookNetworkInput = currentNetwork()
+): boolean {
+  const scoped = toAddressBookNetwork(network);
+  const existing = loadAddressBook(scoped);
+  const next = existing.filter((r) => r.id !== id);
+  if (next.length === existing.length) return false;
+  return persist(next, scoped);
+}
+
+export function exportAddressBook(
+  network: AddressBookNetworkInput = currentNetwork()
+): string {
+  return JSON.stringify(loadAddressBook(network), null, 2);
+}
+
+export function importAddressBook(
+  rawJson: string,
+  network: AddressBookNetworkInput = currentNetwork()
+): boolean {
+  const scoped = toAddressBookNetwork(network);
+  if (typeof rawJson !== "string" || rawJson.length > IMPORT_MAX_FILE_BYTES) return false;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(parsed)) return false;
+
+  const existing = loadAddressBook(scoped);
+  const existingIds = new Set(existing.map((r) => r.id));
+  const accepted: SavedRecipient[] = [];
+
+  for (const rawEntry of parsed.slice(0, IMPORT_MAX_ENTRIES)) {
+    if (typeof rawEntry !== "object" || rawEntry === null) continue;
+    const entry = rawEntry as Record<string, unknown>;
+    if (typeof entry.label !== "string" || typeof entry.address !== "string") continue;
+    const validated = validateRecipient(entry.label, entry.address);
+    if (!validated.ok) continue;
+
+    const id =
+      typeof entry.id === "string" && entry.id && !existingIds.has(entry.id)
+        ? entry.id
+        : createRecipientId();
+    const createdAt =
+      typeof entry.createdAt === "number" && Number.isFinite(entry.createdAt)
+        ? entry.createdAt
+        : Date.now();
+
+    const candidate: SavedRecipient = {
+      id,
+      label: validated.label,
+      address: validated.address,
+      createdAt,
+      network: scoped,
+    };
+    if (isRenderableRecipient(candidate)) {
+      accepted.push(candidate);
+      existingIds.add(id);
+    }
+  }
+
+  return persist([...existing, ...accepted], scoped);
+}

@@ -1,14 +1,5 @@
 "use client";
 
-/**
- * Keyboard Navigation & Accessibility (A11Y) Behavior for Mobile Menu:
- * - When mobile menu opens (mobileOpen = true), focus programmatically moves to the first interactive nav link inside the menu.
- * - Pressing 'Escape' key while menu is open closes the mobile menu.
- * - When mobile menu closes, focus is programmatically restored to the toggle button.
- * - Toggle button features proper ARIA attributes (`aria-expanded`, `aria-controls`, `aria-label`).
- * - Mobile menu container includes `id="mobile-menu"`, `role="region"`, and `aria-label="Mobile Navigation"`.
- */
-
 import React, { memo, useState, useCallback, useMemo, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -45,13 +36,12 @@ const navLinks = [
   { href: "/onramp", label: "Onramp", icon: CreditCard },
   { href: "/cex", label: "CEX", icon: Building2 },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/address-book", label: "Address Book", icon: BookUser },
+  { href: "/address-book", label: "Address Book", icon: BookUser },
   { href: "/schedules", label: "Schedules", icon: CalendarClock },
   { href: "/referrals", label: "Referrals", icon: Share2 },
   { href: "/profile", label: "Profile", icon: UserRound },
 ];
 
-/** Human-readable labels for each locale. */
 const LOCALE_LABELS: Record<Locale, string> = {
   en: "EN",
   es: "ES",
@@ -72,8 +62,6 @@ interface NetworkBadgeProps {
   title: string;
 }
 
-// Shared by the desktop and mobile wallet-status displays so the badge
-// markup only needs to be kept in sync with `networkBadge` in one place.
 const NetworkBadge = ({ label, className, title }: NetworkBadgeProps) => (
   <span
     className={`text-[0.6rem] font-semibold px-1.5 py-0.5 rounded-full uppercase tracking-wide ${className}`}
@@ -82,10 +70,6 @@ const NetworkBadge = ({ label, className, title }: NetworkBadgeProps) => (
     {label}
   </span>
 );
-
-// ---------------------------------------------------------------------------
-// ThemeToggle
-// ---------------------------------------------------------------------------
 
 const ThemeToggle = memo(function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
@@ -101,10 +85,6 @@ const ThemeToggle = memo(function ThemeToggle() {
     </button>
   );
 });
-
-// ---------------------------------------------------------------------------
-// Language Switcher (desktop dropdown)
-// ---------------------------------------------------------------------------
 
 const LanguageSwitcher = memo(function LanguageSwitcher() {
   const { locale, setLocale } = useLocale();
@@ -158,7 +138,6 @@ const LanguageSwitcher = memo(function LanguageSwitcher() {
     [locale],
   );
 
-  // Close on outside click.
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
@@ -170,7 +149,6 @@ const LanguageSwitcher = memo(function LanguageSwitcher() {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  // Close on Escape.
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
@@ -252,10 +230,6 @@ const LanguageSwitcher = memo(function LanguageSwitcher() {
   );
 });
 
-// ---------------------------------------------------------------------------
-// Navbar
-// ---------------------------------------------------------------------------
-
 const Navbar = () => {
   const pathname = usePathname();
   const {
@@ -268,18 +242,16 @@ const Navbar = () => {
     connect,
     disconnect,
     isConnecting,
+    connectError,
+    clearConnectError,
     networkMismatch,
     dismissNetworkMismatch,
     switchNetwork,
   } = useWallet();
   const [mobileOpen, setMobileOpen] = useState(false);
-  // Network switcher state (#480): a persistent indicator (always visible,
-  // visually distinct for non-mainnet) plus a menu that requests the change
-  // through the wallet.
   const [networkMenuOpen, setNetworkMenuOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<StellarNetwork | null>(null);
   const [switchHint, setSwitchHint] = useState<string | null>(null);
-  // Mobile language dropdown
   const [mobileLangOpen, setMobileLangOpen] = useState(false);
 
   const toggleButtonRef = useRef<HTMLButtonElement>(null);
@@ -304,7 +276,6 @@ const Navbar = () => {
     setMobileOpen(false);
   }, [disconnect]);
 
-  // Keyboard navigation: Handle Escape key to close mobile menu
   useEffect(() => {
     if (!mobileOpen) return;
 
@@ -318,7 +289,6 @@ const Navbar = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [mobileOpen]);
 
-  // Escape also closes the network switcher menu.
   useEffect(() => {
     if (!networkMenuOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -395,7 +365,6 @@ const Navbar = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [networkMenuOpen]);
 
-  // Focus management: Move focus into menu on open, return focus to toggle on close
   useEffect(() => {
     if (mobileOpen) {
       const timer = requestAnimationFrame(() => {
@@ -414,11 +383,6 @@ const Navbar = () => {
 
   const addressDisplay = useMemo(() => (address ? `${address.slice(0, 4)}...${address.slice(-4)}` : null), [address]);
 
-  // The indicator reports the wallet's actual network — or the app's target
-  // network before a wallet is connected / while its network is unreadable —
-  // so users always know which chain they are on. It is persistent (rendered
-  // connected or not) and visually distinct for non-mainnet networks. (#480)
-  // `networkStatus ?? APP_NETWORK` guards the partial mocks used in tests.
   const displayNetworkStatus: WalletNetworkState = networkStatus ?? APP_NETWORK;
   const switcherBadge = useMemo(() => {
     const label = formatNetworkLabel(displayNetworkStatus, walletNetworkName);
@@ -453,9 +417,6 @@ const Navbar = () => {
     [switchNetwork]
   );
 
-  // The badge reports what the wallet is actually on, including networks the
-  // app can't use. Rendering an unsupported network as "Testnet" is what made
-  // #289 invisible to users. (#289)
   const networkBadge = useMemo(() => {
     const label = formatNetworkLabel(networkStatus, walletNetworkName);
     if (networkStatus === "PUBLIC") {
@@ -477,11 +438,6 @@ const Navbar = () => {
   return (
     <nav aria-label="Main navigation" className="fixed top-0 left-0 right-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* The full nav-link list plus the connected-wallet chip can exceed
-            max-w-7xl on real desktop widths, with nothing here to wrap; an
-            unscrollable overflow made the disconnect control silently
-            unreachable (discovered via #669's e2e rewrite — worth its own
-            issue for a proper responsive redesign, not fixed further here). */}
         <div className="flex items-center justify-between h-16 overflow-x-auto">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--primary)] to-[var(--secondary)] flex items-center justify-center">
@@ -513,7 +469,6 @@ const Navbar = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Persistent network indicator + switcher (#480) */}
             <div className="relative hidden sm:block">
               <button
                 ref={networkTriggerRef}
@@ -559,7 +514,6 @@ const Navbar = () => {
               )}
             </div>
 
-            {/* Help */}
             <button
               onClick={openHelp}
               aria-label={t("common.help")}
@@ -569,16 +523,8 @@ const Navbar = () => {
               <HelpCircle className="w-4 h-4" />
             </button>
 
-            {/* Language switcher (desktop) */}
             <LanguageSwitcher />
-
-            {/* Notification centre (#477, #844). This row is visible at every
-                width, so one instance serves both the desktop and the mobile
-                navbar; a second copy inside the mobile menu would duplicate the
-                panel's id. */}
             <NotificationCentre />
-
-            {/* Theme toggle */}
             <ThemeToggle />
 
             {isConnected ? (
@@ -621,6 +567,32 @@ const Navbar = () => {
           </div>
         </div>
       </div>
+
+      {!isConnected && connectError && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          data-testid="wallet-connect-error"
+          className="border-t border-[var(--error)]/30 bg-[var(--error)]/10 px-4 py-2"
+        >
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 text-[var(--error)] text-sm">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              <span>{connectError}</span>
+            </div>
+            {typeof clearConnectError === "function" && (
+              <button
+                type="button"
+                onClick={clearConnectError}
+                aria-label="Dismiss wallet connection error"
+                className="flex-shrink-0 text-[var(--error)]/70 hover:text-[var(--error)] transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {isConnected && !isNetworkSupported && (
         <div
@@ -806,14 +778,21 @@ const Navbar = () => {
                 </button>
               </div>
             ) : (
-              <button
-                onClick={handleMobileConnect}
-                disabled={isConnecting}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[var(--primary)] text-white text-sm font-medium"
-              >
-                <Wallet className="w-4 h-4" />
-                {isConnecting ? t("common.loading") : t("common.connect_wallet")}
-              </button>
+              <div className="space-y-2">
+                <button
+                  onClick={handleMobileConnect}
+                  disabled={isConnecting}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[var(--primary)] text-white text-sm font-medium"
+                >
+                  <Wallet className="w-4 h-4" />
+                  {isConnecting ? t("common.loading") : t("common.connect_wallet")}
+                </button>
+                {connectError && (
+                  <p role="alert" className="px-3 text-xs text-[var(--error)]">
+                    {connectError}
+                  </p>
+                )}
+              </div>
             )}
           </div>
         </div>

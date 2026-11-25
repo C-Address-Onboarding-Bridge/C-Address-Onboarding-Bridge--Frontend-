@@ -1,4 +1,12 @@
-import { isFeatureFlagPanelEnabled } from '../lib/featureFlags';
+// @vitest-environment jsdom
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import {
+  isFeatureFlagPanelEnabled,
+  isFeatureEnabled,
+  getDevOverrides,
+  setDevOverride,
+  clearDevOverride,
+} from '../lib/featureFlags';
 
 describe('isFeatureFlagPanelEnabled', () => {
   const originalEnv = process.env;
@@ -6,6 +14,7 @@ describe('isFeatureFlagPanelEnabled', () => {
   afterEach(() => {
     process.env = originalEnv;
     window.localStorage.clear();
+    vi.unstubAllEnvs();
   });
 
   // -------------------------------------------------------------------------
@@ -15,14 +24,11 @@ describe('isFeatureFlagPanelEnabled', () => {
     it('uses a persistent localStorage-backed id, not sessionStorage', () => {
       vi.stubEnv('NODE_ENV', 'production');
 
-      // Simulate a fresh tab: sessionStorage is empty, localStorage persists.
       sessionStorage.clear();
       localStorage.clear();
 
       isFeatureEnabled('new_onboarding_flow');
 
-      // The bucketing id must be persisted in localStorage so it survives
-      // new tabs and new sessions.
       const keys = Object.keys(localStorage);
       const hasPersistentId = keys.some((k) => localStorage.getItem(k));
       expect(hasPersistentId).toBe(true);
@@ -31,13 +37,10 @@ describe('isFeatureFlagPanelEnabled', () => {
     it('produces the same bucket across simulated sessions', () => {
       vi.stubEnv('NODE_ENV', 'production');
 
-      // First session: establish the persistent id.
       localStorage.clear();
       sessionStorage.clear();
       const first = isFeatureEnabled('new_onboarding_flow');
 
-      // Simulate a brand-new tab/session: sessionStorage is wiped but
-      // localStorage (the persistent id) remains.
       sessionStorage.clear();
       const second = isFeatureEnabled('new_onboarding_flow');
 
@@ -65,7 +68,7 @@ describe('isFeatureFlagPanelEnabled', () => {
       vi.stubEnv('NODE_ENV', 'development');
       setDevOverride('new_onboarding_flow', true);
       setDevOverride('advanced_address_validation', false);
-      
+
       const result = getDevOverrides();
       expect(result).toEqual({
         new_onboarding_flow: true,
@@ -94,19 +97,16 @@ describe('isFeatureFlagPanelEnabled', () => {
 
       setDevOverride('new_onboarding_flow', true);
 
-      // localStorage must remain empty — the guard fired before writing.
       expect(localStorage.getItem('ff_dev_overrides')).toBeNull();
     });
 
     it('clearDevOverride does not write to localStorage in production', () => {
-      // Pre-seed via raw localStorage so we bypass the guard on write.
       vi.stubEnv('NODE_ENV', 'development');
       setDevOverride('new_onboarding_flow', true);
 
       vi.stubEnv('NODE_ENV', 'production');
       clearDevOverride('new_onboarding_flow');
 
-      // The key should still be present — clearDevOverride was a no-op.
       const stored = localStorage.getItem('ff_dev_overrides');
       expect(stored).not.toBeNull();
       const parsed = JSON.parse(stored!);
@@ -114,7 +114,6 @@ describe('isFeatureFlagPanelEnabled', () => {
     });
 
     it('setDevOverride does not write in test environment', () => {
-      // NODE_ENV is 'test' by default in Vitest.
       vi.stubEnv('NODE_ENV', 'test');
       setDevOverride('new_onboarding_flow', true);
       expect(localStorage.getItem('ff_dev_overrides')).toBeNull();
