@@ -142,6 +142,18 @@ describe("LocaleContext — setLocale", () => {
     expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe(target);
   });
 
+  it("sets document.documentElement.lang to the active locale (#1021)", async () => {
+    await act(async () => {
+      renderWithLocale();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("set-fr"));
+    });
+
+    expect(document.documentElement.lang).toBe("fr");
+  });
+
   it("does not switch to an unsupported locale", async () => {
     await act(async () => {
       render(

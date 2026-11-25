@@ -47,7 +47,11 @@ interface WalletContextType {
    * when the wallet has no programmatic switch API. (#480)
    */
   switchNetwork: (target: "PUBLIC" | "TESTNET") => Promise<SwitchNetworkResult>;
-  connect: () => Promise<void>;
+  /**
+   * Opens the wallet selection modal. Resolves with the connected address, or
+   * null when the user dismissed the modal without a wallet answering. (#1026)
+   */
+  connect: () => Promise<string | null>;
   disconnect: () => void;
   /** True when the browser reports an active network connection. (#475) */
   isOnline: boolean;
@@ -71,7 +75,7 @@ interface WalletContextType {
    * Opens the Stellar Wallets Kit wallet selection modal programmatically.
    * Equivalent to calling connect() but makes the modal intent explicit. (#459)
    */
-  openWalletModal: () => Promise<void>;
+  openWalletModal: () => Promise<string | null>;
 }
 
 const WalletContext = createContext<WalletContextType | null>(null);
@@ -369,7 +373,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     [updateConnection]
   );
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (): Promise<string | null> => {
     // An explicit connect clears the sticky disconnect so polling resumes. (#288)
     manuallyDisconnectedRef.current = false;
     setIsConnecting(true);
@@ -391,10 +395,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         initialNetworkRef.current = isSupportedNetwork(status) ? status : null;
         dismissedRef.current = false;
         setNetworkMismatch(false);
+        return pk;
       } else {
         // User dismissed the modal: leave the stored session decision in force
         // instead of letting a cancelled attempt count as a reconnect.
         manuallyDisconnectedRef.current = loadSession().manuallyDisconnected;
+        return null;
       }
     } catch (e) {
       // Report the failure, then rethrow so the caller (and the boundary that
