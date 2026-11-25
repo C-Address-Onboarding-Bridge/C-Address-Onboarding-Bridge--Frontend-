@@ -34,6 +34,29 @@ const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB
  * unvalidated user input beyond the query string — so this can't be used to
  * reach arbitrary backend routes our own UI doesn't already call.
  */
+/**
+ * Backend routes this frontend proxies to, as confirmed against the backend
+ * (#1007). A route handler must only ever pass one of these to
+ * `proxyToBackend`; `src/app/api/backend/__tests__/contract.test.ts` checks
+ * every proxied path against this list so a dead target fails CI instead of
+ * silently 404ing in production.
+ */
+export const BACKEND_ROUTES = [
+  "/api/v1/fund/timelocked",
+  "/api/v1/fund/timelocked/:id/claim",
+  "/api/v1/referrals/stats",
+] as const;
+
+export type BackendRoute = (typeof BACKEND_ROUTES)[number];
+
+/**
+ * Response for a proxy route whose backend endpoint does not exist yet
+ * (#1007): 501 instead of forwarding to a path that would 404.
+ */
+export function notImplementedResponse(): Response {
+  return NextResponse.json({ error: "not_implemented" }, { status: 501 });
+}
+
 export async function proxyToBackend(request: Request, backendPath: string): Promise<Response> {
   // Validate origin to prevent CSRF attacks (#891)
   const origin = request.headers.get("origin");

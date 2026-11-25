@@ -2,6 +2,12 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { NEVER_CACHE_ORIGINS } from "@/lib/serviceWorker";
+import {
+  buildCsp,
+  buildWidgetCsp,
+  buildConnectSrcOrigins,
+} from "@/proxy";
+import nextConfigModule from "../../next.config";
 
 /**
  * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
@@ -59,7 +65,6 @@ const sourceFiles: SourceFile[] = SCANNED_DIRS.flatMap((dir) =>
   collect(path.join(srcRoot, dir)),
 );
 
-const nextConfig = readFileSync(path.join(repoRoot, "next.config.ts"), "utf8");
 const swSource = readFileSync(path.join(repoRoot, "public/sw.js"), "utf8");
 
 /** Reports `file:line` for every line matching `pattern`, so failures point at the offender. */
@@ -177,93 +182,189 @@ describe("secret material", () => {
   });
 });
 
-describe("security headers (next.config.ts)", () => {
-  it("sends a Content-Security-Policy header", () => {
-    expect(nextConfig).toMatch(/Content-Security-Policy/);
-  });
+/** Parses a CSP string into directive -> sources, so assertions read the policy, not its source text. */
+function parseCsp(csp: string): Map<string, string[]> {
+  const directives = new Map<string, string[]>();
+  for (const part of csp.split(";")) {
+    const [name, ...sources] = part.trim().split(/\s+/).filter(Boolean);
+    if (name) directives.set(name, sources);
+  }
+  return directives;
+}
 
+const testEnv: Record<string, string | undefined> = {
+  NODE_ENV: "production",
+  NEXT_PUBLIC_API_URL: "https://api.example.test",
+  NEXT_PUBLIC_TRANSACTION_STATUS_URL: "https://status.example.test",
+};
+
+describe("Content-Security-Policy (src/proxy.ts)", () => {
   it.each([
-    ["default-src 'self'", /default-src 'self'/],
-    ["frame-ancestors 'none'", /frame-ancestors 'none'/],
-    ["object-src 'none'", /object-src 'none'/],
-    ["base-uri 'self'", /base-uri 'self'/],
-    ["form-action 'self'", /form-action 'self'/],
-    ["upgrade-insecure-requests", /upgrade-insecure-requests/],
-  ])("CSP declares %s", (_label, pattern) => {
-    expect(nextConfig).toMatch(pattern);
+    ["default-src", ["'self'"]],
+    ["object-src", ["'none'"]],
+    ["base-uri", ["'self'"]],
+    ["form-action", ["'self'"]],
+    ["frame-ancestors", ["'none'"]],
+    ["upgrade-insecure-requests", []],
+  ])("declares %s", (directive, sources) => {
+    const csp = parseCsp(buildCsp(testEnv));
+    expect(csp.has(directive)).toBe(true);
+    expect(csp.get(directive)).toEqual(sources);
   });
 
   it("never allows a wildcard source in the CSP", () => {
-    const csp = nextConfig.match(/const cspHeader = `([\s\S]*?)`/)?.[1];
-    expect(csp, "cspHeader template literal not found in next.config.ts").toBeTruthy();
+    const csp = buildCsp(testEnv);
     expect(csp).not.toMatch(/\*/);
     expect(csp).not.toMatch(/https:(?!\/\/)/);
   });
 
   it("only permits 'unsafe-eval' in development", () => {
-    const csp = nextConfig.match(/const cspHeader = `([\s\S]*?)`/)![1];
-    const unsafeEval = csp.match(/.*unsafe-eval.*/)?.[0];
-    if (unsafeEval) {
-      expect(unsafeEval).toMatch(/isDev/);
-    }
+    expect(buildCsp({ ...testEnv, NODE_ENV: "production" })).not.toMatch(/unsafe-eval/);
+    expect(buildCsp({ ...testEnv, NODE_ENV: "development" })).toMatch(/unsafe-eval/);
+  });
+
+  it("stamps the nonce on script-src when one is supplied", () => {
+    const csp = parseCsp(buildCsp(testEnv, "abc123"));
+    expect(csp.get("script-src")).toContain("'nonce-abc123'");
+    expect(csp.get("script-src")).toContain("'strict-dynamic'");
   });
 
   it("restricts connect-src to self and known Stellar endpoints", () => {
-    const connectSrc = nextConfig.match(/connect-src([\s\S]*?);/)?.[1] ?? "";
-    expect(connectSrc).toMatch(/'self'/);
-    for (const origin of connectSrc.match(/https:\/\/[^\s]+/g) ?? []) {
-      expect(origin).toMatch(/\.stellar\.org$/);
+    const origins = buildConnectSrcOrigins(testEnv);
+    expect(origins).toContain("'self'");
+    expect(origins).toContain("https://api.example.test");
+    expect(origins).toContain("https://status.example.test");
+    for (const origin of origins.filter((o) => o !== "'self'")) {
+      expect(origin).toMatch(/^https:\/\//);
     }
+    expect(parseCsp(buildCsp(testEnv)).get("connect-src")).toEqual(origins);
   });
 
   it.each([
-    ["X-Frame-Options", /"X-Frame-Options"[\s\S]{0,60}"DENY"/],
-    ["Referrer-Policy", /"Referrer-Policy"[\s\S]{0,80}"strict-origin-when-cross-origin"/],
-    ["Permissions-Policy", /"Permissions-Policy"[\s\S]{0,120}camera=\(\)/],
-  ])("sends %s", (_label, pattern) => {
-    expect(nextConfig).toMatch(pattern);
+    ["X-Frame-Options", "DENY"],
+    ["X-Content-Type-Options", "nosniff"],
+    ["Referrer-Policy", "strict-origin-when-cross-origin"],
+    ["Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()"],
+  ])("sends %s", (key, value) => {
+    const headers = nextConfigModule.headers;
+    expect(headers).toBeTypeOf("function");
+    return headers!().then((entries) => {
+      const strict = entries.find((entry) => entry.source === "/((?!widget(?:/|$)).*)");
+      expect(strict, "strict header entry not found").toBeTruthy();
+      expect(strict!.headers).toContainEqual({ key, value });
+    });
   });
 
-  it("applies the header set to every route except the embeddable widget", () => {
+  it("sends X-Content-Type-Options: nosniff on the widget route too", async () => {
+    const entries = await nextConfigModule.headers!();
+    const widgetEntries = entries.filter((entry) => entry.source.startsWith("/widget"));
+    expect(widgetEntries).toHaveLength(2);
+    for (const entry of widgetEntries) {
+      expect(entry.headers).toContainEqual({
+        key: "X-Content-Type-Options",
+        value: "nosniff",
+      });
+    }
+  });
+
+  it("sends Strict-Transport-Security in production only", async () => {
+    const original = process.env.NODE_ENV;
+    const hsts = {
+      key: "Strict-Transport-Security",
+      value: "max-age=63072000; includeSubDomains",
+    };
+    try {
+      process.env.NODE_ENV = "production";
+      const prodEntries = await nextConfigModule.headers!();
+      expect(prodEntries.length).toBeGreaterThan(0);
+      for (const entry of prodEntries) {
+        expect(entry.headers).toContainEqual(hsts);
+      }
+
+      process.env.NODE_ENV = "development";
+      const devEntries = await nextConfigModule.headers!();
+      for (const entry of devEntries) {
+        expect(entry.headers).not.toContainEqual(
+          expect.objectContaining({ key: "Strict-Transport-Security" }),
+        );
+      }
+    } finally {
+      process.env.NODE_ENV = original;
+    }
+  });
+
+  it("applies the header set to every route except the embeddable widget", async () => {
     // #558: the widget is designed to be framed by third-party host pages,
     // so it deliberately doesn't get frame-ancestors 'none' / X-Frame-Options
-    // DENY. This asserts the carve-out is exactly "/widget" and nothing
-    // broader, so a future edit can't widen it by accident.
-    expect(nextConfig).toMatch(/source:\s*"\/\(\(\?!widget\)\.\*\)"/);
+    // DENY. The carve-out is scoped exactly (not a "starts with widget"
+    // prefix) so /widgets and /widget-preview keep the strict headers.
+    const entries = await nextConfigModule.headers!();
+    const strict = entries.find((entry) => entry.source === "/((?!widget(?:/|$)).*)");
+    expect(strict, "strict header entry not found").toBeTruthy();
+    expect(strict!.headers).toContainEqual({ key: "X-Frame-Options", value: "DENY" });
+
+    const widgetSources = entries
+      .filter((entry) => entry.headers !== strict!.headers)
+      .map((entry) => entry.source);
+    expect(widgetSources).toEqual(["/widget", "/widget/:path*"]);
   });
 });
 
 describe("embeddable widget headers (#558)", () => {
-  it("gives the widget route its own header set, not the strict default", () => {
-    expect(nextConfig).toMatch(/source:\s*"\/widget\/:path\*"/);
-    expect(nextConfig).toMatch(/headers:\s*widgetSecurityHeaders/);
+  it("gives the widget route its own header set, not the strict default", async () => {
+    const entries = await nextConfigModule.headers!();
+    const widgetEntries = entries.filter((entry) => entry.source.startsWith("/widget"));
+    expect(widgetEntries.map((entry) => entry.source)).toEqual([
+      "/widget",
+      "/widget/:path*",
+    ]);
+    for (const entry of widgetEntries) {
+      expect(entry.headers).not.toContainEqual(
+        expect.objectContaining({ key: "X-Frame-Options" }),
+      );
+    }
   });
 
   it("relaxes frame-ancestors for the widget instead of dropping CSP outright", () => {
-    const widgetHeaders = nextConfig.match(
-      /const widgetSecurityHeaders = \[([\s\S]*?)\n\];/,
-    )?.[1];
-    expect(widgetHeaders, "widgetSecurityHeaders array not found in next.config.ts").toBeTruthy();
-    // Checks the .replace() call rewrites the shared cspHeader's
-    // frame-ancestors, not that the string "frame-ancestors 'none'" is
-    // absent from this block's source text — it necessarily appears once,
-    // as the pattern the .replace() call matches against.
-    expect(widgetHeaders).toMatch(/\.replace\(\/frame-ancestors 'none';\/, "frame-ancestors \*;"\)/);
+    const csp = parseCsp(buildWidgetCsp(testEnv));
+    expect(csp.has("frame-ancestors")).toBe(true);
+    expect(csp.get("frame-ancestors")).not.toEqual(["'none'"]);
+    // Everything else is still the strict policy.
+    expect(csp.get("default-src")).toEqual(["'self'"]);
+    expect(csp.get("object-src")).toEqual(["'none'"]);
   });
 
-  it("does not send X-Frame-Options on the widget route (no permissive value exists for it)", () => {
-    const widgetHeaders = nextConfig.match(
-      /const widgetSecurityHeaders = \[([\s\S]*?)\n\];/,
-    )?.[1];
-    expect(widgetHeaders).not.toMatch(/X-Frame-Options/);
+  it("yields frame-ancestors 'none' with no allowlist and exactly the listed origins otherwise", () => {
+    expect(parseCsp(buildWidgetCsp(testEnv)).get("frame-ancestors")).toEqual(["'none'"]);
+
+    const allowlisted = parseCsp(
+      buildWidgetCsp({
+        ...testEnv,
+        NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS:
+          "https://host-a.example, https://host-b.example",
+      }),
+    ).get("frame-ancestors");
+    expect(allowlisted).toEqual(["https://host-a.example", "https://host-b.example"]);
   });
 
-  it("keeps Referrer-Policy and Permissions-Policy on the widget route", () => {
-    const widgetHeaders = nextConfig.match(
-      /const widgetSecurityHeaders = \[([\s\S]*?)\n\];/,
-    )?.[1];
-    expect(widgetHeaders).toMatch(/"Referrer-Policy"/);
-    expect(widgetHeaders).toMatch(/"Permissions-Policy"/);
+  it("does not send X-Frame-Options on the widget route (no permissive value exists for it)", async () => {
+    const entries = await nextConfigModule.headers!();
+    const widgetEntries = entries.filter((entry) => entry.source.startsWith("/widget"));
+    expect(widgetEntries.length).toBeGreaterThan(0);
+    for (const entry of widgetEntries) {
+      expect(entry.headers.map((header) => header.key)).not.toContain("X-Frame-Options");
+    }
+  });
+
+  it("keeps Referrer-Policy and Permissions-Policy on the widget route", async () => {
+    const entries = await nextConfigModule.headers!();
+    const widgetEntries = entries.filter((entry) => entry.source.startsWith("/widget"));
+    expect(widgetEntries.length).toBeGreaterThan(0);
+    for (const entry of widgetEntries) {
+      const keys = entry.headers.map((header) => header.key);
+      expect(keys).toContain("Referrer-Policy");
+      expect(keys).toContain("Permissions-Policy");
+    }
   });
 });
 

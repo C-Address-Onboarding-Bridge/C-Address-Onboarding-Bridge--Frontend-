@@ -19,7 +19,7 @@ import bundleAnalyzer from "@next/bundle-analyzer";
  *      no longer sent.
  *
  * NOTE (#879): the Content-Security-Policy itself is emitted by
- * `src/middleware.ts`, which needs a per-request nonce and env-driven
+ * `src/proxy.ts`, which needs a per-request nonce and env-driven
  * connect-src. This file only carries the static headers, so there is exactly
  * one CSP on every response.
  */
@@ -47,10 +47,30 @@ const maxJsAssetBytes = 1024 * 1024;
 // bundle-size budget violations fail the build instead of scrolling past.
 const enforceBudget = process.env.ENFORCE_BUDGET === "true";
 
+/**
+ * HSTS (#1010) is production-only: sending it from a local `http://localhost`
+ * dev server would pin the browser to https for that host and break dev.
+ * `preload` is deliberately omitted — it's a one-way commitment to the
+ * browser preload list and needs a separate decision.
+ */
+const strictTransportSecurityHeaders =
+  process.env.NODE_ENV === "production"
+    ? [
+        {
+          key: "Strict-Transport-Security",
+          value: "max-age=63072000; includeSubDomains",
+        },
+      ]
+    : [];
+
 const securityHeaders = [
   {
     key: "X-Frame-Options",
     value: "DENY",
+  },
+  {
+    key: "X-Content-Type-Options",
+    value: "nosniff",
   },
   {
     key: "Referrer-Policy",
@@ -75,6 +95,10 @@ const securityHeaders = [
  * parent origin.
  */
 const widgetSecurityHeaders = [
+  {
+    key: "X-Content-Type-Options",
+    value: "nosniff",
+  },
   {
     key: "Referrer-Policy",
     value: "strict-origin-when-cross-origin",
@@ -116,15 +140,15 @@ const nextConfig: NextConfig = {
       // like /widgets or /widget-preview keep X-Frame-Options: DENY.
       {
         source: "/((?!widget(?:/|$)).*)",
-        headers: securityHeaders,
+        headers: [...securityHeaders, ...strictTransportSecurityHeaders],
       },
       {
         source: "/widget",
-        headers: widgetSecurityHeaders,
+        headers: [...widgetSecurityHeaders, ...strictTransportSecurityHeaders],
       },
       {
         source: "/widget/:path*",
-        headers: widgetSecurityHeaders,
+        headers: [...widgetSecurityHeaders, ...strictTransportSecurityHeaders],
       },
     ];
   },
