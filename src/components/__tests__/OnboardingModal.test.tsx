@@ -57,10 +57,11 @@ describe('OnboardingModal', () => {
     expect(screen.queryByTestId('back-button')).not.toBeInTheDocument();
   });
 
-  it('shows Back button on subsequent steps', () => {
+  it('shows Back button on subsequent steps (Skip still visible as close control)', () => {
     render(<OnboardingModal {...defaultProps} initialStep={1} />);
     expect(screen.getByTestId('back-button')).toBeInTheDocument();
-    expect(screen.queryByTestId('skip-button')).not.toBeInTheDocument();
+    // Skip/close button is always visible (#913)
+    expect(screen.getByTestId('skip-button')).toBeInTheDocument();
   });
 
   it('calls onClose when Skip is clicked', () => {
@@ -94,6 +95,7 @@ describe('OnboardingModal', () => {
     const modal = screen.getByTestId('onboarding-modal');
     expect(modal).toHaveAttribute('role', 'dialog');
     expect(modal).toHaveAttribute('aria-modal', 'true');
+    expect(modal).toHaveAttribute('aria-labelledby', 'onboarding-step-title');
   });
 
   it('updates progress bar correctly', () => {
@@ -120,5 +122,38 @@ describe('OnboardingModal', () => {
     expect(screen.getByTestId('step-title')).toHaveTextContent('Connect Wallet');
     expect(screen.getByTestId('step-indicator')).toHaveTextContent('Step 2 of 3');
     expect(localStorage.getItem('onboarding:test-resume')).toBe('1');
+  });
+
+  // --- #913: accessibility tests -------------------------------------------
+
+  it('shows a Skip/close control on an option step (step 1 with options)', () => {
+    const stepsWithOptions: OnboardingStep[] = [
+      {
+        title: 'What is a C-address?',
+        description: 'A C-address is a smart contract account.',
+        options: [
+          { id: 'new', label: "I'm new to Stellar" },
+          { id: 'have-g', label: 'I already have a G-address' },
+        ],
+      },
+    ];
+    render(<OnboardingModal {...defaultProps} steps={stepsWithOptions} />);
+    // Skip/close button must be visible even on an option-only step
+    expect(screen.getByTestId('skip-button')).toBeInTheDocument();
+  });
+
+  it('closes on Escape right after open with no prior click (document-level handler)', () => {
+    const onClose = vi.fn();
+    render(<OnboardingModal {...defaultProps} onClose={onClose} />);
+    // Dispatch Escape at the document level — no click inside the modal first
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('has aria-labelledby pointing at the step title', () => {
+    render(<OnboardingModal {...defaultProps} />);
+    const modal = screen.getByTestId('onboarding-modal');
+    const title = screen.getByTestId('step-title');
+    expect(modal.getAttribute('aria-labelledby')).toBe(title.id);
   });
 });

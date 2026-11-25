@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
-import { ArrowRight } from 'lucide-react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { ArrowRight, X } from 'lucide-react';
 import { useHydrated } from '@/hooks/useHydrated';
 
 export interface OnboardingOption {
@@ -137,6 +137,74 @@ export function OnboardingModal({
     }
   }, [currentStep]);
 
+  // --- Focus management (#913) ------------------------------------------------
+  // Move focus into the dialog when it opens, trap Tab within it, and restore
+  // focus to the previously focused element when it closes. Escape is handled
+  // at the document level so it works even before focus enters the dialog.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
+
+  // Move focus to the step heading (or first focusable control) on open and on
+  // every step change so screen-reader users hear the new step title.
+  useEffect(() => {
+    if (!isOpen) return;
+    // Capture the element that had focus before the modal opened.
+    if (!previouslyFocused.current) {
+      previouslyFocused.current = document.activeElement as HTMLElement;
+    }
+    // Defer until after render so the heading exists.
+    const id = requestAnimationFrame(() => {
+      const heading = dialogRef.current?.querySelector<HTMLElement>('[data-testid="step-title"]');
+      if (heading) {
+        heading.setAttribute('tabindex', '-1');
+        heading.focus();
+      }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [isOpen, currentStep]);
+
+  // Restore focus to the trigger when the modal closes.
+  useEffect(() => {
+    if (isOpen) return;
+    if (previouslyFocused.current) {
+      previouslyFocused.current.focus();
+      previouslyFocused.current = null;
+    }
+  }, [isOpen]);
+
+  // Escape at the document level — works even if focus hasn't entered the dialog.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+      // Trap Tab within the dialog.
+      if (e.key === 'Tab') {
+        const container = dialogRef.current;
+        if (!container) return;
+        const focusables = container.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [isOpen, onClose]);
+
+  // Legacy onKeyDown kept for completeness; the document-level handler above
+  // is the authoritative Escape listener.
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -156,7 +224,7 @@ export function OnboardingModal({
       className="onboarding-overlay fixed inset-0 z-50 flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Onboarding"
+      aria-labelledby="onboarding-step-title"
       onKeyDown={handleKeyDown}
       data-testid="onboarding-modal"
       style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
@@ -165,9 +233,24 @@ export function OnboardingModal({
           landscape, a small popup window) scrolls inside the dialog instead of
           pushing the Next/Back controls off-screen with no way to reach them. */}
       <div
-        className="onboarding-content card w-full max-w-[480px] max-h-[90vh] overflow-y-auto p-8"
+        ref={dialogRef}
+        className="onboarding-content card w-full max-w-[480px] max-h-[90vh] overflow-y-auto p-8 relative"
         style={{ boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' }}
       >
+        {/* Always-visible Skip/Close control (#913). On the first step this is
+            labelled "Skip"; on later steps it closes (dismisses) the modal.
+            Rendered outside the option/non-option branch so it appears on every
+            step, including option-only steps where the old code had no Skip. */}
+        <button
+          type="button"
+          onClick={onClose}
+          data-testid="skip-button"
+          aria-label={isFirst ? 'Skip onboarding' : 'Close onboarding'}
+          className="absolute top-4 right-4 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
         {/* Progress bar */}
         <div className="h-1 rounded-full bg-[var(--surface-2)] mb-6 overflow-hidden">
           <div
@@ -184,7 +267,11 @@ export function OnboardingModal({
 
         {/* Step content */}
         {step.icon && <div className="mb-4">{step.icon}</div>}
-        <h2 className="text-2xl font-semibold mb-3 text-[var(--foreground)]" data-testid="step-title">
+        <h2
+          id="onboarding-step-title"
+          className="text-2xl font-semibold mb-3 text-[var(--foreground)]"
+          data-testid="step-title"
+        >
           {step.title}
         </h2>
         <p className="text-base text-[var(--text-muted)] mb-8 leading-relaxed" data-testid="step-description">
@@ -218,7 +305,7 @@ export function OnboardingModal({
           </div>
         ) : (
           <div className="flex justify-between gap-3">
-            {!isFirst ? (
+            {!isFirst && (
               <button
                 type="button"
                 onClick={handleBack}
@@ -227,21 +314,12 @@ export function OnboardingModal({
               >
                 Back
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={onClose}
-                data-testid="skip-button"
-                className="px-6 py-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-[var(--foreground)] text-sm hover:bg-[var(--border)] transition-colors"
-              >
-                Skip
-              </button>
             )}
             <button
               type="button"
               onClick={handleNext}
               data-testid="next-button"
-              className="px-6 py-2.5 rounded-lg bg-[var(--primary)] text-white text-sm font-medium hover:bg-[var(--primary)]/90 transition-colors"
+              className="px-6 py-2.5 rounded-lg bg-[var(--primary)] text-white text-sm font-medium hover:bg-[var(--primary)]/90 transition-colors ml-auto"
             >
               {isLast ? (step.nextLabel ?? 'Get Started') : 'Next'}
             </button>

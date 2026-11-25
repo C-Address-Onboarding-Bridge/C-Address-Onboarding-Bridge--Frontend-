@@ -690,6 +690,17 @@ function isUnfundedAccountError(err: unknown): boolean {
   return e.response?.status === 404;
 }
 
+/**
+ * Check whether an error thrown by `fetchHorizonJson` is a 404 "not found"
+ * response (the transaction/account hasn't been ingested yet). Mirrors the
+ * `isNotFound` helper in the server-side status route (`status/route.ts`).
+ */
+function isHorizonNotFound(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as { response?: { status?: number } };
+  return e.response?.status === 404;
+}
+
 async function withBalanceFallback(
   promise: Promise<AccountBalances>
 ): Promise<AccountBalances> {
@@ -2140,8 +2151,11 @@ export async function getTransactionByHash(
   };
   try {
     record = await fetchHorizonJson(network, basePath);
-  } catch {
-    // Not ingested yet → still in flight, not unknown.
+  } catch (err) {
+    // Only a 404 means "not ingested yet" — the transaction may still be in
+    // flight. Any other failure (5xx, 429, network error) is an upstream
+    // problem that must surface as an error, not a perpetual "pending" poll.
+    if (!isHorizonNotFound(err)) throw err;
     return {
       hash,
       network,
@@ -2222,6 +2236,31 @@ export async function getTransactionByHash(
     memo: record.memo ?? null,
     sequence: Number.isFinite(sequenceNumber) ? sequenceNumber : null,
   };
+}
+
+/**
+ * Resolve a transaction hash to details, trying the wallet's network first and
+ * falling back to the other on 404. When `linkNetwork` is provided, only that
+ * network is consulted (#717). Any non-404 error (5xx, 429, network failure)
+ * is rethrown so the caller can surface a retryable error instead of polling
+ * forever.
+ */
+export async function findTransactionByHash(
+  hash: string,
+  walletNetwork: StellarNetwork,
+  linkNetwork: StellarNetwork | null = null,
+): Promise<TransactionDetails | null> {
+  if (linkNetwork) {
+    return getTransactionByHash(hash, linkNetwork);
+  }
+  try {
+    return await getTransactionByHash(hash, walletNetwork);
+  } catch (err) {
+    if (!isHorizonNotFound(err)) throw err;
+    // 404 — try the other network
+    const otherNetwork: StellarNetwork = walletNetwork === "TESTNET" ? "PUBLIC" : "TESTNET";
+    return getTransactionByHash(hash, otherNetwork);
+  }
 }
 
 /* -------------------------------------------------------------------------- */
