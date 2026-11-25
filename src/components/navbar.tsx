@@ -218,6 +218,8 @@ const Navbar = () => {
   const toggleButtonRef = useRef<HTMLButtonElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const wasOpenRef = useRef(false);
+  const networkMenuRef = useRef<HTMLDivElement>(null);
+  const networkTriggerRef = useRef<HTMLButtonElement>(null);
 
   const { openHelp } = useHelp();
   const { locale, setLocale, t } = useLocale();
@@ -254,6 +256,71 @@ const Navbar = () => {
     if (!networkMenuOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        setNetworkMenuOpen(false);
+        networkTriggerRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [networkMenuOpen]);
+
+  // Move focus to the first enabled menuitemradio when the network menu opens.
+  useEffect(() => {
+    if (!networkMenuOpen) return;
+    const frame = requestAnimationFrame(() => {
+      const items = networkMenuRef.current?.querySelectorAll<HTMLButtonElement>(
+        '[role="menuitemradio"]:not([disabled])'
+      );
+      items?.[0]?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [networkMenuOpen]);
+
+  // Close the network menu on outside mousedown (same pattern as LanguageSwitcher).
+  useEffect(() => {
+    if (!networkMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        networkMenuRef.current &&
+        !networkMenuRef.current.contains(e.target as Node) &&
+        networkTriggerRef.current &&
+        !networkTriggerRef.current.contains(e.target as Node)
+      ) {
+        setNetworkMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [networkMenuOpen]);
+
+  // Arrow key navigation inside the network menu.
+  useEffect(() => {
+    if (!networkMenuOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const items = Array.from(
+        networkMenuRef.current?.querySelectorAll<HTMLButtonElement>(
+          '[role="menuitemradio"]:not([disabled])'
+        ) ?? []
+      );
+      if (items.length === 0) return;
+      const focused = document.activeElement as HTMLButtonElement | null;
+      const currentIdx = items.indexOf(focused as HTMLButtonElement);
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        const next = currentIdx < items.length - 1 ? items[currentIdx + 1] : items[0];
+        next?.focus();
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        const prev = currentIdx > 0 ? items[currentIdx - 1] : items[items.length - 1];
+        prev?.focus();
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        items[0]?.focus();
+      } else if (event.key === "End") {
+        event.preventDefault();
+        items[items.length - 1]?.focus();
+      } else if (event.key === "Tab") {
         setNetworkMenuOpen(false);
       }
     };
@@ -309,6 +376,7 @@ const Navbar = () => {
       setSwitchingTo(null);
       if (result === "switched") {
         setNetworkMenuOpen(false);
+        networkTriggerRef.current?.focus();
       } else if (result === "manual") {
         setSwitchHint("Change the network in your wallet — this app will update automatically.");
       } else {
@@ -380,6 +448,7 @@ const Navbar = () => {
             {/* Persistent network indicator + switcher (#480) */}
             <div className="relative hidden sm:block">
               <button
+                ref={networkTriggerRef}
                 onClick={() => setNetworkMenuOpen((v) => !v)}
                 aria-label={`Network: ${switcherBadge.label}. Change network`}
                 aria-haspopup="menu"
@@ -390,6 +459,7 @@ const Navbar = () => {
               </button>
               {networkMenuOpen && (
                 <div
+                  ref={networkMenuRef}
                   role="menu"
                   aria-label="Switch network"
                   className="absolute right-0 top-full mt-1 w-40 rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-lg z-50 py-1"
@@ -399,9 +469,12 @@ const Navbar = () => {
                     return (
                       <button
                         key={target}
-                        role="menuitem"
-                        onClick={() => handleSwitchNetwork(target)}
-                        disabled={switchingTo !== null || isCurrent}
+                        role="menuitemradio"
+                        aria-checked={isCurrent}
+                        onClick={() => {
+                          handleSwitchNetwork(target);
+                        }}
+                        disabled={switchingTo !== null}
                         className="w-full flex items-center justify-between px-3 py-2 text-sm transition-colors hover:bg-[var(--surface-2)] text-[var(--text-muted)] hover:text-[var(--foreground)] disabled:opacity-50"
                       >
                         <span>{target === "PUBLIC" ? "Mainnet" : "Testnet"}</span>
