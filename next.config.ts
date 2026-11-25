@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 import bundleAnalyzer from "@next/bundle-analyzer";
+import fs from "fs";
+import path from "path";
 
 /**
  * Build configuration (#332).
@@ -22,6 +24,10 @@ import bundleAnalyzer from "@next/bundle-analyzer";
  * `src/middleware.ts`, which needs a per-request nonce and env-driven
  * connect-src. This file only carries the static headers, so there is exactly
  * one CSP on every response.
+ *
+ * NOTE (#1075): `scripts/performance-report.js` reads
+ * `.next/build-stats.json`, which nothing generated. When `BUILD_STATS=true`
+ * the client build now dumps webpack stats there so the report has real input.
  */
 
 const withBundleAnalyzer = bundleAnalyzer({
@@ -46,6 +52,9 @@ const maxJsAssetBytes = 1024 * 1024;
 // In CI, flip webpack performance hints from "warning" to "error" so that
 // bundle-size budget violations fail the build instead of scrolling past.
 const enforceBudget = process.env.ENFORCE_BUDGET === "true";
+
+// Opt-in webpack stats dump consumed by scripts/performance-report.js.
+const emitBuildStats = process.env.BUILD_STATS === "true";
 
 const securityHeaders = [
   {
@@ -151,6 +160,36 @@ const nextConfig: NextConfig = {
               : "warning"
             : false,
       };
+
+      // Dump client webpack stats for scripts/performance-report.js (#1075).
+      // Only when BUILD_STATS=true so normal builds don't pay for it.
+      if (emitBuildStats) {
+        config.plugins.push({
+          apply(compiler: {
+            hooks: {
+              done: {
+                tap: (
+                  name: string,
+                  callback: (stats: {
+                    hasErrors: () => boolean;
+                    toJson: (opts: { assets: boolean }) => unknown;
+                  }) => void,
+                ) => void;
+              };
+            };
+          }) {
+            compiler.hooks.done.tap("BuildStatsPlugin", (stats) => {
+              if (stats.hasErrors()) return;
+              const buildDir = path.join(process.cwd(), ".next");
+              fs.mkdirSync(buildDir, { recursive: true });
+              fs.writeFileSync(
+                path.join(buildDir, "build-stats.json"),
+                JSON.stringify(stats.toJson({ assets: true })),
+              );
+            });
+          },
+        });
+      }
     }
     return config;
   },

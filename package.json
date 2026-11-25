@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build --webpack",
+    "build:stats": "cross-env BUILD_STATS=true next build --webpack",
     "analyze": "ANALYZE=true next build --webpack",
+    "perf:report": "node scripts/performance-report.js",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -47,7 +49,7 @@
   "overrides": {
     "axios": "^1.18.0",
     "bs58@4": "4.0.1",
-    "base-x@3": "3.0.11",
+    "base-x@3": "0.3.11",
     "toml": "^4.2.0",
     "source-map-js": "^1.2.2",
     "smol-toml": "^1.9.1",
