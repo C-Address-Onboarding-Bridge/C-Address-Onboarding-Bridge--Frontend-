@@ -64,7 +64,7 @@ interface ErrorBoundaryState {
   inFlight: InFlightTransaction | null;
 }
 
-function readInFlightTransaction(): InFlightTransaction | null {
+export function readInFlightTransaction(): InFlightTransaction | null {
   if (typeof sessionStorage === "undefined") return null;
   try {
     const raw = sessionStorage.getItem(IN_FLIGHT_TRANSACTION_KEY);

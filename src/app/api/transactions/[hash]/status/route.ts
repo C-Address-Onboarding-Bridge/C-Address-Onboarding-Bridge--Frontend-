@@ -12,7 +12,7 @@ const ALLOWED_NETWORKS: StellarNetwork[] = ["PUBLIC", "TESTNET"];
 
 /** How often the server re-checks Horizon while the tx is still in flight. */
 const POLL_INTERVAL_MS = 3_000;
-/** Hard cap for a single SSE connection before it closes. */
+/** Hard cap for a single SSE connection before emitting `event: timeout` and closing. */
 const MAX_DURATION_MS = 30_000;
 /** One Stellar ledger close, in ms (~5s). */
 const LEDGER_CLOSE_MS = 5_000;
@@ -165,8 +165,9 @@ function jsonError(message: string, status: number): Response {
  * Responds with JSON when the client only accepts JSON (single snapshot) and
  * with a Server-Sent Events stream when the client requests `text/event-stream`
  * (the bridge page's live status feed). The stream closes itself once the
- * transaction reaches a terminal state, after MAX_DURATION_MS, or as soon as
- * the client disconnects.
+ * transaction reaches a terminal state, emits `event: timeout` after
+ * MAX_DURATION_MS so the client can reconnect seamlessly, or stops immediately
+ * when the client disconnects. (#952)
  */
 export async function GET(
   request: Request,
@@ -219,37 +220,91 @@ export async function GET(
   }
 
   const encoder = new TextEncoder();
+  let streamCancelled = false;
+  let wakeSleep: (() => void) | null = null;
+
+  const abortStream = () => {
+    streamCancelled = true;
+    if (wakeSleep) {
+      const resolve = wakeSleep;
+      wakeSleep = null;
+      resolve();
+    }
+  };
+
+  request.signal.addEventListener("abort", abortStream, { once: true });
+
+  const waitWithAbort = (ms: number) =>
+    new Promise<void>((resolve) => {
+      if (streamCancelled || request.signal.aborted) {
+        resolve();
+        return;
+      }
+      const timer = setTimeout(() => {
+        wakeSleep = null;
+        resolve();
+      }, ms);
+      wakeSleep = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    });
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const startedAt = Date.now();
+      let reachedTerminalState = false;
+
+      const safeEnqueue = (chunk: string): boolean => {
+        if (streamCancelled || request.signal.aborted) return false;
+        try {
+          controller.enqueue(encoder.encode(chunk));
+          return true;
+        } catch {
+          streamCancelled = true;
+          return false;
+        }
+      };
+
       try {
-        // eslint-disable-next-line no-constant-condition
-        while (Date.now() - startedAt < MAX_DURATION_MS) {
-          if (request.signal.aborted) break;
+        while (!streamCancelled && !request.signal.aborted && Date.now() - startedAt < MAX_DURATION_MS) {
           let payload: StatusResponse;
           try {
             payload = await fetchCurrentStatus(hash, network);
           } catch {
-            controller.enqueue(
-              encoder.encode(
-                `event: error\ndata: ${JSON.stringify({
-                  error: "Failed to reach Horizon",
-                })}\n\n`
-              )
+            safeEnqueue(
+              `event: error\ndata: ${JSON.stringify({
+                error: "Failed to reach Horizon",
+              })}\n\n`
             );
+            reachedTerminalState = true;
             break;
           }
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
-          if (payload.status === "confirmed" || payload.status === "failed") break;
-          await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+          if (streamCancelled || request.signal.aborted) break;
+          if (!safeEnqueue(`data: ${JSON.stringify(payload)}\n\n`)) break;
+          if (payload.status === "confirmed" || payload.status === "failed") {
+            reachedTerminalState = true;
+            break;
+          }
+          await waitWithAbort(POLL_INTERVAL_MS);
+        }
+
+        // Notify the client that the 30s stream window elapsed so it can
+        // reconnect over SSE rather than treating the close as a fatal error. (#952)
+        if (!reachedTerminalState && !streamCancelled && !request.signal.aborted) {
+          safeEnqueue(`event: timeout\ndata: ${JSON.stringify({ reason: "stream_timeout" })}\n\n`);
         }
       } finally {
+        request.signal.removeEventListener("abort", abortStream);
         try {
           controller.close();
         } catch {
           // Stream already closed by the client.
         }
       }
+    },
+    cancel() {
+      abortStream();
     },
   });
 

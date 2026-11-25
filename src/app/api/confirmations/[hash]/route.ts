@@ -3,7 +3,7 @@ import { Horizon } from "@stellar/stellar-sdk";
 import { HORIZON_URL, type StellarNetwork } from "@/lib/types";
 import { isValidHash, type TransactionConfirmation } from "@/lib/confirmations";
 import { extractTransferFromOps } from "@/lib/operationTransfer";
-import { extractTransferFromOps } from "@/lib/stellar";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
 
 /** Stroops per XLM (1 XLM = 10,000,000 stroops). */
 const STROOPS_PER_XLM = 10_000_000;
