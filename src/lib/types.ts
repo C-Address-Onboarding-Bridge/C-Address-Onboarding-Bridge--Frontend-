@@ -26,7 +26,12 @@ export interface WalletState {
  * a structurally identical anonymous one. It also means adding a state is a
  * one-line change that the compiler propagates everywhere. (#346)
  */
-export type BridgeTransactionStatus = "pending" | "confirmed" | "failed";
+export type BridgeTransactionStatus =
+  | "pending"
+  | "confirmed"
+  | "failed"
+  | "expired"
+  | "not_found";
 
 /**
  * How funds moved. `g-to-c`/`fiat`/`cex` are the bridge flows; the rest are
@@ -64,11 +69,19 @@ export interface BridgeTransactionData {
   memo?: string;
 }
 
-/** Narrows a transaction status to the terminal states (confirmed or failed). */
+/**
+ * Narrows a transaction status to the terminal states: confirmed, failed, or
+ * the "never landed" states expired/not_found. (#1023)
+ */
 export function isTerminalStatus(
   status: BridgeTransactionStatus
-): status is "confirmed" | "failed" {
-  return status === "confirmed" || status === "failed";
+): status is "confirmed" | "failed" | "expired" | "not_found" {
+  return (
+    status === "confirmed" ||
+    status === "failed" ||
+    status === "expired" ||
+    status === "not_found"
+  );
 }
 
 /** An asset balance for a Stellar account. */

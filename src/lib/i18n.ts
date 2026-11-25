@@ -59,6 +59,51 @@ export interface TranslationSet {
     refresh_balance: string;
     refreshBalanceLabel: string;
     back_to_home: string;
+    review_title: string;
+    review_subtitle: string;
+    lock_options: string;
+    lock_transfer: string;
+    unlock_at: string;
+    mainnet_prompt_title: string;
+    mainnet_prompt_body: string;
+    mainnet_continue: string;
+    announcing_review: string;
+    announcing_success: string;
+    announcing_error: string;
+  };
+  landing: {
+    title: string;
+    subtitle: string;
+    get_started: string;
+    bridge_cta: string;
+    onramp_cta: string;
+    cex_cta: string;
+  };
+  notFound: {
+    title: string;
+    body: string;
+    back_home: string;
+  };
+  error: {
+    title: string;
+    body: string;
+    retry: string;
+  };
+  transaction: {
+    title: string;
+    status: string;
+    hash: string;
+    from: string;
+    to: string;
+    amount: string;
+    network: string;
+    timestamp: string;
+    not_found: string;
+    loading: string;
+    view_explorer: string;
+    receipt_title: string;
+    confirmation_title: string;
+    confirmation_body: string;
   };
   help: {
     title: string;
@@ -197,6 +242,51 @@ const translations: Record<Locale, TranslationSet> = {
       refresh_balance: 'Refresh balance',
       refreshBalanceLabel: 'Refresh balance',
       back_to_home: 'Back to home',
+      review_title: 'Review your transfer',
+      review_subtitle: 'Check the details below before confirming.',
+      lock_options: 'Lock options',
+      lock_transfer: 'Lock this transfer',
+      unlock_at: 'Unlock at',
+      mainnet_prompt_title: 'You are on Mainnet',
+      mainnet_prompt_body: 'This transfer moves real funds. Continue only if you are sure.',
+      mainnet_continue: 'Continue on Mainnet',
+      announcing_review: 'Review step opened.',
+      announcing_success: 'Transfer submitted successfully.',
+      announcing_error: 'Transfer failed. Please try again.',
+    },
+    landing: {
+      title: 'Onboard to your C-Address',
+      subtitle: 'Bridge, buy or withdraw funds straight into your Soroban smart account.',
+      get_started: 'Get started',
+      bridge_cta: 'Bridge assets',
+      onramp_cta: 'Buy with a card',
+      cex_cta: 'Withdraw from an exchange',
+    },
+    notFound: {
+      title: 'Page not found',
+      body: 'The page you are looking for does not exist or has moved.',
+      back_home: 'Back to home',
+    },
+    error: {
+      title: 'Something went wrong',
+      body: 'An unexpected error occurred. Please try again.',
+      retry: 'Try again',
+    },
+    transaction: {
+      title: 'Transaction details',
+      status: 'Status',
+      hash: 'Transaction hash',
+      from: 'From',
+      to: 'To',
+      amount: 'Amount',
+      network: 'Network',
+      timestamp: 'Timestamp',
+      not_found: 'Transaction not found',
+      loading: 'Loading transaction...',
+      view_explorer: 'View on explorer',
+      receipt_title: 'Receipt',
+      confirmation_title: 'Confirm transaction',
+      confirmation_body: 'Review and confirm this transaction in your wallet.',
     },
     help: {
       title: 'Help Centre',

@@ -137,6 +137,7 @@ export default function BridgePage() {
   const [rawAmount, setRawAmount] = useState("");
   const [asset, setAsset] = useState("XLM");
   const [fundingLinkNetwork, setFundingLinkNetwork] = useState<"TESTNET" | "PUBLIC" | null>(null);
+  const [fundingLinkError, setFundingLinkError] = useState<string | null>(null);
   // Locking is an optional add-on to the same form, not a separate flow: the
   // address/amount/asset fields above are shared, and only the submit path
   // branches (createLock vs. bridgeViaContract). See src/lib/locks.ts and
@@ -245,6 +246,7 @@ export default function BridgePage() {
     validTo &&
     !insufficientBalance &&
     !bridgingBlocked &&
+    !networkMismatch &&
     (!isLocked || unlockValidation?.ok === true) &&
     debouncedToAddress === toAddress &&
     debouncedAmount === amount &&
@@ -297,16 +299,21 @@ export default function BridgePage() {
     if (hasFundingLinkParams(searchParams)) {
       const result = parseFundingLink(searchParams);
       if (result.ok) {
+        setFundingLinkError(null);
         setToAddress(result.params.target);
         if (result.params.amount) setRawAmount(result.params.amount);
         if (result.params.asset) setAsset(result.params.asset);
         setFundingLinkNetwork(result.params.network);
+      } else {
+        // A malformed link must not be dropped silently. (#1014)
+        setFundingLinkError(result.message);
       }
     }
   }, [searchParams]);
 
-  // Warn if the wallet is on a different network than the funding link specified.
-  const networkMismatch = fundingLinkNetwork && fundingLinkNetwork !== network;
+  // Block proceeding if the wallet is on a different network than the funding
+  // link specified — the target address is only valid on the link's network. (#1014)
+  const networkMismatch = Boolean(fundingLinkNetwork && fundingLinkNetwork !== network);
 
   const handleSubmit = async () => {
     if (!canProceed) return;
