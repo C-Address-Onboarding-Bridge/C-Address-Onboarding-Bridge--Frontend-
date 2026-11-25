@@ -164,15 +164,13 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
 
   if (!flagEnabled || !address) return null;
 
-  const announcement = feedback
-    ? feedback.ok
-      ? `Claim succeeded. ${feedback.message}`
-      : `Claim failed. ${feedback.message}`
-    : "";
+  const successAnnouncement = feedback?.ok ? `Claim succeeded. ${feedback.message}` : "";
+  const failureAnnouncement = feedback && !feedback.ok ? `Claim failed. ${feedback.message}` : "";
 
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]" data-testid="claims-panel">
-      <LiveRegion politeness={feedback?.ok === false ? "assertive" : "polite"} message={announcement} />
+      <LiveRegion message={successAnnouncement} />
+      <LiveRegion politeness="assertive" message={failureAnnouncement} />
       <div className="p-5 border-b border-[var(--border)]">
         <h3 className="font-semibold">Locked Transfers</h3>
       </div>
@@ -270,7 +268,6 @@ export default function ClaimsPanel({ address, network, isNetworkSupported }: Cl
 
                 {rowFeedback && (
                   <p
-                    role={rowFeedback.ok ? "status" : "alert"}
                     data-testid={`claim-feedback-${lock.id}`}
                     className={`mt-2 text-xs flex items-center gap-1 ${
                       rowFeedback.ok ? "text-[var(--success)]" : "text-[var(--error)]"

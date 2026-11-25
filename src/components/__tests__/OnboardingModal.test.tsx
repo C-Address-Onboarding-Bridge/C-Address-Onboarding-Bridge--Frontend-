@@ -156,4 +156,21 @@ describe('OnboardingModal', () => {
     const title = screen.getByTestId('step-title');
     expect(modal.getAttribute('aria-labelledby')).toBe(title.id);
   });
+
+  it('does not downgrade a stored "completed" value when reopened and closed (#1040)', () => {
+    localStorage.setItem('onboarding:test-completed', 'completed');
+    const onClose = vi.fn();
+    render(
+      <OnboardingModal
+        {...defaultProps}
+        onClose={onClose}
+        storageKey="onboarding:test-completed"
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId('onboarding-modal'), { key: 'Escape' });
+
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(localStorage.getItem('onboarding:test-completed')).toBe('completed');
+  });
 });

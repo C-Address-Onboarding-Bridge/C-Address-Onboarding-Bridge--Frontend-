@@ -15,6 +15,40 @@ import { useHydrated } from "@/hooks/useHydrated";
  */
 export const ONBOARDING_STORAGE_KEY = "onboarding:guided:v1";
 
+/**
+ * localStorage key holding the funding route chosen on the routes step, so a
+ * resumed flow still shows the chosen route and hands off correctly. (#1039)
+ */
+export const ONBOARDING_ROUTE_STORAGE_KEY = "onboarding:guided:route:v1";
+
+/** Read the persisted route choice, if any. (#1039) */
+function readStoredRoute(): { label: string; href: string } | null {
+  try {
+    const raw = localStorage.getItem(ONBOARDING_ROUTE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { label?: unknown; href?: unknown };
+    if (typeof parsed?.label === "string" && typeof parsed?.href === "string") {
+      return { label: parsed.label, href: parsed.href };
+    }
+  } catch {
+    // Storage unavailable or malformed — fall back to no route.
+  }
+  return null;
+}
+
+/** Persist the chosen route alongside the step. (#1039) */
+function writeStoredRoute(route: { label: string; href: string } | null) {
+  try {
+    if (route) {
+      localStorage.setItem(ONBOARDING_ROUTE_STORAGE_KEY, JSON.stringify(route));
+    } else {
+      localStorage.removeItem(ONBOARDING_ROUTE_STORAGE_KEY);
+    }
+  } catch {
+    // Best-effort persistence.
+  }
+}
+
 const INTRO_STEP: OnboardingStep = {
   title: "What is a C-address?",
   description:
@@ -110,6 +144,13 @@ export default function OnboardingFlow() {
     label: string;
     href: string;
   } | null>(null);
+  // Restore the route chosen before a skip so a resumed flow keeps it. (#1039)
+  const [restoredRoute, setRestoredRoute] = useState(false);
+  if (hydrated && !restoredRoute) {
+    setRestoredRoute(true);
+    const stored = readStoredRoute();
+    if (stored) setChosenRoute(stored);
+  }
 
   const steps: OnboardingStep[] = useMemo(() => {
     if (!chosenRoute) return GUIDED_STEPS;
@@ -129,11 +170,16 @@ export default function OnboardingFlow() {
     // Only the funding-routes step records a choice.
     if (stepIndex === 1) {
       const route = ROUTE_BY_OPTION[option.id];
-      if (route) setChosenRoute(route);
+      if (route) {
+        setChosenRoute(route);
+        writeStoredRoute(route);
+      }
     }
   };
 
   const handleComplete = () => {
+    // Always close the modal on completion; navigate when a route is known. (#1039)
+    setIsOpen(false);
     if (chosenRoute) {
       router.push(chosenRoute.href);
     }
