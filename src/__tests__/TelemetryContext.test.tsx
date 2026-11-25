@@ -149,6 +149,29 @@ describe("TelemetryProvider", () => {
     expect(localStorage.getItem(TELEMETRY_FIRST_VISIT_KEY)).not.toBeNull();
   });
 
+  it("keeps the tree shape stable across hydration so children mount once (#1031)", () => {
+    const mountSpy = vi.fn();
+    const unmountSpy = vi.fn();
+
+    function CountingChild() {
+      React.useEffect(() => {
+        mountSpy();
+        return () => unmountSpy();
+      }, []);
+      return <p>child</p>;
+    }
+
+    render(
+      <TelemetryProvider>
+        <CountingChild />
+      </TelemetryProvider>
+    );
+
+    expect(screen.getByText("child")).toBeTruthy();
+    expect(mountSpy).toHaveBeenCalledTimes(1);
+    expect(unmountSpy).not.toHaveBeenCalled();
+  });
+
   it("server-renders with the context available and no prompt", () => {
     setConsentStatus("granted");
     const html = renderToString(

@@ -6,6 +6,10 @@ import {
   markReauthRequired,
   clearSensitiveState,
   INACTIVITY_TIMEOUT_MS,
+  INACTIVITY_STORAGE_KEY,
+  REAUTH_REQUIRED_KEY,
+  getLastActivityTime,
+  isReauthRequired,
   type InactivityState,
 } from "@/lib/inactivityTimeout";
 import { useHydrated } from "@/hooks/useHydrated";
@@ -122,8 +126,19 @@ export function useInactivityTimeout(options: UseInactivityTimeoutOptions = {}) 
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     if (warningRef.current) clearTimeout(warningRef.current);
 
+    // Cross-tab awareness: another tab may have recorded more recent activity
+    // than the one this timer was scheduled from. Re-read the shared
+    // timestamp and, if so, reschedule for the remaining time instead of
+    // firing while the user is active elsewhere. (#1028)
     const scheduleWarning = (delay: number) => {
       warningRef.current = setTimeout(() => {
+        const now = Date.now();
+        const lastActivity = getLastActivityTime(now);
+        const remaining = lastActivity + (timeoutMs - 60_000) - now;
+        if (remaining > 0) {
+          scheduleWarning(remaining);
+          return;
+        }
         setInactivityState((prev) => ({
           ...(prev || initialState),
           isWarning: true,
@@ -134,6 +149,13 @@ export function useInactivityTimeout(options: UseInactivityTimeoutOptions = {}) 
 
     const scheduleTimeout = (delay: number) => {
       timeoutRef.current = setTimeout(() => {
+        const now = Date.now();
+        const lastActivity = getLastActivityTime(now);
+        const remaining = lastActivity + timeoutMs - now;
+        if (remaining > 0) {
+          scheduleTimeout(remaining);
+          return;
+        }
         markReauthRequired();
         clearSensitiveState();
         setInactivityState((prev) => ({
@@ -170,16 +192,42 @@ export function useInactivityTimeout(options: UseInactivityTimeoutOptions = {}) 
       );
     };
 
+    // Follow activity and re-confirmation recorded by other tabs.
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === INACTIVITY_STORAGE_KEY) {
+        const now = Date.now();
+        const lastActivity = getLastActivityTime(now);
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        if (warningRef.current) clearTimeout(warningRef.current);
+        scheduleWarning(Math.max(0, lastActivity + (timeoutMs - 60_000) - now));
+        scheduleTimeout(Math.max(0, lastActivity + timeoutMs - now));
+        setInactivityState((prev) =>
+          prev
+            ? { ...prev, lastActivityAt: lastActivity, isWarning: false, isTimedOut: false }
+            : prev
+        );
+        return;
+      }
+      if (event.key === REAUTH_REQUIRED_KEY) {
+        const reauthRequired = isReauthRequired();
+        setInactivityState((prev) =>
+          prev ? { ...prev, reauthRequired } : prev
+        );
+      }
+    };
+
     window.addEventListener("mousemove", handleActivity);
     window.addEventListener("keydown", handleActivity);
     window.addEventListener("click", handleActivity);
     window.addEventListener("scroll", handleActivity);
+    window.addEventListener("storage", handleStorage);
 
     return () => {
       window.removeEventListener("mousemove", handleActivity);
       window.removeEventListener("keydown", handleActivity);
       window.removeEventListener("click", handleActivity);
       window.removeEventListener("scroll", handleActivity);
+      window.removeEventListener("storage", handleStorage);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       if (warningRef.current) clearTimeout(warningRef.current);
     };

@@ -9,16 +9,58 @@
  * single timer instead of each page wiring its own (and losing the
  * re-auth requirement to a stray unmount).
  */
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useWallet } from "@/components/wallet-provider";
 import { useInactivityTimeout } from "@/hooks/useInactivityTimeout";
 import { clearReauthRequired } from "@/lib/inactivityTimeout";
+
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function ReauthGate() {
   const { isConnected, address, connect } = useWallet();
   const { inactivityState, extend } = useInactivityTimeout();
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [cancelled, setCancelled] = useState(false);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const reconnectButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  const isOpen = Boolean(isConnected && inactivityState?.reauthRequired);
+
+  // Move focus into the dialog on mount and trap Tab/Shift+Tab inside it so
+  // keyboard users can't reach the signing/funding buttons behind it. (#1027)
+  useEffect(() => {
+    if (!isOpen) return;
+    reconnectButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+      ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (event.shiftKey) {
+        if (active === first || !dialog.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !dialog.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => document.removeEventListener("keydown", handleKeyDown, true);
+  }, [isOpen]);
 
   const handleReconfirm = useCallback(async () => {
     setIsReconnecting(true);
@@ -41,12 +83,13 @@ export function ReauthGate() {
     }
   }, [address, connect, extend]);
 
-  if (!isConnected || !inactivityState?.reauthRequired) {
+  if (!isOpen) {
     return null;
   }
 
   return (
     <div
+      ref={dialogRef}
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="reauth-gate-title"
@@ -61,6 +104,7 @@ export function ReauthGate() {
           continue signing or funding.
         </p>
         <button
+          ref={reconnectButtonRef}
           type="button"
           onClick={() => void handleReconfirm()}
           disabled={isReconnecting}
