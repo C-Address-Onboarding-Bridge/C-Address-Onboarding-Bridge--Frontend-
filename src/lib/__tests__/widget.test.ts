@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   buildWidgetSearchParams,
   isMessageFromWidget,
+  isTrustedParentOrigin,
   parseWidgetConfig,
   postWidgetMessage,
   WIDGET_MESSAGE_SOURCE,
@@ -201,5 +202,68 @@ describe("isMessageFromWidget — origin validation (#558)", () => {
         iframeWindow,
       ),
     ).toBe(true);
+  });
+});
+
+describe("isTrustedParentOrigin — ancestorOrigins (#1004)", () => {
+  const legit = "https://legit.example.com";
+  const untrusted = "https://evil.example.com";
+  const allowed = [legit];
+
+  it("accepts when the immediate parent (ancestors[0]) is the legit host", () => {
+    expect(
+      isTrustedParentOrigin(legit, allowed, {
+        ancestorOrigins: [legit, "https://outer.example.com"],
+        referrer: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects when the immediate parent is untrusted even if a deeper ancestor is legit", () => {
+    expect(
+      isTrustedParentOrigin(legit, allowed, {
+        ancestorOrigins: [untrusted, legit],
+        referrer: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects when the immediate parent is untrusted and the declared origin is untrusted", () => {
+    expect(
+      isTrustedParentOrigin(untrusted, [legit, untrusted], {
+        ancestorOrigins: [untrusted, legit],
+        referrer: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects a declared origin that is not on the allowlist", () => {
+    expect(
+      isTrustedParentOrigin(untrusted, allowed, {
+        ancestorOrigins: [untrusted],
+        referrer: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects when the referrer disagrees with the declared origin", () => {
+    expect(
+      isTrustedParentOrigin(legit, allowed, {
+        ancestorOrigins: [legit],
+        referrer: `${untrusted}/page`,
+      }),
+    ).toBe(false);
+  });
+
+  it("fails closed when there is no evidence (empty referrer, no ancestorOrigins)", () => {
+    expect(isTrustedParentOrigin(legit, allowed, { ancestorOrigins: null, referrer: "" })).toBe(false);
+    expect(isTrustedParentOrigin(legit, allowed, { ancestorOrigins: [], referrer: null })).toBe(false);
+    expect(isTrustedParentOrigin(legit, allowed)).toBe(false);
+  });
+
+  it("accepts when only the referrer provides evidence", () => {
+    expect(isTrustedParentOrigin(legit, allowed, { ancestorOrigins: null, referrer: `${legit}/page` })).toBe(
+      true,
+    );
   });
 });
