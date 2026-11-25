@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Keypair, StrKey } from "@stellar/stellar-sdk";
 import { createHmac } from "node:crypto";
 import { POST } from "../route";
+import { resetRateLimits } from "@/lib/rateLimit";
 
 /**
  * Tests for #934: `buildProviderUrl` used to run entirely client-side with
@@ -26,10 +27,10 @@ function restoreEnv(key: string, value: string | undefined) {
   else process.env[key] = value;
 }
 
-function makeRequest(body: Record<string, unknown>): Request {
+function makeRequest(body: Record<string, unknown>, headers: Record<string, string> = {}): Request {
   return new Request("http://localhost/api/onramp/redirect-url", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", origin: "http://localhost", ...headers },
     body: JSON.stringify(body),
   });
 }

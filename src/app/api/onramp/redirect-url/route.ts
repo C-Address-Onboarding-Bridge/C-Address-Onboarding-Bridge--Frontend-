@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { createHmac } from "node:crypto";
 import { isCAddress, isGAddress } from "@/lib/stellar";
-import { providers } from "@/lib/onrampProviders";
+import { providers, isWithinProviderLimits } from "@/lib/onrampProviders";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
+
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_REQUESTS = 30;
 
 /**
  * Server-side, signed on-ramp provider redirect URLs (#934).
@@ -47,6 +51,29 @@ function signQueryString(secretKey: string, queryString: string): string {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  // Same Origin/Referer check the backend proxy uses (#891, #1017).
+  const origin = request.headers.get("origin");
+  const referer = request.headers.get("referer");
+  const secFetchSite = request.headers.get("sec-fetch-site");
+  if (!origin && !referer && secFetchSite !== "same-origin") {
+    console.warn("On-ramp redirect request rejected: missing origin information");
+    return NextResponse.json({ error: "Request rejected." }, { status: 403 });
+  }
+
+  const { allowed, retryAfterSeconds } = checkRateLimit(`onramp-redirect:${getClientIp(request)}`, {
+    windowMs: RATE_LIMIT_WINDOW_MS,
+    max: RATE_LIMIT_MAX_REQUESTS,
+  });
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down." },
+      {
+        status: 429,
+        headers: retryAfterSeconds ? { "Retry-After": String(retryAfterSeconds) } : undefined,
+      }
+    );
+  }
+
   let body: RedirectUrlRequestBody;
   try {
     body = (await request.json()) as RedirectUrlRequestBody;
@@ -88,6 +115,15 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: `${provider.name} does not support ${currency}.` }, { status: 400 });
   }
 
+  // Enforce the provider's numeric bounds server-side (#1017): the client-side
+  // check in onramp-page.tsx is advisory only.
+  if (!isWithinProviderLimits(Number(fiatAmount), provider.id)) {
+    return NextResponse.json(
+      { error: `${provider.name} accepts amounts between ${provider.limits}.` },
+      { status: 400 }
+    );
+  }
+
   if (!provider.apiKey) {
     return NextResponse.json({ error: `${provider.name} API key is not configured.` }, { status: 500 });
   }
@@ -95,12 +131,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   const secretEnvVar = provider.id === "moonpay" ? "MOONPAY_SECRET_KEY" : "TRANSAK_SECRET_KEY";
   const secretKey = process.env[secretEnvVar];
   if (!secretKey) {
-    // Never fall back to returning an unsigned URL (#934) — fail loudly
-    // instead so a missing secret is caught in config, not in production.
-    return NextResponse.json(
-      { error: `${secretEnvVar} is not configured; cannot sign the redirect URL.` },
-      { status: 500 }
-    );
+    // Never fall back to returning an unsigned URL (#934) — fail loudly in the
+    // logs so a missing secret is caught in config, but keep the env var name
+    // out of the response body (#1017).
+    console.error(`${secretEnvVar} is not configured; cannot sign the on-ramp redirect URL.`);
+    return NextResponse.json({ error: "On-ramp is temporarily unavailable." }, { status: 503 });
   }
 
   const params =
