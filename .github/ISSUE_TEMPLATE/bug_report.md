@@ -22,5 +22,11 @@ Describe the proposed fix or the approach you think should be taken to resolve t
 
 - [ ] Bug is fixed
 - [ ] Regression test is added
-- [ ] All CI checks pass locally (`npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`)
+- [ ] Lockfile is in sync (`npx npm@10 install --package-lock-only --ignore-scripts`)
+- [ ] `npm audit --audit-level=high` passes
+- [ ] `npm run lint` passes
+- [ ] `npm run typecheck` passes
+- [ ] `npm run test` passes (with coverage)
+- [ ] `ENFORCE_BUDGET=true npm run build` passes
+- [ ] Playwright e2e passes (`npx playwright install` then `npm run test:e2e`)
 - [ ] PR links to this issue (e.g., `Closes #<issue-number>`)
