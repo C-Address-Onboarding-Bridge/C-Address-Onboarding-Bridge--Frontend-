@@ -15,10 +15,13 @@ Closes #<issue-number>
 
 <!-- Describe how you tested the changes locally. -->
 
+- [ ] `package-lock.json` is in sync with `package.json` (if you ran `npm install` with npm 11, fix with `npx npm@10 install --package-lock-only --ignore-scripts`)
+- [ ] `npm audit --audit-level=high` passes
 - [ ] `npm run lint` passes
 - [ ] `npm run typecheck` passes
-- [ ] `npm run test` passes
-- [ ] `npm run build` passes
+- [ ] `npm run test` passes (with coverage)
+- [ ] `ENFORCE_BUDGET=true npm run build` passes
+- [ ] `npx playwright install` + `npm run test:e2e` passes
 
 ## Screenshots
 

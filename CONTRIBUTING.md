@@ -42,18 +42,29 @@ Thank you for contributing to C-Address Bridge. This guide covers the setup, wor
 
 ## Running CI Checks Locally
 
-CI runs four checks on every push and pull request. Run each locally before pushing:
+CI runs the following blocking gates on every push and pull request. Run each locally before pushing:
 
 | Check | Command | What it does |
 |---|---|---|
+| Lockfile sync | `npx npm@10 install --package-lock-only --ignore-scripts` | Fails if `package-lock.json` differs from what npm 10 would write |
+| Audit | `npm audit --audit-level=high` | Fails on high or critical vulnerabilities |
 | Lint | `npm run lint` | Runs ESLint to enforce code style and catch errors |
 | Typecheck | `npm run typecheck` | Runs TypeScript type checking with `tsc --noEmit` |
-| Test | `npm run test` | Runs the Vitest test suite |
-| Build | `npm run build` | Produces a production build (also enforces bundle budget) |
+| Test | `npm run test` | Runs the Vitest test suite with coverage |
+| Build | `ENFORCE_BUDGET=true npm run build` | Produces a production build and enforces the bundle budget |
+| E2E | `npx playwright install --with-deps && npm run test:e2e` | Runs the Playwright end-to-end suite |
 
-All four must pass before opening a pull request.
+All of these must pass before opening a pull request.
 
-## Pre-push hook
+> **Lockfile gotcha:** running `npm install` with npm 11 rewrites `package-lock.json` differently from npm 10 and fails the lockfile-sync check. If that happens, regenerate it with `npx npm@10 install --package-lock-only --ignore-scripts` and commit the result.
+
+## Git hooks
+
+### Pre-commit
+
+The `.husky/pre-commit` hook runs the **entire** Vitest suite (`npm test`) on every commit. Because the suite currently has pre-existing failures, this can reject commits that don't touch the failing tests. Avoid reaching for `--no-verify` blindly — it also skips the pre-push build below.
+
+### Pre-push
 
 The `.husky/pre-push` hook runs `npm run build` against the frontend before every `git push`. This catches build-breaking changes before they reach CI.
 
@@ -65,7 +76,7 @@ If you need to push a work-in-progress branch that doesn't build yet (e.g. a dra
 git push --no-verify
 ```
 
-Use this sparingly. All four CI checks (including the build) must still pass before a PR can be merged.
+Use this sparingly. Note that `--no-verify` skips **both** the pre-commit and pre-push hooks, so all CI gates (including the build) must still pass before a PR can be merged.
 
 ## Visual Testing Decision
 
@@ -79,8 +90,6 @@ Playwright E2E tests remain the browser-based check. They capture screenshots
 and videos when a test fails for debugging; these artifacts are not approved
 visual baselines and do not detect visual changes on their own. For UI changes,
 include screenshots in the pull request as described by the PR template.
-
-This speeds up local testing during development.
 
 ## Branch Naming
 
@@ -102,7 +111,7 @@ Use conventional commit format:
 
 - **One issue per PR** — Keep PRs focused on a single issue or concern.
 - **Bug fixes must include a regression test** — If your PR fixes a bug, add a test that reproduces the bug and verifies the fix.
-- **All CI checks must pass locally** before pushing — Run `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build`.
+- **All CI checks must pass locally** before pushing — Run the lockfile-sync, audit, lint, typecheck, test, build, and e2e commands listed above.
 - **Link the issue** you are closing in the PR description (e.g., `Closes #250`).
 
 ## Source of Truth for CI
