@@ -72,10 +72,12 @@ describe("CSP connect-src (issue #700)", () => {
   });
 });
 
-describe("CSP framing for /widget (issue #699)", () => {
-  it("widget policy allows framing and keeps other directives", () => {
-    const csp = buildWidgetCsp({});
-    expect(csp).toContain("frame-ancestors *");
+describe("CSP framing for /widget (issue #699, #1001)", () => {
+  it("widget policy allows 'self' plus configured embedder origins and keeps other directives", () => {
+    const csp = buildWidgetCsp({
+      NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS: "https://partner.example.com",
+    });
+    expect(csp).toContain("frame-ancestors 'self' https://partner.example.com");
     expect(csp).not.toContain("frame-ancestors 'none'");
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("base-uri 'self'");
@@ -86,13 +88,14 @@ describe("CSP framing for /widget (issue #699)", () => {
     expect(isWidgetPath("/widget/embed")).toBe(true);
     expect(isWidgetPath("/")).toBe(false);
     expect(isWidgetPath("/widgets")).toBe(false);
+    expect(isWidgetPath("/widget-example")).toBe(false);
   });
 
   it("proxy sets the right header per path", () => {
     const app = proxy(new NextRequest("http://localhost/"));
     const widget = proxy(new NextRequest("http://localhost/widget"));
     expect(app.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
-    expect(widget.headers.get("Content-Security-Policy")).toContain("frame-ancestors *");
+    expect(widget.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'self'");
   });
 });
 

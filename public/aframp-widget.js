@@ -13,9 +13,9 @@
  *
  * Usage:
  *   <div id="caddress-widget"></div>
- *   <script src="https://<this-app-origin>/caddress-widget.js"></script>
+ *   <script src="https://<this-app-origin>/aframp-widget.js"></script>
  *   <script>
- *     CAddressWidget.mount(document.getElementById("caddress-widget"), {
+ *     AframpWidget.mount(document.getElementById("caddress-widget"), {
  *       widgetOrigin: "https://<this-app-origin>",
  *       address: "C...",        // required: destination C-address
  *       asset: "XLM",           // optional, default "XLM"
@@ -84,10 +84,10 @@
    */
   function mount(container, config) {
     if (!config || !config.widgetOrigin) {
-      throw new Error("CAddressWidget.mount: config.widgetOrigin is required");
+      throw new Error("AframpWidget.mount: config.widgetOrigin is required");
     }
     if (!config.address) {
-      throw new Error("CAddressWidget.mount: config.address is required");
+      throw new Error("AframpWidget.mount: config.address is required");
     }
 
     var widgetOrigin = new URL(config.widgetOrigin).origin;

@@ -47,24 +47,24 @@ export function buildConnectSrcOrigins(
   env: Record<string, string | undefined> = process.env,
 ): string[] {
   return Array.from(
-  new Set(
-    [
-      "'self'",
-      toOrigin(env.NEXT_PUBLIC_API_URL),
-      "https://friendbot.stellar.org",
-      toOrigin(HORIZON_URL.PUBLIC),
-      toOrigin(HORIZON_URL.TESTNET),
-      toOrigin(SOROBAN_RPC_URL.PUBLIC),
-      toOrigin(SOROBAN_RPC_URL.TESTNET),
-      toOrigin(env.NEXT_PUBLIC_TRANSACTION_STATUS_URL),
-      "https://horizon.stellar.org",
-      "https://horizon-testnet.stellar.org",
-      toOrigin(env.NEXT_PUBLIC_SOROBAN_RPC_URL),
-      toOrigin(env.NEXT_PUBLIC_SOROBAN_RPC_TESTNET_URL),
-      toOrigin(env.NEXT_PUBLIC_SOROBAN_RPC_MAINNET_URL),
-      "https://soroban-testnet.stellar.org",
-    ].filter((origin): origin is string => Boolean(origin)),
-  ),
+    new Set(
+      [
+        "'self'",
+        toOrigin(env.NEXT_PUBLIC_API_URL),
+        "https://friendbot.stellar.org",
+        toOrigin(HORIZON_URL.PUBLIC),
+        toOrigin(HORIZON_URL.TESTNET),
+        toOrigin(SOROBAN_RPC_URL.PUBLIC),
+        toOrigin(SOROBAN_RPC_URL.TESTNET),
+        toOrigin(env.NEXT_PUBLIC_TRANSACTION_STATUS_URL),
+        "https://horizon.stellar.org",
+        "https://horizon-testnet.stellar.org",
+        toOrigin(env.NEXT_PUBLIC_SOROBAN_RPC_URL),
+        toOrigin(env.NEXT_PUBLIC_SOROBAN_RPC_TESTNET_URL),
+        toOrigin(env.NEXT_PUBLIC_SOROBAN_RPC_MAINNET_URL),
+        "https://soroban-testnet.stellar.org",
+      ].filter((origin): origin is string => Boolean(origin)),
+    ),
   );
 }
 
@@ -82,30 +82,28 @@ export function buildCsp(
     ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${evalSrc}`
     : `script-src 'self'${evalSrc}`;
   return [
-  "default-src 'self'",
-  scriptSrc,
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
-  "font-src 'self'",
-  `connect-src ${connectSrcOrigins.join(" ")}`,
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-  "upgrade-insecure-requests",
-].join("; ");
+    "default-src 'self'",
+    scriptSrc,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    `connect-src ${connectSrcOrigins.join(" ")}`,
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "upgrade-insecure-requests",
+  ].join("; ");
 }
 
 export function buildWidgetCsp(
   env: Record<string, string | undefined> = process.env,
   nonce?: string,
 ): string {
-  // frame-ancestors comes from the registered embedder allowlist
-  // (NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS); with nothing registered it stays
-  // 'none' so unregistered origins can't frame the widget.
-  const frameAncestors = buildFrameAncestorsCsp(
-    getAllowedEmbedderOrigins(env.NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS),
-  );
+  // Always include 'self' so the app's own /widget-example route can frame
+  // /widget alongside any registered embedders in NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS (#1001).
+  const allowedOrigins = ["'self'", ...getAllowedEmbedderOrigins(env.NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS)];
+  const frameAncestors = buildFrameAncestorsCsp(allowedOrigins);
   return buildCsp(env, nonce).replace("frame-ancestors 'none'", frameAncestors);
 }
 

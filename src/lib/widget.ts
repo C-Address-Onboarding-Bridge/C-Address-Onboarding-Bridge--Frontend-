@@ -4,7 +4,7 @@
  * Pure config-parsing and postMessage helpers used by both sides of the
  * embed: the widget page itself (`src/app/widget/page.tsx`, running inside
  * a third-party host's iframe) and the host-facing loader
- * (`public/caddress-widget.js`, running on the host page). Kept dependency-free
+ * (`public/aframp-widget.js`, running on the host page). Kept dependency-free
  * (no React, no wallet-provider, no routing) so the widget page that imports
  * it stays small and standalone, per the issue's own requirement.
  */
