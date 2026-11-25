@@ -11,9 +11,12 @@ import {
   loadNotifications,
   markAllNotificationsRead,
   markNotificationRead,
+  notificationsStorageKey,
+  NOTIFICATIONS_CHANGE_EVENT,
   unreadNotificationCount,
   type AppNotification,
   type NotificationScope,
+  type NotificationsChangeDetail,
 } from "@/lib/notifications";
 import { useWallet } from "@/components/wallet-provider";
 
@@ -72,6 +75,30 @@ const NotificationCentre = ({ closeOnNavigate = true }: NotificationCentreProps)
     refresh();
   }, [refresh]);
 
+  // Stay in sync with writes made elsewhere (#1038): same-tab writes dispatch a
+  // custom event, other tabs surface a native `storage` event. Both are filtered
+  // to this scope's key so another account's activity never leaks in.
+  useEffect(() => {
+    const key = notificationsStorageKey(scope);
+    const handleChange = (event: Event) => {
+      if (event instanceof CustomEvent) {
+        const detail = event.detail as NotificationsChangeDetail | null;
+        if (detail && detail.key !== key) return;
+      }
+      refresh();
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== key) return;
+      refresh();
+    };
+    window.addEventListener(NOTIFICATIONS_CHANGE_EVENT, handleChange);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener(NOTIFICATIONS_CHANGE_EVENT, handleChange);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [refresh, scope]);
+
   // Escape closes the panel and returns focus to the bell.
   useEffect(() => {
     if (!open) return;
@@ -89,9 +116,14 @@ const NotificationCentre = ({ closeOnNavigate = true }: NotificationCentreProps)
 
   const handleToggle = useCallback(() => {
     // Opening the panel marks nothing read; unread state is only changed by
-    // explicit interaction or navigation.
-    setOpenFor((current) => (current === sessionKey ? null : sessionKey));
-  }, [sessionKey]);
+    // explicit interaction or navigation. Refresh on open so the list is never
+    // stale (#1038).
+    setOpenFor((current) => {
+      if (current === sessionKey) return null;
+      refresh();
+      return sessionKey;
+    });
+  }, [sessionKey, refresh]);
 
   const handleActivate = useCallback(
     (id: string) => {

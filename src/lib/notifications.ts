@@ -175,17 +175,41 @@ function parseNotifications(raw: string | null): AppNotification[] {
   return valid;
 }
 
+/**
+ * Same-tab change event (#1038). `storage` events only fire in *other* tabs, so
+ * a mounted notification centre would otherwise never learn about writes made
+ * by `addNotification` in the same tab. The event detail carries the storage
+ * key that changed so listeners can ignore other scopes.
+ */
+export const NOTIFICATIONS_CHANGE_EVENT = "wallet:notifications-change";
+
+export interface NotificationsChangeDetail {
+  key: string;
+}
+
 function writeNotifications(
   notifications: AppNotification[],
   scope?: NotificationScope | null
 ): AppNotification[] {
   const store = storage();
   if (!store) return notifications;
+  const key = notificationsStorageKey(scope);
   try {
-    store.setItem(notificationsStorageKey(scope), JSON.stringify(notifications));
+    store.setItem(key, JSON.stringify(notifications));
   } catch {
     // Quota or privacy-mode failure: the caller keeps its in-memory copy, the
     // only loss is persistence across reloads.
+  }
+  if (typeof window !== "undefined") {
+    try {
+      window.dispatchEvent(
+        new CustomEvent<NotificationsChangeDetail>(NOTIFICATIONS_CHANGE_EVENT, {
+          detail: { key },
+        })
+      );
+    } catch {
+      // CustomEvent unavailable: listeners fall back to mount/open refreshes.
+    }
   }
   return notifications;
 }

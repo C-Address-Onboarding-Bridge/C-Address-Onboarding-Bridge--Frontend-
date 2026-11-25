@@ -563,7 +563,7 @@ const Navbar = () => {
               onClick={openHelp}
               aria-label={t("common.help")}
               title={t("common.help")}
-              className="hidden sm:flex p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+              className="flex p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
             >
               <HelpCircle className="w-4 h-4" />
             </button>
@@ -705,6 +705,20 @@ const Navbar = () => {
                 </PrefetchLink>
               );
             })}
+
+            {/* Help (mobile) — the icon button is visible at every width, but
+                this entry keeps the Help Centre reachable from the menu too. */}
+            <button
+              type="button"
+              onClick={() => {
+                closeMobile();
+                openHelp();
+              }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-[var(--text-muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-2)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+            >
+              <HelpCircle className="w-4 h-4" />
+              {t("common.help")}
+            </button>
 
             {/* Language switcher (mobile) */}
             <div className="pt-2 mt-2 border-t border-[var(--border)]">

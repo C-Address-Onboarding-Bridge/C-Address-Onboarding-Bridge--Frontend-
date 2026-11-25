@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, FileUp, Loader2, X } from "lucide-react";
 import {
   MAX_BATCH_RECIPIENTS,
@@ -11,6 +11,7 @@ import {
 } from "@/lib/batchFunding";
 import type { BatchFundingRecipientResult } from "@/lib/api";
 import LiveRegion from "@/components/live-region";
+import { useDebounce } from "@/hooks/useDebounce";
 
 export interface BatchFundingFormProps {
   /**
@@ -59,6 +60,21 @@ export function BatchFundingForm({ onSubmit, estimateFee, disabled = false }: Ba
   const hasInput = rawText.trim().length > 0;
   const canReview =
     !disabled && hasInput && validRows.length > 0 && !overCap && !fileReadError;
+
+  // One debounced summary instead of one assertive announcement per bad row.
+  const errorSummary = useMemo(() => {
+    const errorCount = invalidRows.length + parsed.parseErrors.length;
+    if (errorCount === 0) return "";
+    const rowLabel = `${errorCount} row${errorCount === 1 ? "" : "s"} have errors`;
+    const validLabel = `${validRows.length} valid recipient${validRows.length === 1 ? "" : "s"}`;
+    return `${rowLabel}, ${validLabel}.`;
+  }, [invalidRows.length, parsed.parseErrors.length, validRows.length]);
+  const debouncedErrorSummary = useDebounce(errorSummary, 500);
+  const [errorAnnouncement, setErrorAnnouncement] = useState("");
+
+  useEffect(() => {
+    setErrorAnnouncement(debouncedErrorSummary);
+  }, [debouncedErrorSummary]);
 
   const handleTextChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setRawText(e.target.value);
