@@ -21,7 +21,9 @@ The initial JS budget is a ratchet just above the current maximum single-route s
 | `/schedules` | 648.51 KB |
 | `/widget` | 629.20 KB |
 
-The values are from the production build's route HTML and include the shared Next.js runtime plus route-specific scripts. Dynamically rendered parameterized routes do not have standalone prerendered HTML files in this build.
+These values were captured from the production build's route HTML and include the shared Next.js runtime plus route-specific scripts. Dynamically rendered parameterized routes do not have standalone prerendered HTML files in this build.
+
+> **What the budget actually measures:** The webpack `maxAssetSize` and `maxEntrypointSize` limits in `next.config.ts` apply to webpack asset/entrypoint sizes, not to the per-route HTML totals in the table above. The per-route numbers in the table are measured manually from the production build output HTML (`next build` then inspect `.next/server/app/`). To reproduce the table, run `npm run build` and check the file sizes reported in the build output, or inspect the generated HTML files in `.next/server/app/` to sum the script sizes for each route.
 
 When bundle size increases, the build fails with `ERROR in asset size limit: The following asset(s) exceed the specified limit...` This prompts engineers to investigate and optimize before merge.
 
@@ -47,12 +49,13 @@ When bundle size increases, the build fails with `ERROR in asset size limit: The
 
 These targets align with Google's recommended thresholds for "good" user experience:
 
-| Metric | Target | Current | Status |
-|--------|--------|---------|--------|
-| Lighthouse Score | ≥ 90 | ~85 | Tracked in CI |
-| Largest Contentful Paint (LCP) | ≤ 2.5s | ~2.1s | Monitored |
-| Cumulative Layout Shift (CLS) | ≤ 0.1 | ~0.05 | Monitored |
-| First Input Delay (FID) / INP | ≤ 100ms | ~80ms | Monitored |
+| Metric | Target | Notes |
+|--------|--------|-------|
+| Largest Contentful Paint (LCP) | ≤ 2.5s | Not currently tracked automatically |
+| Cumulative Layout Shift (CLS) | ≤ 0.1 | Not currently tracked automatically |
+| First Input Delay (FID) / INP | ≤ 100ms | Not currently tracked automatically |
+
+> **Note:** CWV are not currently measured or enforced in CI. The values previously shown in this table had no documented source and have been removed. Measure against real user traffic (e.g. Vercel Analytics, Lighthouse DevTools) to track progress toward these targets.
 
 ## Widget Bundle
 
@@ -61,28 +64,27 @@ The external widget bundle (if enabled) has stricter constraints due to being em
 - **Target size:** ≤ 50 KB (gzipped)
 - **Reason:** Minimal impact on partner sites' load times
 
-Track widget-specific size with:
-```bash
-npm run analyze -- --widget
-```
+To check widget-specific size, run `npm run analyze` (which runs `ANALYZE=true next build`) and inspect the bundle report. There is no `--widget` flag — the analyzer reports all chunks including the widget entry point.
 
 ## Enforcement
 
-- **CI:** Builds fail when initial JS exceeds 700 KB
-- **PR Reports:** Bundle analysis appears in pull request comments showing the delta from main
-- **Local:** Run `npm run analyze` to see a visual breakdown in `.next/analyze/__bundle_report.html`
+- **Build budget:** The webpack `maxAssetSize`/`maxEntrypointSize` limits in `next.config.ts` cause the build to fail when asset or entrypoint sizes exceed the configured threshold. Run `npm run build` to check.
+- **Local analysis:** Run `npm run analyze` to see a visual breakdown in `.next/analyze/__bundle_report.html`.
+
+> **Not implemented:** Lighthouse CI, automated PR bundle-delta comments, and Web Vitals reporting via the service worker are **not** currently configured. `public/sw.js` handles asset caching only. `.github/workflows/ci.yml` runs lint, typecheck, tests, and build — it posts no Lighthouse results and no PR comments. These features can be added in future issues.
 
 ## Monitoring
 
-Lighthouse scores and Core Web Vitals are tracked in:
-- GitHub Actions CI logs (on every build)
-- Vercel Analytics (on deployed previews and production)
-- Web Vitals reports (via Service Worker in production)
+Performance monitoring beyond the local build budget is currently manual:
+
+- Run `npm run build` locally to verify bundle sizes stay under budget.
+- Use browser DevTools Lighthouse panel or [web.dev/measure](https://web.dev/measure) to check Core Web Vitals against the targets above.
+- Vercel Analytics (if configured on a deployment) can track real-user CWV over time.
 
 ## Recent optimization history
 
-- **Initial SDK:** Stellar SDK is kept out of initial route JS and loaded from deferred chunks when wallet or network operations need it
-- **Bundle analyzer:** Enabled with `npm run analyze` to identify large modules before they land
+- **Initial SDK:** Stellar SDK is kept out of initial route JS and loaded from deferred chunks when wallet or network operations need it.
+- **Bundle analyzer:** Enabled with `npm run analyze` to identify large modules before they land.
 
 ## Rationale
 

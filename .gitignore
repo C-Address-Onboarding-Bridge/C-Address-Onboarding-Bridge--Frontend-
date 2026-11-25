@@ -54,8 +54,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — .env.example is committed so contributors know what to configure
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -67,3 +68,7 @@ next-env.d.ts
 # Percy / Storybook (not configured — see CONTRIBUTING.md)
 .percy/
 storybook-static/
+
+# pr description scratch files (not part of source)
+pr-description*.md
+docs-pr-description.md
