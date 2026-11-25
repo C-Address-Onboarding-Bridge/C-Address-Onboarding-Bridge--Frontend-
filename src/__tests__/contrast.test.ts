@@ -182,3 +182,43 @@ describe("--text-muted WCAG AA contrast — light theme", () => {
     expect(contrastRatio(lightMuted, bg)).toBeGreaterThanOrEqual(AA_NORMAL);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #910 — --warning token WCAG AA contrast
+//
+// The Testnet badge and network-changed banner use text-[var(--warning)].
+// The light --warning (#c07800) and dark --warning (#fdcb6e) must each clear
+// 4.5:1 over the solid surfaces they can appear on (--background, --surface).
+// ---------------------------------------------------------------------------
+
+const lightWarning = hexToRgb(getToken(lightTokens, "warning"));
+const darkWarning = hexToRgb(getToken(darkTokens, "warning"));
+
+const warningSurfaces: Record<string, { light: RGB; dark: RGB }> = {
+  "--background": {
+    light: hexToRgb(getToken(lightTokens, "background")),
+    dark: hexToRgb(getToken(darkTokens, "background")),
+  },
+  "--surface": {
+    light: hexToRgb(getToken(lightTokens, "surface")),
+    dark: hexToRgb(getToken(darkTokens, "surface")),
+  },
+};
+
+describe("--warning WCAG AA contrast — light theme (#910)", () => {
+  it.each(Object.entries(warningSurfaces))(
+    "meets AA over %s (light)",
+    (_label, surfaces) => {
+      expect(contrastRatio(lightWarning, surfaces.light)).toBeGreaterThanOrEqual(AA_NORMAL);
+    },
+  );
+});
+
+describe("--warning WCAG AA contrast — dark theme (#910)", () => {
+  it.each(Object.entries(warningSurfaces))(
+    "meets AA over %s (dark)",
+    (_label, surfaces) => {
+      expect(contrastRatio(darkWarning, surfaces.dark)).toBeGreaterThanOrEqual(AA_NORMAL);
+    },
+  );
+});

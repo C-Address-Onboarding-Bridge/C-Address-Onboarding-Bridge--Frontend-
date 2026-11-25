@@ -59,7 +59,7 @@ describe("confirmations", () => {
       expect(result.status).toBe("success");
       expect(result.fromAddressTruncated).toMatch(/^[A-Z]{6}\.\.\.[A-Z]{6}$/);
       expect(result.toAddressTruncated).toMatch(/^[A-Z]{6}\.\.\.[A-Z]{6}$/);
-      expect(result.timestamp).toContain("1970");
+      expect(result.timestamp).toContain("2023-11");
     });
   });
 
@@ -67,7 +67,9 @@ describe("confirmations", () => {
     it("accepts valid 64-char hex hashes", () => {
       expect(isValidHash("a".repeat(64))).toBe(true);
       expect(isValidHash("A".repeat(64))).toBe(true);
-      expect(isValidHash("0123456789abcdefABCDEF".repeat(3) + "0123")).toBe(true);
+      const mixedCase = ("0123456789abcdefABCDEF".repeat(3)).slice(0, 64);
+      expect(mixedCase).toHaveLength(64);
+      expect(isValidHash(mixedCase)).toBe(true);
     });
 
     it("rejects invalid hashes", () => {
@@ -75,6 +77,7 @@ describe("confirmations", () => {
       expect(isValidHash("g".repeat(64))).toBe(false); // 'g' is not hex
       expect(isValidHash("a".repeat(63))).toBe(false);
       expect(isValidHash("a".repeat(65))).toBe(false);
+      expect(isValidHash("0123456789abcdefABCDEF".repeat(3) + "0123")).toBe(false); // 70 chars
     });
   });
 

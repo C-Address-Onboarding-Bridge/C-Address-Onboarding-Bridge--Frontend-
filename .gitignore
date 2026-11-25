@@ -14,7 +14,7 @@
 /coverage
 /playwright-report/
 /test-results/
-# Vitest / Jest snapshot files
+# Vitest / Jest snapshot files — generated output, not source of truth
 **/__snapshots__/
 *.snap
 
@@ -28,6 +28,21 @@
 # misc
 .DS_Store
 *.pem
+# Editor / OS artefacts
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+
+# Stray PR description files committed by mistake (#908)
+pr-description*.md
+docs-pr-description*.md
+# Percy visual-diff config is not a project dependency (#908)
+.percy.yml
+
+# Test snapshots — generated files that should not be committed
+**/__snapshots__/
 
 # debug
 npm-debug.log*
@@ -45,6 +60,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# PR description scratch files (branch bookkeeping, not documentation)
-pr-description*.md
-docs-pr-description*.md
+# Percy / Storybook (not configured — see CONTRIBUTING.md)
+.percy/
+storybook-static/

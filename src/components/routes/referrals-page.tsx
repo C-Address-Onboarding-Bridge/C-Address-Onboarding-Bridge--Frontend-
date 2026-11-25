@@ -34,7 +34,7 @@ export default function ReferralsPage() {
   const [statsResult, setStatsResult] = useState<{ key: string; stats: ReferralStats | null; error: boolean } | null>(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
 
-  const [qrResult, setQrResult] = useState<{ link: string; svg: string | null; error: boolean } | null>(null);
+  const [qrResult, setQrResult] = useState<{ link: string; dataUrl: string | null; error: boolean } | null>(null);
   const requestKey = `${address ?? ""}:${network}:${refreshIndex}`;
   const requestEnabled = Boolean(isConnected && address && isNetworkSupported);
   const currentStats = statsResult?.key === requestKey ? statsResult : null;
@@ -66,22 +66,22 @@ export default function ReferralsPage() {
   }, [stats]);
 
   const currentQr = qrResult?.link === referralLink ? qrResult : null;
-  const qrSvg = currentQr?.svg ?? null;
+  const qrDataUrl = currentQr?.dataUrl ?? null;
   const qrError = currentQr?.error ?? false;
 
   useEffect(() => {
     if (!referralLink) return;
     let cancelled = false;
 
-    // `type: "svg"` renders a plain markup string with no canvas/DOM
-    // dependency, unlike toDataURL/toCanvas — this keeps QR generation
-    // working identically in the browser and in tests.
-    QRCode.toString(referralLink, { type: "svg", margin: 1, width: 176 })
-      .then((svg) => {
-        if (!cancelled) setQrResult({ link: referralLink, svg, error: false });
+    // Render the QR as a data URL and display it via <img> rather than
+    // injecting raw SVG markup — avoids a dangerouslySetInnerHTML sink
+    // (see security-audit.test.ts).
+    QRCode.toDataURL(referralLink, { margin: 1, width: 176 })
+      .then((dataUrl) => {
+        if (!cancelled) setQrResult({ link: referralLink, dataUrl, error: false });
       })
       .catch(() => {
-        if (!cancelled) setQrResult({ link: referralLink, svg: null, error: true });
+        if (!cancelled) setQrResult({ link: referralLink, dataUrl: null, error: true });
       });
 
     return () => {
@@ -190,100 +190,35 @@ export default function ReferralsPage() {
                   >
                     {copyStatus === "copied" ? (
                       <Check className="w-4 h-4 text-[var(--success)]" />
-                    ) : copyStatus === "error" ? (
-                      <X className="w-4 h-4 text-[var(--error)]" />
                     ) : (
-                      <Copy className="w-4 h-4 text-[var(--text-muted)]" />
+                      <Copy className="w-4 h-4" />
                     )}
                   </button>
-                  <LiveRegion message={copyAnnouncement} />
                 </div>
-                {copyStatus === "error" && (
-                  <p className="text-xs text-[var(--error)] mt-1.5">Copy failed — check clipboard permissions</p>
-                )}
-                <p className="text-xs text-[var(--text-muted)] mt-2">
-                  Anyone who funds a C-address through this link is attributed to your account.
-                </p>
+                <LiveRegion message={copyAnnouncement} />
               </div>
 
-              {/* The QR code needs a true white background to stay scannable
-                  regardless of the app's light/dark theme, so this container
-                  intentionally uses literal colors instead of the themed
-                  --surface variable. */}
-              <div className="shrink-0 self-start bg-white p-3 rounded-lg" data-testid="referral-qr-container">
-                {qrSvg ? (
-                  <div
-                    role="img"
+              <div className="shrink-0 flex items-center justify-center">
+                {qrError ? (
+                  <div className="w-44 h-44 flex items-center justify-center text-xs text-[var(--text-muted)] text-center px-2">
+                    Couldn&apos;t generate QR code.
+                  </div>
+                ) : qrDataUrl ? (
+                  <img
+                    src={qrDataUrl}
+                    alt="QR code for your referral link"
                     aria-label="QR code for your referral link"
                     className="w-44 h-44"
                     data-testid="referral-qr-svg"
-                    dangerouslySetInnerHTML={{ __html: qrSvg }}
                   />
-                ) : qrError ? (
-                  <div className="w-44 h-44 flex items-center justify-center text-center text-xs text-gray-500 px-2">
-                    QR code unavailable
-                  </div>
                 ) : (
-                  <div
-                    aria-hidden="true"
-                    className="w-44 h-44 rounded bg-gray-200 animate-pulse motion-reduce:animate-none"
-                  />
+                  <div className="w-44 h-44 flex items-center justify-center">
+                    <Loader2 className="w-6 h-6 animate-spin motion-reduce:animate-none text-[var(--text-muted)]" />
+                    <span className="sr-only">Generating QR code…</span>
+                  </div>
                 )}
               </div>
             </div>
-          </section>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
-            <div className="card p-5">
-              <div className="flex items-center gap-2 mb-1">
-                <TrendingUp className="w-4 h-4 text-[var(--primary-light)]" />
-                <span className="text-xs text-[var(--text-muted)]">Referred volume</span>
-              </div>
-              <div className="text-2xl font-bold" data-testid="referred-volume">
-                {formatReferralAmount(stats.referredVolume)}
-              </div>
-            </div>
-            <div className="card p-5">
-              <div className="flex items-center gap-2 mb-1">
-                <Users className="w-4 h-4 text-[var(--secondary)]" />
-                <span className="text-xs text-[var(--text-muted)]">Referred transactions</span>
-              </div>
-              <div className="text-2xl font-bold" data-testid="referred-count">
-                {stats.referredTransactionCount}
-              </div>
-            </div>
-            <div className="card p-5">
-              <div className="flex items-center gap-2 mb-1">
-                <Coins className="w-4 h-4 text-[var(--accent)]" />
-                <span className="text-xs text-[var(--text-muted)]">Accrued referral fees</span>
-              </div>
-              <div className="text-2xl font-bold" data-testid="accrued-fees">
-                {formatReferralAmount(stats.accruedFees)}
-              </div>
-            </div>
-          </div>
-
-          <section aria-labelledby="referral-chart-heading" className="card p-5">
-            <h2 id="referral-chart-heading" className="font-semibold mb-4">
-              Referred volume over time
-            </h2>
-
-            {!hasReferralActivity(stats) ? (
-              <div className="p-10 text-center" data-testid="referrals-empty-state">
-                <p className="text-sm text-[var(--text-muted)]">
-                  No referrals yet. Share your link above — referred volume and fees will show up here once
-                  someone funds a C-address through it.
-                </p>
-              </div>
-            ) : (
-              <BarChart
-                buckets={volumeBuckets}
-                valueOf={(bucket) => bucket.volume}
-                formatValue={formatReferralAmount}
-                ariaLabel="Referred volume over time"
-                color="var(--primary)"
-              />
-            )}
           </section>
         </>
       )}

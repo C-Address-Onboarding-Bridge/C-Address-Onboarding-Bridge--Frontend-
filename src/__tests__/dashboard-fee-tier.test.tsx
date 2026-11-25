@@ -39,6 +39,7 @@ vi.mock("@/components/wallet-provider", () => ({
 vi.mock("@/lib/stellar", () => ({
   getAccountBalances: vi.fn().mockResolvedValue({ total: "100", balances: [] }),
   fetchRecentTransactions: vi.fn().mockResolvedValue([]),
+  fetchTransactionsForRange: vi.fn().mockResolvedValue([]),
   getExplorerUrl: () => "https://stellar.expert",
   formatNetworkLabel: () => "Testnet",
   toSafeErrorMessage: (_e: unknown, fallback: string) => fallback,

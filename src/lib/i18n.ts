@@ -3,6 +3,7 @@
  * Supports en, es, fr, pt with RTL-safe layout handling.
  * #361
  */
+import { useCallback, useSyncExternalStore } from 'react';
 
 export type Locale = 'en' | 'es' | 'fr' | 'pt';
 
@@ -111,6 +112,39 @@ export interface TranslationSet {
     transaction_failed: string;
     invalid_address: string;
   };
+  cex: {
+    title: string;
+    subtitle: string;
+    openHelp: string;
+    step1Title: string;
+    minWithdrawal: string;
+    step2Title: string;
+    step2Hint: string;
+    addressInputLabel: string;
+    addressValid: string;
+    addressError: string;
+    copiedAnnouncement: string;
+    copyFailedAnnouncement: string;
+    step3Title: string;
+    bridgeComingSoon: string;
+    bridgeComingSoonBody: string;
+    depositAddressLabel: string;
+    copyAddress: string;
+    copyFailed: string;
+    openExchange: string;
+    enterAddressPrompt: string;
+    whyTitle: string;
+    why1: string;
+    why2: string;
+    why3: string;
+    needHelpTitle: string;
+    needHelpBody: string;
+    openHelpCentre: string;
+    exchangeDetailsTitle: string;
+    exchangeLabel: string;
+    minWithdrawalLabel: string;
+    feeLabel: string;
+  };
 }
 
 const translations: Record<Locale, TranslationSet> = {
@@ -216,6 +250,39 @@ const translations: Record<Locale, TranslationSet> = {
       transaction_failed: 'Transaction failed. Please try again.',
       invalid_address: 'The address is not valid.',
     },
+    cex: {
+      title: 'CEX Withdrawal Routing',
+      subtitle: 'Route your centralized exchange withdrawals directly to a Soroban C-address.',
+      openHelp: 'Open help centre',
+      step1Title: '1. Select Your Exchange',
+      minWithdrawal: 'Min: {amount}',
+      step2Title: '2. Enter Your C-Address',
+      step2Hint: 'Your Soroban smart account address. C-addresses start with the letter C and are distinct from regular Stellar G-addresses.',
+      addressInputLabel: 'Soroban C-address',
+      addressValid: 'Valid C-address',
+      addressError: 'Invalid C-address — must be a valid Soroban contract address (starts with C).',
+      copiedAnnouncement: 'C-address copied to clipboard.',
+      copyFailedAnnouncement: 'Copy failed. Check clipboard permissions and try again.',
+      step3Title: '3. Withdrawal Details for {name}',
+      bridgeComingSoon: 'Bridge deposit address not yet configured',
+      bridgeComingSoonBody: 'This deployment hasn\'t set up a bridge deposit address yet. In the meantime, use the Bridge tab to convert a G-address payment to your C-address.',
+      depositAddressLabel: 'Your C-Address (for reference)',
+      copyAddress: 'Copy C-address',
+      copyFailed: 'Copy failed',
+      openExchange: 'Open {name} Withdrawal',
+      enterAddressPrompt: 'Your C-address and the exchange withdrawal link appear here once the address is valid.',
+      whyTitle: 'Why route to a C-address?',
+      why1: 'Funds land directly in your Soroban smart account.',
+      why2: 'No intermediate G-address to manage or secure.',
+      why3: 'Works with any exchange that supports Stellar withdrawals.',
+      needHelpTitle: 'Need help?',
+      needHelpBody: 'Read the step-by-step guide to withdrawing from an exchange to a C-address.',
+      openHelpCentre: 'Open help centre',
+      exchangeDetailsTitle: 'Exchange Details',
+      exchangeLabel: 'Exchange',
+      minWithdrawalLabel: 'Min Withdrawal',
+      feeLabel: 'Fee',
+    },
   },
   es: {
     common: {
@@ -318,6 +385,39 @@ const translations: Record<Locale, TranslationSet> = {
       network_mismatch: 'Cambie a la red correcta.',
       transaction_failed: 'La transacción falló. Inténtelo de nuevo.',
       invalid_address: 'La dirección no es válida.',
+    },
+    cex: {
+      title: 'Enrutamiento de retiros desde CEX',
+      subtitle: 'Envía los retiros de tu exchange centralizado directamente a una dirección C de Soroban.',
+      openHelp: 'Abrir centro de ayuda',
+      step1Title: '1. Selecciona tu exchange',
+      minWithdrawal: 'Mín.: {amount}',
+      step2Title: '2. Introduce tu dirección C',
+      step2Hint: 'La dirección de tu cuenta inteligente de Soroban. Las direcciones C empiezan por la letra C y son distintas de las direcciones G habituales de Stellar.',
+      addressInputLabel: 'Dirección C de Soroban',
+      addressValid: 'Dirección C válida',
+      addressError: 'Dirección C no válida: debe ser una dirección de contrato de Soroban válida (empieza por C).',
+      copiedAnnouncement: 'Dirección C copiada al portapapeles.',
+      copyFailedAnnouncement: 'No se pudo copiar. Revisa los permisos del portapapeles e inténtalo de nuevo.',
+      step3Title: '3. Detalles del retiro para {name}',
+      bridgeComingSoon: 'Dirección de depósito del puente aún no configurada',
+      bridgeComingSoonBody: 'Esta instalación todavía no ha configurado una dirección de depósito del puente. Mientras tanto, usa la pestaña Puente para convertir un pago a una dirección G en tu dirección C.',
+      depositAddressLabel: 'Tu dirección C (como referencia)',
+      copyAddress: 'Copiar dirección C',
+      copyFailed: 'No se pudo copiar',
+      openExchange: 'Abrir retiro en {name}',
+      enterAddressPrompt: 'Introduce arriba una dirección C válida para ver los detalles del retiro.',
+      whyTitle: '¿Por qué enviar a una dirección C?',
+      why1: 'Los fondos llegan directamente a tu cuenta inteligente de Soroban.',
+      why2: 'Sin una dirección G intermedia que gestionar o proteger.',
+      why3: 'Funciona con cualquier exchange que admita retiros en Stellar.',
+      needHelpTitle: '¿Necesitas ayuda?',
+      needHelpBody: 'Lee la guía paso a paso para retirar desde un exchange a una dirección C.',
+      openHelpCentre: 'Abrir centro de ayuda',
+      exchangeDetailsTitle: 'Detalles del exchange',
+      exchangeLabel: 'Exchange',
+      minWithdrawalLabel: 'Retiro mínimo',
+      feeLabel: 'Comisión',
     },
   },
   fr: {
@@ -422,6 +522,39 @@ const translations: Record<Locale, TranslationSet> = {
       transaction_failed: 'La transaction a échoué. Veuillez réessayer.',
       invalid_address: 'L\'adresse n\'est pas valide.',
     },
+    cex: {
+      title: 'Routage des retraits CEX',
+      subtitle: 'Acheminez les retraits de votre plateforme d\'échange centralisée directement vers une adresse C Soroban.',
+      openHelp: 'Ouvrir le centre d\'aide',
+      step1Title: '1. Choisissez votre plateforme',
+      minWithdrawal: 'Min. : {amount}',
+      step2Title: '2. Saisissez votre adresse C',
+      step2Hint: 'L\'adresse de votre compte intelligent Soroban. Les adresses C commencent par la lettre C et sont distinctes des adresses G Stellar classiques.',
+      addressInputLabel: 'Adresse C Soroban',
+      addressValid: 'Adresse C valide',
+      addressError: 'Adresse C invalide : elle doit être une adresse de contrat Soroban valide (commençant par C).',
+      copiedAnnouncement: 'Adresse C copiée dans le presse-papiers.',
+      copyFailedAnnouncement: 'Échec de la copie. Vérifiez les autorisations du presse-papiers et réessayez.',
+      step3Title: '3. Détails du retrait pour {name}',
+      bridgeComingSoon: 'Adresse de dépôt du pont pas encore configurée',
+      bridgeComingSoonBody: 'Ce déploiement n\'a pas encore configuré d\'adresse de dépôt pour le pont. En attendant, utilisez l\'onglet Pont pour convertir un paiement vers une adresse G en paiement vers votre adresse C.',
+      depositAddressLabel: 'Votre adresse C (pour référence)',
+      copyAddress: 'Copier l\'adresse C',
+      copyFailed: 'Échec de la copie',
+      openExchange: 'Ouvrir le retrait {name}',
+      enterAddressPrompt: 'Saisissez une adresse C valide ci-dessus pour voir les détails du retrait.',
+      whyTitle: 'Pourquoi passer par une adresse C ?',
+      why1: 'Les fonds arrivent directement sur votre compte intelligent Soroban.',
+      why2: 'Aucune adresse G intermédiaire à gérer ou à sécuriser.',
+      why3: 'Fonctionne avec toute plateforme prenant en charge les retraits Stellar.',
+      needHelpTitle: 'Besoin d\'aide ?',
+      needHelpBody: 'Consultez le guide pas à pas pour retirer depuis une plateforme vers une adresse C.',
+      openHelpCentre: 'Ouvrir le centre d\'aide',
+      exchangeDetailsTitle: 'Détails de la plateforme',
+      exchangeLabel: 'Plateforme',
+      minWithdrawalLabel: 'Retrait minimum',
+      feeLabel: 'Frais',
+    },
   },
   pt: {
     common: {
@@ -525,6 +658,39 @@ const translations: Record<Locale, TranslationSet> = {
       transaction_failed: 'A transação falhou. Tente novamente.',
       invalid_address: 'O endereço não é válido.',
     },
+    cex: {
+      title: 'Roteamento de saques de CEX',
+      subtitle: 'Envie os saques da sua corretora centralizada diretamente para um endereço C da Soroban.',
+      openHelp: 'Abrir central de ajuda',
+      step1Title: '1. Selecione sua corretora',
+      minWithdrawal: 'Mín.: {amount}',
+      step2Title: '2. Informe seu endereço C',
+      step2Hint: 'O endereço da sua conta inteligente Soroban. Endereços C começam com a letra C e são diferentes dos endereços G comuns da Stellar.',
+      addressInputLabel: 'Endereço C da Soroban',
+      addressValid: 'Endereço C válido',
+      addressError: 'Endereço C inválido: deve ser um endereço de contrato Soroban válido (começa com C).',
+      copiedAnnouncement: 'Endereço C copiado para a área de transferência.',
+      copyFailedAnnouncement: 'Falha ao copiar. Verifique as permissões da área de transferência e tente novamente.',
+      step3Title: '3. Detalhes do saque para {name}',
+      bridgeComingSoon: 'Endereço de depósito da ponte ainda não configurado',
+      bridgeComingSoonBody: 'Esta implantação ainda não configurou um endereço de depósito da ponte. Enquanto isso, use a aba Ponte para converter um pagamento para endereço G em um pagamento para o seu endereço C.',
+      depositAddressLabel: 'Seu endereço C (para referência)',
+      copyAddress: 'Copiar endereço C',
+      copyFailed: 'Falha ao copiar',
+      openExchange: 'Abrir saque na {name}',
+      enterAddressPrompt: 'Informe acima um endereço C válido para ver os detalhes do saque.',
+      whyTitle: 'Por que enviar para um endereço C?',
+      why1: 'Os fundos chegam diretamente na sua conta inteligente Soroban.',
+      why2: 'Nenhum endereço G intermediário para gerenciar ou proteger.',
+      why3: 'Funciona com qualquer corretora que suporte saques na Stellar.',
+      needHelpTitle: 'Precisa de ajuda?',
+      needHelpBody: 'Leia o guia passo a passo para sacar de uma corretora para um endereço C.',
+      openHelpCentre: 'Abrir central de ajuda',
+      exchangeDetailsTitle: 'Detalhes da corretora',
+      exchangeLabel: 'Corretora',
+      minWithdrawalLabel: 'Saque mínimo',
+      feeLabel: 'Taxa',
+    },
   },
 };
 
@@ -532,7 +698,17 @@ export function getTranslations(locale: Locale): TranslationSet {
   return translations[locale] ?? translations[DEFAULT_LOCALE];
 }
 
-export function t(locale: Locale, key: string): string {
+/** Values substituted into `{name}`-style placeholders in a translation. */
+export type TranslationVars = Record<string, string | number>;
+
+function interpolate(text: string, vars?: TranslationVars): string {
+  if (!vars) return text;
+  return text.replace(/\{(\w+)\}/g, (match, name: string) =>
+    name in vars ? String(vars[name]) : match,
+  );
+}
+
+function lookup(locale: Locale, key: string): string {
   const set = getTranslations(locale);
   const parts = key.split('.');
   let current: unknown = set;
@@ -544,4 +720,86 @@ export function t(locale: Locale, key: string): string {
     }
   }
   return typeof current === 'string' ? current : key;
+}
+
+/**
+ * Translate a dot-path key, falling back to the key itself.
+ *
+ * `t(locale, key, vars?)` translates in an explicit locale. `t(key, vars?)`
+ * uses the active locale (see {@link setLocale}).
+ */
+export function t(key: string, vars?: TranslationVars): string;
+export function t(locale: Locale, key: string, vars?: TranslationVars): string;
+export function t(a: string, b?: string | TranslationVars, c?: TranslationVars): string {
+  if (typeof b === 'string') return interpolate(lookup(a as Locale, b), c);
+  return interpolate(lookup(activeLocale, a), b);
+}
+
+/**
+ * Detect locale from browser or fallback to default.
+ */
+export function detectLocale(): Locale {
+  if (typeof window === 'undefined') return DEFAULT_LOCALE;
+  const browser = window.navigator.language?.slice(0, 2).toLowerCase() ?? DEFAULT_LOCALE;
+  return SUPPORTED_LOCALES.includes(browser as Locale) ? (browser as Locale) : DEFAULT_LOCALE;
+}
+
+/**
+ * Format a number for the given locale.
+ */
+export function formatNumber(value: number, locale: Locale = DEFAULT_LOCALE): string {
+  return new Intl.NumberFormat(locale).format(value);
+}
+
+/**
+ * Format a currency amount for the given locale.
+ */
+export function formatCurrency(
+  value: number,
+  currency: string = 'USD',
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value);
+}
+
+// ---------------------------------------------------------------------------
+// Active locale
+//
+// `LocaleProvider` owns the user's choice (storage, browser detection) and
+// mirrors it here, so components that only need strings can call
+// `useTranslation()` without depending on the context, and stay in step with
+// the language switcher.
+// ---------------------------------------------------------------------------
+
+let activeLocale: Locale = DEFAULT_LOCALE;
+const listeners = new Set<() => void>();
+
+/** The locale `t(key)` and `useTranslation()` currently translate into. */
+export function getLocale(): Locale {
+  return activeLocale;
+}
+
+/** Set the active locale. No-ops for unsupported values. */
+export function setLocale(locale: Locale): void {
+  if (!SUPPORTED_LOCALES.includes(locale) || locale === activeLocale) return;
+  activeLocale = locale;
+  listeners.forEach((listener) => listener());
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/** Translate in the active locale, re-rendering when it changes. */
+export function useTranslation(): {
+  locale: Locale;
+  t: (key: string, vars?: TranslationVars) => string;
+} {
+  const locale = useSyncExternalStore(subscribe, getLocale, () => DEFAULT_LOCALE);
+  const translate = useCallback(
+    (key: string, vars?: TranslationVars) => interpolate(lookup(locale, key), vars),
+    [locale],
+  );
+  return { locale, t: translate };
 }

@@ -89,6 +89,30 @@ describe("AddressBookPage (#466)", () => {
     expect(screen.queryByText("Discarded")).not.toBeInTheDocument();
   });
 
+  it("gives the inline edit inputs accessible names instead of 'edit text, blank' (#930)", async () => {
+    const saved = saveRecipient("Alice", VALID_ADDRESS)!;
+    render(<AddressBookPage />);
+    await screen.findByText("Alice");
+
+    fireEvent.click(screen.getByTestId(`edit-button-${saved.id}`));
+
+    expect(screen.getByLabelText("Label for Alice")).toBe(screen.getByTestId(`edit-label-input-${saved.id}`));
+    expect(screen.getByLabelText("Address for Alice")).toBe(screen.getByTestId(`edit-address-input-${saved.id}`));
+  });
+
+  it("moves focus to the first edit field, and back to the Edit button on cancel (#930)", async () => {
+    const saved = saveRecipient("Alice", VALID_ADDRESS)!;
+    render(<AddressBookPage />);
+    await screen.findByText("Alice");
+
+    const editButton = screen.getByTestId(`edit-button-${saved.id}`);
+    fireEvent.click(editButton);
+    expect(screen.getByTestId(`edit-label-input-${saved.id}`)).toHaveFocus();
+
+    fireEvent.click(screen.getByTestId(`cancel-edit-${saved.id}`));
+    expect(editButton).toHaveFocus();
+  });
+
   it("deletes a recipient", async () => {
     const saved = saveRecipient("Alice", VALID_ADDRESS)!;
     render(<AddressBookPage />);

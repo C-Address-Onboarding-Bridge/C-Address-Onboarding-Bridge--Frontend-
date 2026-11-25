@@ -20,6 +20,7 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useState,
   type ReactNode,
 } from 'react';
@@ -29,6 +30,7 @@ import {
   getTranslations,
   t as rawT,
   detectLocale,
+  setLocale as setActiveLocale,
   type Locale,
   type TranslationSet,
 } from '@/lib/i18n';
@@ -97,6 +99,12 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     setLocaleOverride(next);
   }, []);
 
+  // Mirror the choice into the i18n module so components using
+  // `useTranslation()` (e.g. the CEX page, #734) follow the language switcher.
+  useEffect(() => {
+    setActiveLocale(locale);
+  }, [locale]);
+
   const tBound = useCallback((key: string) => rawT(locale, key), [locale]);
 
   const value: LocaleContextValue = {
@@ -121,6 +129,9 @@ export function useLocale(): LocaleContextValue {
   const ctx = useContext(LocaleContext);
   if (!ctx) {
     // Graceful fallback outside the provider (e.g. isolated unit tests).
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('useLocale was called outside <LocaleProvider>; locale changes will be ignored.');
+    }
     return {
       locale: DEFAULT_LOCALE,
       t: (key: string) => rawT(DEFAULT_LOCALE, key),

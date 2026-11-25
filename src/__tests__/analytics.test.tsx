@@ -73,6 +73,33 @@ describe("aggregateAnalytics", () => {
     const today = buckets[buckets.length - 1];
     expect(today?.count).toBe(0);
   });
+
+  it("gives correct 30D and 90D totals for 25 payments spread over 60 days (#938)", () => {
+    // One payment every ~2.4 days for 60 days: 25 payments total, all
+    // within 90D, but only the more recent ones fall within 30D. This is
+    // exactly the shape the dashboard's "fetch only 10 records" bug got
+    // wrong — switching range used to change nothing once there were
+    // more than 10 payments in history.
+    const payments: BridgeTransactionData[] = Array.from({ length: 25 }, (_, i) =>
+      tx({ amount: "1", asset: "XLM", timestamp: NOW - i * 2.4 * DAY_MS })
+    );
+
+    const totalCount = (range: 7 | 30 | 90) =>
+      aggregateAnalytics(payments, range).reduce((sum, b) => sum + b.count, 0);
+
+    const within30 = payments.filter((p) => NOW - p.timestamp <= 30 * DAY_MS).length;
+    const within90 = payments.filter((p) => NOW - p.timestamp <= 90 * DAY_MS).length;
+
+    expect(within30).toBeGreaterThan(10); // the old hard cap this bug is about
+    expect(within30).toBeLessThan(within90);
+    expect(within90).toBe(25); // all 25 fit inside 90 days
+
+    expect(totalCount(30)).toBe(within30);
+    expect(totalCount(90)).toBe(within90);
+    // Switching the range must actually change the total — the bug report's
+    // core symptom was that it didn't.
+    expect(totalCount(30)).not.toBe(totalCount(90));
+  });
 });
 
 describe("AnalyticsSection", () => {

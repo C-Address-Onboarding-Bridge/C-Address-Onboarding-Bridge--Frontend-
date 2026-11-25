@@ -17,6 +17,21 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      # Fails a PR whose package.json and package-lock.json disagree for the npm
+      # that ships with Node 22 (#845), with a readable diff instead of npm ci's
+      # bare "not in sync" error. Regenerate with the same npm major:
+      #   npx npm@10 install --package-lock-only --ignore-scripts
+      - name: Lockfile is in sync with package.json
+        run: |
+          npm --version
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          if ! git diff --exit-code --stat package-lock.json; then
+            echo "::error file=package-lock.json::package-lock.json is out of sync with package.json for npm $(npm --version). Run: npx npm@10 install --package-lock-only --ignore-scripts"
+            git diff package-lock.json | head -80
+            exit 1
+          fi
+
       - run: npm ci
 
       # Blocking. Transitive advisories through @creit.tech/stellar-wallets-kit
@@ -27,10 +42,19 @@ jobs:
 
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm run test
+      # The coverage provider is installed ad hoc (not saved to package.json) at
+      # the installed vitest version, then the suite is run once with coverage.
       - name: Coverage report
-        run: npm run test -- --coverage
-        continue-on-error: true
+        run: |
+          VITEST_VERSION="$(node -p "require('vitest/package.json').version")"
+          npm install --no-save --no-audit --no-fund "@vitest/coverage-v8@${VITEST_VERSION}"
+          npx vitest run --coverage --coverage.provider=v8 --coverage.reporter=text --coverage.reporter=lcov --coverage.include='src/**'
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
+          if-no-files-found: warn
       - run: npm run build
         env:
           ENFORCE_BUDGET: "true"

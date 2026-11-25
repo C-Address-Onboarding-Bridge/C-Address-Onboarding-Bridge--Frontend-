@@ -23,6 +23,20 @@ interface Bucket {
 }
 
 const buckets = new Map<string, Bucket>();
+const BUCKET_CLEANUP_INTERVAL_MS = 60_000; // Evict expired buckets every minute
+
+// Periodically clean up expired buckets to prevent unbounded memory growth
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, bucket] of buckets.entries()) {
+      // Evict buckets older than 5 minutes (enough time for multiple windows)
+      if (now - bucket.windowStart > 5 * 60_000) {
+        buckets.delete(key);
+      }
+    }
+  }, BUCKET_CLEANUP_INTERVAL_MS);
+}
 
 /** Test-only: clears all counters so tests don't leak state into each other. */
 export function resetRateLimits(): void {
@@ -60,16 +74,20 @@ export function checkRateLimit(
 /**
  * Best-effort client IP extraction for a Next.js route handler's Request.
  * `x-forwarded-for` may carry a comma-separated chain through multiple
- * proxies — the first entry is the original client. Falls back to a shared
- * "unknown" bucket (rather than throwing) when neither header is present,
- * e.g. in local dev with no proxy in front — every unidentified caller then
- * shares one limit rather than each getting an unlimited allowance.
+ * proxies. We use the rightmost (last) entry, which is the IP of the
+ * most recent proxy — the one directly connected to us, which we trust.
+ * The leftmost entry (client's claim of its own IP) is untrusted since
+ * the client controls that value and can bypass rate limits by forging it.
+ * Falls back to a shared "unknown" bucket (rather than throwing) when
+ * neither header is present, e.g. in local dev with no proxy in front.
  */
 export function getClientIp(request: Request): string {
   const forwardedFor = request.headers.get("x-forwarded-for");
   if (forwardedFor) {
-    const first = forwardedFor.split(",")[0]?.trim();
-    if (first) return first;
+    // Use the last (rightmost) entry: the most recent proxy's IP
+    const parts = forwardedFor.split(",");
+    const last = parts[parts.length - 1]?.trim();
+    if (last) return last;
   }
   const realIp = request.headers.get("x-real-ip");
   if (realIp) return realIp;

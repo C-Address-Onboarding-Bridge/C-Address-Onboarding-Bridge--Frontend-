@@ -1,7 +1,11 @@
 #!/bin/sh
 
+# Resolve the repo root from git rather than relying on $0's relative path,
+# which breaks after any cd inside this script. (#920)
+ROOT=$(git rev-parse --show-toplevel)
+
 echo "--- Frontend build ---"
-cd "$(dirname "$0")/.."
+cd "$ROOT"
 # A production build now fails fast if NEXT_PUBLIC_API_URL is unset (#675) —
 # this hook only verifies the build itself succeeds, not real backend
 # connectivity, so a placeholder is enough here.
@@ -11,27 +15,3 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 echo "PASSED: Frontend build"
-
-BACKEND_DIR="$(dirname "$0")/../backend"
-if [ -f "$BACKEND_DIR/package.json" ]; then
-  echo "--- Backend build ---"
-  cd "$BACKEND_DIR"
-  npm run build
-  if [ $? -ne 0 ]; then
-    echo "FAILED: Backend build"
-    exit 1
-  fi
-  echo "PASSED: Backend build"
-fi
-
-CONTRACTS_DIR="$(dirname "$0")/../contracts"
-if [ -f "$CONTRACTS_DIR/Cargo.toml" ]; then
-  echo "--- Contract build + tests ---"
-  cd "$CONTRACTS_DIR"
-  cargo build --release && cargo test
-  if [ $? -ne 0 ]; then
-    echo "FAILED: Contract build + tests"
-    exit 1
-  fi
-  echo "PASSED: Contract build + tests"
-fi

@@ -53,10 +53,6 @@ function generateReport() {
     console.warn(`Could not parse build stats: ${error.message}`);
   }
 
-  console.log('### Checks\n');
-  console.log('- ✅ Initial JS budget enforced in webpack config');
-  console.log('- ✅ Lighthouse scores tracked via CI');
-  console.log('- ✅ Bundle analysis available via `npm run analyze`');
 }
 
 generateReport();

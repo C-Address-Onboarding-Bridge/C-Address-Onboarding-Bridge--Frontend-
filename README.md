@@ -195,3 +195,22 @@ NEXT_PUBLIC_HORIZON_URL_TESTNET=https://your-custom-horizon.example.com
 ## License
 
 MIT
+
+## Note to maintainers
+
+`getAccountMinimumBalance()` in `src/lib/stellar.ts` (#577) is already implemented on main (it returns the base reserve, `"1.0"`), so no code change was needed.
+- #638: `isValidHash` in `src/lib/confirmations.ts` already accepts 64-char hex hashes case-insensitively; only the `.skip` on its test remains.
+- #639: `buildAndSubmitPayment` already builds the operation for the selected asset via `resolveAsset` (native XLM or the matching trustline asset); only the tests are still skipped.
+- #640: `resolveAsset` already throws `No <CODE> trustline found` and never falls back to XLM; only the test is still skipped.
+- #641: `assertActiveAccountMatches` already names both the active Freighter account and the From address and passes when they match; only the tests are still skipped.
+
+## Handsoff notes
+
+<!-- handsoff-issue-735 -->
+- #735: i18n: translate the onramp page
+
+<!-- handsoff-issue-463 -->
+- #463: feat: multi-asset portfolio view on the dashboard
+
+<!-- handsoff-issue-880 -->
+- #880: bug: bridge form persistence for mobile wallet hand-offs (#487) is never used

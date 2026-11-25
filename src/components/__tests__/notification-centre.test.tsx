@@ -5,6 +5,12 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import NotificationCentre from "@/components/notification-centre";
 import { addNotification, loadNotifications } from "@/lib/notifications";
 
+// The centre reads the connected wallet to scope its storage (#694, #844).
+// These tests exercise the no-wallet case, which uses the lib's global key.
+vi.mock("@/components/wallet-provider", () => ({
+  useWallet: () => ({ address: null, network: "TESTNET" }),
+}));
+
 vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: { children: React.ReactNode; href: string }) => (
     <a href={href} {...props}>

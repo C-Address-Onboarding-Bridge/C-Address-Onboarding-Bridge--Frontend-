@@ -53,6 +53,20 @@ CI runs four checks on every push and pull request. Run each locally before push
 
 All four must pass before opening a pull request.
 
+## Pre-push hook
+
+The `.husky/pre-push` hook runs `npm run build` against the frontend before every `git push`. This catches build-breaking changes before they reach CI.
+
+The hook resolves the repo root via `git rev-parse --show-toplevel` so it stays correct regardless of which directory you run `git push` from. It only covers this frontend repository — the backend and contracts live in separate repos and are not built here.
+
+If you need to push a work-in-progress branch that doesn't build yet (e.g. a draft PR or a checkpoint commit), you can skip the hook with:
+
+```bash
+git push --no-verify
+```
+
+Use this sparingly. All four CI checks (including the build) must still pass before a PR can be merged.
+
 ## Visual Testing Decision
 
 The repository does not currently run visual-baseline comparisons. The parked

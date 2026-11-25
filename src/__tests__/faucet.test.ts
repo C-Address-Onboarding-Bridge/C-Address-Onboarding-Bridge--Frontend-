@@ -19,7 +19,7 @@ describe("requestTestXLM", () => {
       } as Response)
     );
 
-    const result = await requestTestXLM(VALID_G_ADDRESS);
+    const result = await requestTestXLM(VALID_G_ADDRESS, "TESTNET");
     expect(result.success).toBe(true);
     expect(result.message).toContain("Test XLM sent!");
     expect(result.message).toContain("abc123de...");
@@ -33,7 +33,7 @@ describe("requestTestXLM", () => {
       } as Response)
     );
 
-    const result = await requestTestXLM(VALID_G_ADDRESS);
+    const result = await requestTestXLM(VALID_G_ADDRESS, "TESTNET");
     expect(result.success).toBe(false);
     expect(result.message).toContain("rate-limited");
   });
@@ -46,13 +46,13 @@ describe("requestTestXLM", () => {
       } as Response)
     );
 
-    const result = await requestTestXLM(VALID_G_ADDRESS);
+    const result = await requestTestXLM(VALID_G_ADDRESS, "TESTNET");
     expect(result.success).toBe(false);
     expect(result.message).toContain("500");
   });
 
   it("returns failure for invalid address", async () => {
-    const result = await requestTestXLM("invalid");
+    const result = await requestTestXLM("invalid", "TESTNET");
     expect(result.success).toBe(false);
     expect(result.message).toBe("Invalid Stellar address.");
   });
@@ -60,7 +60,7 @@ describe("requestTestXLM", () => {
   it("returns failure on network error", async () => {
     global.fetch = vi.fn(() => Promise.reject(new Error("network down")));
 
-    const result = await requestTestXLM(VALID_G_ADDRESS);
+    const result = await requestTestXLM(VALID_G_ADDRESS, "TESTNET");
     expect(result.success).toBe(false);
     expect(result.message).toContain("Network error");
   });

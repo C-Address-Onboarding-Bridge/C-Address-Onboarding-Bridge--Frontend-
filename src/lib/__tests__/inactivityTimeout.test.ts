@@ -107,4 +107,31 @@ describe("inactivity timeout management", () => {
   it("handles missing activity when checking reauth", () => {
     expect(isReauthRequired()).toBe(false);
   });
+
+  it("keeps reauthRequired true across a simulated reload even once isTimedOut alone would reset", () => {
+    // Time out once...
+    recordActivity(NOW);
+    const timedOutState = getInactivityState(NOW + INACTIVITY_TIMEOUT_MS + 1000, INACTIVITY_TIMEOUT_MS);
+    expect(timedOutState.isTimedOut).toBe(true);
+    expect(timedOutState.reauthRequired).toBe(true);
+    markReauthRequired(NOW + INACTIVITY_TIMEOUT_MS + 1000);
+
+    // ...then simulate a page reload: a fresh read of inactivity state is
+    // computed relative to a brand-new "now", shortly after the reload,
+    // with no new real user activity. isTimedOut (purely time-derived) is
+    // no longer true, but reauthRequired must still be true because the
+    // persisted REAUTH_REQUIRED_KEY flag was never explicitly cleared.
+    const reloadNow = NOW + INACTIVITY_TIMEOUT_MS + 2000;
+    const afterReload = getInactivityState(reloadNow, INACTIVITY_TIMEOUT_MS);
+    expect(afterReload.reauthRequired).toBe(true);
+  });
+
+  it("reauthRequired goes back to false only after an explicit clearReauthRequired", () => {
+    recordActivity(NOW);
+    markReauthRequired(NOW);
+    expect(getInactivityState(NOW + 1000, INACTIVITY_TIMEOUT_MS).reauthRequired).toBe(true);
+
+    clearReauthRequired();
+    expect(getInactivityState(NOW + 2000, INACTIVITY_TIMEOUT_MS).reauthRequired).toBe(false);
+  });
 });

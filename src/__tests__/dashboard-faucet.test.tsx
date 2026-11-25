@@ -34,6 +34,7 @@ vi.mock("@/lib/stellar", async (importOriginal) => {
     ...actual,
     getAccountBalances: vi.fn(async () => ({ total: "0", balances: [] })),
     fetchRecentTransactions: vi.fn(async () => []),
+    fetchTransactionsForRange: vi.fn(async () => []),
     getExplorerUrl: (_network: unknown, _type: unknown, id: string) => `https://stellar.expert/explorer/testnet/account/${id}`,
     formatNetworkLabel: (_status: unknown, _name?: string | null) => "Testnet",
     toSafeErrorMessage: (_e: unknown, fallback: string) => fallback,

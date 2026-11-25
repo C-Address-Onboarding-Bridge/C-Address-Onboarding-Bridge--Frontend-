@@ -1,25 +1,26 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { switchWalletNetwork } from "@/lib/stellar";
-
-// Wallet signing goes through @creit.tech/stellar-wallets-kit; these are
-// local stand-ins for the former @stellar/freighter-api mocks.
-const freighter = {
 
 /**
- * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
- * was never finished (or was lost in a bad merge) during the first bounty
- * programme. They are skipped -- not deleted -- so the next programme has an
- * exact worklist: un-skip one, make it pass, repeat. Nothing here was rewritten
- * to fit the current implementation.
+ * switchWalletNetwork (#480) confirms the switch through the Stellar Wallets
+ * Kit (`StellarWalletsKit.getNetwork`, via getWalletNetwork) — the
+ * @stellar/freighter-api package is no longer a dependency (#722, #846). The
+ * kit and its wallet modules are mocked so getWalletNetwork resolves.
  */
-  isConnected: vi.fn(),
-  getAddress: vi.fn(),
-  signTransaction: vi.fn(),
-  getNetwork: vi.fn(),
-};
 
-const getNetwork = vi.mocked(freighter.getNetwork);
+const kit = vi.hoisted(() => ({
+  init: vi.fn(),
+  getNetwork: vi.fn(),
+}));
+
+vi.mock("@creit.tech/stellar-wallets-kit/sdk", () => ({ StellarWalletsKit: kit }));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/freighter", () => ({ FreighterModule: class {} }));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/xbull", () => ({ xBullModule: class {} }));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/lobstr", () => ({ LobstrModule: class {} }));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/albedo", () => ({ AlbedoModule: class {} }));
+vi.mock("@creit.tech/stellar-wallets-kit/modules/rabet", () => ({ RabetModule: class {} }));
+
+import { switchWalletNetwork } from "@/lib/stellar";
 
 function injectFreighter(setNetwork: unknown) {
   (window as unknown as { freighter?: { setNetwork: unknown } }).freighter = {
@@ -36,15 +37,16 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("switchWalletNetwork (#480)", () => {
+describe("switchWalletNetwork (#480, #846)", () => {
   it("falls back to manual when the wallet exposes no programmatic switch API", async () => {
     await expect(switchWalletNetwork("TESTNET")).resolves.toBe("manual");
+    expect(kit.getNetwork).not.toHaveBeenCalled();
   });
 
-  it("requests the change through the wallet and confirms once it lands on the target", async () => {
+  it("requests the change through the wallet and confirms it via the kit", async () => {
     const setNetwork = vi.fn().mockResolvedValue(undefined);
     injectFreighter(setNetwork);
-    getNetwork.mockResolvedValue({ network: "TESTNET", networkPassphrase: "" } as never);
+    kit.getNetwork.mockResolvedValue({ network: "TESTNET", networkPassphrase: "" });
 
     await expect(switchWalletNetwork("TESTNET")).resolves.toBe("switched");
 
@@ -53,14 +55,15 @@ describe("switchWalletNetwork (#480)", () => {
       "Test SDF Network ; September 2015",
       "https://horizon-testnet.stellar.org"
     );
+    expect(kit.getNetwork).toHaveBeenCalled();
   });
 
   it("passes the mainnet passphrase, name, and URL for a PUBLIC switch", async () => {
     const setNetwork = vi.fn().mockResolvedValue(undefined);
     injectFreighter(setNetwork);
-    getNetwork.mockResolvedValue({ network: "PUBLIC", networkPassphrase: "" } as never);
+    kit.getNetwork.mockResolvedValue({ network: "PUBLIC", networkPassphrase: "" });
 
-    await switchWalletNetwork("PUBLIC");
+    await expect(switchWalletNetwork("PUBLIC")).resolves.toBe("switched");
 
     expect(setNetwork).toHaveBeenCalledWith(
       "Public Global Stellar Network ; September 2015",
@@ -75,19 +78,44 @@ describe("switchWalletNetwork (#480)", () => {
 
     await expect(switchWalletNetwork("PUBLIC")).resolves.toBe("cancelled");
     expect(setNetwork).toHaveBeenCalledOnce();
+    expect(kit.getNetwork).not.toHaveBeenCalled();
   });
 
-  // Skipped with its two siblings above: all three depend on the wallet-kit
-  // singleton resolving under these mocks, which it never does. This one only
-  // passed before because the (failing) siblings warmed the kit first.
+  it("keeps polling until the wallet lands on the target", async () => {
+    const setNetwork = vi.fn().mockResolvedValue(undefined);
+    injectFreighter(setNetwork);
+    kit.getNetwork
+      .mockResolvedValueOnce({ network: "TESTNET", networkPassphrase: "" })
+      .mockResolvedValue({ network: "PUBLIC", networkPassphrase: "" });
+
+    vi.useFakeTimers();
+    const pending = switchWalletNetwork("PUBLIC");
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(pending).resolves.toBe("switched");
+    expect(kit.getNetwork.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("returns cancelled when the wallet never lands on the target within the timeout", async () => {
     const setNetwork = vi.fn().mockResolvedValue(undefined);
     injectFreighter(setNetwork);
     // The wallet stays on TESTNET while we ask for PUBLIC.
-    getNetwork.mockResolvedValue({ network: "TESTNET", networkPassphrase: "" } as never);
+    kit.getNetwork.mockResolvedValue({ network: "TESTNET", networkPassphrase: "" });
 
     vi.useFakeTimers();
     const pending = switchWalletNetwork("PUBLIC");
+    await vi.advanceTimersByTimeAsync(8_500);
+
+    await expect(pending).resolves.toBe("cancelled");
+  });
+
+  it("does not count a failed network read as switched", async () => {
+    const setNetwork = vi.fn().mockResolvedValue(undefined);
+    injectFreighter(setNetwork);
+    kit.getNetwork.mockResolvedValue({ error: "locked" });
+
+    vi.useFakeTimers();
+    const pending = switchWalletNetwork("TESTNET");
     await vi.advanceTimersByTimeAsync(8_500);
 
     await expect(pending).resolves.toBe("cancelled");

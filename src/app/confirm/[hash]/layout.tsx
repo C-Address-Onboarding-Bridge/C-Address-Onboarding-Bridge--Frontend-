@@ -25,7 +25,7 @@ export async function generateMetadata({ params }: LayoutProps): Promise<Metadat
     openGraph: {
       title: `Transaction Confirmed on C-Address Bridge`,
       description: `View transaction confirmation for ${hash.slice(0, 8)}...`,
-      url: `https://c-address-bridge.example.com/confirm/${hash}`,
+      url: `/confirm/${hash}`,
       type: "website",
       siteName: "C-Address Bridge",
     },
@@ -33,6 +33,11 @@ export async function generateMetadata({ params }: LayoutProps): Promise<Metadat
       card: "summary",
       title: `Transaction Confirmed on C-Address Bridge`,
       description: `View transaction confirmation for ${hash.slice(0, 8)}...`,
+    },
+    // See src/app/bridge/layout.tsx: without an own canonical, Next inherits
+    // the root layout's homepage canonical for this route too. (#942)
+    alternates: {
+      canonical: `/confirm/${hash}`,
     },
   };
 }

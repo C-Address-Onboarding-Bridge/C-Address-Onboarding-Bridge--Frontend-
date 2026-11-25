@@ -8,11 +8,11 @@ export const metadata: Metadata = {
     title: 'G→C Bridge',
     description:
       'Fund Soroban smart accounts (C-addresses) directly from your G-address with a single transaction.',
-    url: 'https://c-address-bridge.example.com/bridge',
+    url: '/bridge',
     type: 'website',
     images: [
       {
-        url: 'https://c-address-bridge.example.com/og-image.png',
+        url: '/og-image.png',
         width: 1200,
         height: 630,
         alt: 'C-Address Bridge',
@@ -24,11 +24,17 @@ export const metadata: Metadata = {
     title: 'G→C Bridge',
     description:
       'Fund Soroban smart accounts (C-addresses) directly from your G-address.',
-    images: ['https://c-address-bridge.example.com/og-image.png'],
+    images: ['/og-image.png'],
   },
   robots: {
     index: true,
     follow: true,
+  },
+  // Without this, Next merges the root layout's `alternates.canonical` (the
+  // homepage URL) into this route, so /bridge told search engines it was a
+  // duplicate of `/`. (#942)
+  alternates: {
+    canonical: '/bridge',
   },
 };
 

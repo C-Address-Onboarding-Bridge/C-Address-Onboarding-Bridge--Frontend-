@@ -6,7 +6,8 @@
  * single-recipient bridge flow uses (`@/lib/stellar`) rather than
  * re-deriving checksum or amount-format logic here.
  */
-import { isCAddress, isValidStellarAddress, isValidStellarAmount, toStroops, fromStroops } from "./stellar";
+import { isCAddress, isValidStellarAddress, isValidStellarAmount } from "./stellar";
+import { toStroops, fromStroops } from "./stroops";
 import { MAX_BATCH_RECIPIENTS } from "./types";
 
 export { MAX_BATCH_RECIPIENTS };

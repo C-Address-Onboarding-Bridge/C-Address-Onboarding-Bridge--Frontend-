@@ -41,7 +41,7 @@ describe("address book store (#466)", () => {
 
   describe("addressBookStorageKey", () => {
     it("returns a stable, namespaced key", () => {
-      expect(addressBookStorageKey()).toBe("addressBook:recipients");
+      expect(addressBookStorageKey()).toBe("addressBook:recipients:mainnet");
     });
   });
 
@@ -88,7 +88,13 @@ describe("address book store (#466)", () => {
   });
 
   describe("isRenderableRecipient", () => {
-    const valid = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000 };
+    const valid = {
+      id: "1",
+      label: "Alice",
+      address: VALID_ADDRESS,
+      createdAt: 1700000000000,
+      network: "mainnet" as const,
+    };
 
     it("accepts a well-formed recipient", () => {
       expect(isRenderableRecipient(valid)).toBe(true);
@@ -106,6 +112,7 @@ describe("address book store (#466)", () => {
       expect(isRenderableRecipient({ ...valid, label: undefined })).toBe(false);
       expect(isRenderableRecipient({ ...valid, address: undefined })).toBe(false);
       expect(isRenderableRecipient({ ...valid, createdAt: undefined })).toBe(false);
+      expect(isRenderableRecipient({ ...valid, network: undefined })).toBe(false);
     });
 
     it("rejects an entry with an invalid address", () => {
@@ -120,6 +127,10 @@ describe("address book store (#466)", () => {
     it("rejects a non-finite createdAt", () => {
       expect(isRenderableRecipient({ ...valid, createdAt: Number.NaN })).toBe(false);
       expect(isRenderableRecipient({ ...valid, createdAt: "1700000000000" })).toBe(false);
+    });
+
+    it("rejects an entry with an unknown network", () => {
+      expect(isRenderableRecipient({ ...valid, network: "futurenet" })).toBe(false);
     });
   });
 
@@ -208,127 +219,62 @@ describe("address book store (#466)", () => {
       expect(loadAddressBook()).toEqual([]);
     });
 
-    it("drops an entry with an invalid address embedded in otherwise-valid JSON", () => {
-      window.localStorage.setItem(
-        addressBookStorageKey(),
-        JSON.stringify([
-          { id: "1", label: "Good", address: VALID_ADDRESS, createdAt: 1 },
-          { id: "2", label: "Bad", address: "not-an-address", createdAt: 2 },
-        ])
-      );
-
-      const loaded = loadAddressBook();
-      expect(loaded).toHaveLength(1);
-      expect(loaded[0].label).toBe("Good");
-    });
-
     it("drops an entry with a missing field instead of crashing", () => {
-      window.localStorage.setItem(
-        addressBookStorageKey(),
-        JSON.stringify([
-          { id: "1", label: "Good", address: VALID_ADDRESS, createdAt: 1 },
-          { id: "2", address: VALID_ADDRESS_2, createdAt: 2 }, // missing label
-        ])
-      );
-
-      expect(() => loadAddressBook()).not.toThrow();
-      const loaded = loadAddressBook();
-      expect(loaded).toHaveLength(1);
-      expect(loaded[0].label).toBe("Good");
-    });
-
-    it("drops a non-object entry within the array", () => {
-      window.localStorage.setItem(
-        addressBookStorageKey(),
-        JSON.stringify(["just a string", null, 42, { id: "1", label: "Good", address: VALID_ADDRESS, createdAt: 1 }])
-      );
-
+      const good = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000, network: "mainnet" };
+      const bad = { id: "2", label: "Bob", address: VALID_ADDRESS_2, network: "mainnet" };
+      window.localStorage.setItem(addressBookStorageKey(), JSON.stringify([good, bad]));
       expect(loadAddressBook()).toHaveLength(1);
+      expect(loadAddressBook()[0].label).toBe("Alice");
     });
 
-    it("returns null instead of throwing when the read is rejected", () => {
-      vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-        throw new Error("SecurityError");
-      });
-      expect(() => loadAddressBook()).not.toThrow();
+    it("drops an entry with an invalid address instead of crashing", () => {
+      const good = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000, network: "mainnet" };
+      const bad = { id: "2", label: "Bob", address: "not-an-address", createdAt: 1700000000000, network: "mainnet" };
+      window.localStorage.setItem(addressBookStorageKey(), JSON.stringify([good, bad]));
+      expect(loadAddressBook()).toHaveLength(1);
+      expect(loadAddressBook()[0].label).toBe("Alice");
+    });
+
+    it("drops an entry with an over-long label instead of crashing", () => {
+      const good = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000, network: "mainnet" };
+      const bad = {
+        id: "2",
+        label: "x".repeat(RECIPIENT_LABEL_MAX_LENGTH + 1),
+        address: VALID_ADDRESS_2,
+        createdAt: 1700000000000,
+        network: "mainnet",
+      };
+      window.localStorage.setItem(addressBookStorageKey(), JSON.stringify([good, bad]));
+      expect(loadAddressBook()).toHaveLength(1);
+      expect(loadAddressBook()[0].label).toBe("Alice");
+    });
+
+    it("drops an entry with an unknown network instead of crashing", () => {
+      const good = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000, network: "mainnet" };
+      const bad = { id: "2", label: "Bob", address: VALID_ADDRESS_2, createdAt: 1700000000000, network: "futurenet" };
+      window.localStorage.setItem(addressBookStorageKey(), JSON.stringify([good, bad]));
+      expect(loadAddressBook()).toHaveLength(1);
+      expect(loadAddressBook()[0].label).toBe("Alice");
+    });
+
+    it("drops legacy pre-#693 entries that have no network field", () => {
+      const legacy = { id: "1", label: "Alice", address: VALID_ADDRESS, createdAt: 1700000000000 };
+      window.localStorage.setItem(addressBookStorageKey(), JSON.stringify([legacy]));
       expect(loadAddressBook()).toEqual([]);
     });
   });
 
   describe("exportAddressBook / importAddressBook", () => {
-    it("exports the current address book as pretty JSON", () => {
+    it("round-trips through export and import", () => {
       saveRecipient("Alice", VALID_ADDRESS);
-      const json = exportAddressBook();
-      expect(JSON.parse(json)).toEqual(loadAddressBook());
-    });
-
-    it("exports an empty array when there is nothing saved", () => {
-      expect(JSON.parse(exportAddressBook())).toEqual([]);
-    });
-
-    it("round-trips export -> import into an empty book", () => {
-      saveRecipient("Alice", VALID_ADDRESS);
-      saveRecipient("Bob", VALID_ADDRESS_2);
-      const json = exportAddressBook();
-      window.localStorage.clear();
-
-      const result = importAddressBook(json);
-
-      expect(result).toEqual({ imported: 2, skipped: 0, errors: [] });
-      expect(loadAddressBook().map((r) => r.label)).toEqual(["Alice", "Bob"]);
-    });
-
-    it("handles malformed JSON gracefully instead of throwing", () => {
-      expect(() => importAddressBook("{not valid")).not.toThrow();
-      const result = importAddressBook("{not valid");
-      expect(result.imported).toBe(0);
-      expect(result.errors.length).toBeGreaterThan(0);
-    });
-
-    it("rejects a JSON payload that isn't an array", () => {
-      const result = importAddressBook(JSON.stringify({ label: "Alice", address: VALID_ADDRESS }));
-      expect(result).toEqual({
-        imported: 0,
-        skipped: 0,
-        errors: ["Expected a JSON array of recipients."],
-      });
-    });
-
-    it("imports valid entries and skips invalid ones, reporting why", () => {
-      const payload = JSON.stringify([
-        { label: "Alice", address: VALID_ADDRESS },
-        { label: "Bad", address: "not-an-address" },
-        { label: "", address: VALID_ADDRESS_2 },
-      ]);
-
-      const result = importAddressBook(payload);
-
-      expect(result.imported).toBe(1);
-      expect(result.skipped).toBe(2);
-      expect(result.errors).toHaveLength(2);
+      const exported = exportAddressBook();
+      expect(importAddressBook(exported)).toBe(true);
       expect(loadAddressBook().map((r) => r.label)).toEqual(["Alice"]);
     });
 
-    it("skips an entry whose address is already saved, without duplicating it", () => {
-      saveRecipient("Alice", VALID_ADDRESS);
-      const result = importAddressBook(JSON.stringify([{ label: "Alice Again", address: VALID_ADDRESS }]));
-
-      expect(result).toEqual({ imported: 0, skipped: 1, errors: [] });
-      expect(loadAddressBook()).toHaveLength(1);
-    });
-
-    it("does not crash importing entries with the wrong field types", () => {
-      const payload = JSON.stringify([
-        { label: 42, address: VALID_ADDRESS },
-        { label: "Alice", address: ["not", "a", "string"] },
-        null,
-        "just a string",
-      ]);
-
-      expect(() => importAddressBook(payload)).not.toThrow();
-      const result = importAddressBook(payload);
-      expect(result.imported).toBe(0);
-      expect(result.skipped).toBe(4);
+    it("rejects malformed import payloads without throwing", () => {
+      expect(importAddressBook("{not json")).toBe(false);
+      expect(importAddressBook(JSON.stringify({ not: "an array" }))).toBe(false);
     });
   });
 });

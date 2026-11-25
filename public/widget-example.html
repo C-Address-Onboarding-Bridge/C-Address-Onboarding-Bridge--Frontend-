@@ -40,7 +40,7 @@
     <h1>C-Address Onboarding Bridge Widget — Live Example</h1>
     <p>
       This page embeds the funding widget exactly the way a third-party dApp
-      would, via <code>/caddress-widget.js</code>. See
+      would, via <code>/aframp-widget.js</code>. See
       <a href="/docs/embedding.md">docs/embedding.md</a> for the full guide.
     </p>
 
@@ -49,7 +49,7 @@
     <p>Messages received from the widget:</p>
     <div id="log">(none yet)</div>
 
-    <script src="/caddress-widget.js"></script>
+    <script src="/aframp-widget.js"></script>
     <script>
       const log = document.getElementById("log");
       let entries = [];
@@ -58,7 +58,7 @@
         log.textContent = entries.join("\n");
       }
 
-      CAddressWidget.mount(document.getElementById("caddress-widget"), {
+      AframpWidget.mount(document.getElementById("caddress-widget"), {
         // This example is served by the app itself, so its own origin is
         // both the widget origin and the host origin — a real third-party
         // dApp would set widgetOrigin to this app's deployed URL instead.

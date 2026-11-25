@@ -78,9 +78,9 @@ describe("parseHealthResponse", () => {
     expect(result?.services).toEqual({ horizon: "up" });
   });
 
-  it("returns null for a non-object payload", () => {
-    expect(parseHealthResponse(null)).toBeNull();
-    expect(parseHealthResponse("ok")).toBeNull();
+  it("throws for a non-object payload so getHealthStatus retries it like any failed attempt", () => {
+    expect(() => parseHealthResponse(null)).toThrow();
+    expect(() => parseHealthResponse("ok")).toThrow();
   });
 });
 
@@ -96,9 +96,24 @@ describe("getHealthStatus", () => {
     expect(health?.services.horizon).toBe("degraded");
   });
 
-  it("returns null on a network failure without throwing", async () => {
+  it("resolves with a full unhealthy status on a network failure without throwing (#710, #842)", async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error("network down"));
-    await expect(getHealthStatus()).resolves.toBeNull();
+    const health = await getHealthStatus();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(health.status).toBe("unhealthy");
+    expect(health.services.horizon).toBe("down");
+    expect(health.circuitBreakers).toEqual({});
+    expect(typeof health.timestamp).toBe("string");
+  });
+
+  it("recovers on the retry when only the first attempt fails", async () => {
+    global.fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("blip"))
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(CAPTURED_HEALTHY_RESPONSE) });
+    const health = await getHealthStatus();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(health.status).toBe("healthy");
   });
 });
 

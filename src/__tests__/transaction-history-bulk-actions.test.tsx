@@ -1,25 +1,17 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
-import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent, cleanup, within, waitFor } from "@testing-library/react";
 import TransactionHistory, { buildTransactionsCsv } from "@/components/transaction-history";
 import type { BridgeTransactionData } from "@/lib/types";
 
 /**
- * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
- * was never finished (or was lost in a bad merge) during the first bounty
- * programme. They are skipped -- not deleted -- so the next programme has an
- * exact worklist: un-skip one, make it pass, repeat. Nothing here was rewritten
- * to fit the current implementation.
- */
-
-/**
- * Bulk actions on transaction history (#486).
+ * Bulk actions on transaction history (#486, #919).
  *
- * The interesting case throughout is a *mixed* selection: some selected rows
- * are eligible for a given bulk action and some are not. Claim is only
- * eligible for confirmed G -> C bridge transactions (see isClaimEligible in
- * the component) — a pending bridge has no funds on the C side yet, and
- * fiat/CEX withdrawals aren't claimable timelocks at all.
+ * Key invariants:
+ * - Without an `onClaim` prop the Claim button is hidden entirely — no fake
+ *   success messages (#919).
+ * - With `onClaim` wired, the button is shown, requires confirmation, calls
+ *   the handler with the selected IDs, and surfaces failures inline.
  */
 
 afterEach(() => {
@@ -143,7 +135,7 @@ describe("bulk export (mixed eligibility)", () => {
     fireEvent.click(rowCheckbox(PENDING_BRIDGE));
     fireEvent.click(rowCheckbox(FAILED_FIAT));
 
-    const exportButton = screen.getByRole("button", { name: /Export/i });
+    const exportButton = screen.getByTestId("bulk-export-button");
     expect(exportButton).not.toBeDisabled();
 
     fireEvent.click(exportButton);
@@ -160,9 +152,34 @@ describe("bulk export (mixed eligibility)", () => {
   });
 });
 
-describe("bulk claim (mixed eligibility)", () => {
-  it("disables claim and explains why when only some selected rows are eligible", () => {
+describe("bulk claim — no onClaim prop (not yet wired)", () => {
+  it("hides the Claim button entirely when onClaim is not provided (#919)", () => {
     render(<TransactionHistory transactions={ALL_TX} loading={false} network="TESTNET" />);
+
+    fireEvent.click(rowCheckbox(CLAIMABLE));
+
+    // Export should still appear, but Claim must not.
+    expect(screen.getByTestId("bulk-export-button")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Claim/i })).toBeNull();
+  });
+
+  it("never opens a confirmation dialog when Claim button is absent", () => {
+    render(<TransactionHistory transactions={ALL_TX} loading={false} network="TESTNET" />);
+    fireEvent.click(rowCheckbox(CLAIMABLE));
+    expect(screen.queryByTestId("bulk-claim-dialog")).toBeNull();
+  });
+});
+
+describe("bulk claim — onClaim prop wired (#919)", () => {
+  it("disables claim and explains why when only some selected rows are eligible", () => {
+    render(
+      <TransactionHistory
+        transactions={ALL_TX}
+        loading={false}
+        network="TESTNET"
+        onClaim={vi.fn()}
+      />
+    );
 
     // One eligible (confirmed g-to-c) + one ineligible (pending g-to-c).
     fireEvent.click(rowCheckbox(CLAIMABLE));
@@ -179,33 +196,75 @@ describe("bulk claim (mixed eligibility)", () => {
     expect(screen.queryByTestId("bulk-claim-dialog")).toBeNull();
   });
 
-  it("enables claim once every selected row is eligible, and requires confirmation before it acts", () => {
-    render(<TransactionHistory transactions={ALL_TX} loading={false} network="TESTNET" />);
+  it("calls onClaim with selected IDs after confirmation and reports success", async () => {
+    const onClaim = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TransactionHistory
+        transactions={ALL_TX}
+        loading={false}
+        network="TESTNET"
+        onClaim={onClaim}
+      />
+    );
 
     fireEvent.click(rowCheckbox(CLAIMABLE));
     fireEvent.click(rowCheckbox(CLAIMABLE_2));
 
     const claimButton = screen.getByRole("button", { name: /Claim/i });
     expect(claimButton).not.toBeDisabled();
-
     fireEvent.click(claimButton);
+
     const dialog = screen.getByTestId("bulk-claim-dialog");
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByText(/claims 2 transactions/i)).toBeInTheDocument();
 
     // No funds should move until the user explicitly confirms.
     expect(screen.queryByText(/^Claimed/)).toBeNull();
+    expect(onClaim).not.toHaveBeenCalled();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Confirm claim" }));
 
+    await waitFor(() => {
+      expect(onClaim).toHaveBeenCalledWith(["claimable-1", "claimable-2"]);
+    });
+
+    expect(await screen.findByText("Claimed 2 transactions.")).toBeInTheDocument();
     expect(screen.queryByTestId("bulk-claim-dialog")).toBeNull();
-    expect(screen.getByText("Claimed 2 transactions.")).toBeInTheDocument();
     // Claimed rows are cleared from the selection afterward.
     expect(screen.queryByTestId("selection-count")).toBeNull();
   });
 
+  it("surfaces the error inline when onClaim rejects, keeping the dialog open", async () => {
+    const onClaim = vi.fn().mockRejectedValue(new Error("Wallet rejected signature"));
+    render(
+      <TransactionHistory
+        transactions={ALL_TX}
+        loading={false}
+        network="TESTNET"
+        onClaim={onClaim}
+      />
+    );
+
+    fireEvent.click(rowCheckbox(CLAIMABLE));
+    fireEvent.click(screen.getByRole("button", { name: /Claim/i }));
+    fireEvent.click(within(screen.getByTestId("bulk-claim-dialog")).getByRole("button", { name: "Confirm claim" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Wallet rejected signature");
+    // Dialog stays open so the user can retry or cancel.
+    expect(screen.getByTestId("bulk-claim-dialog")).toBeInTheDocument();
+    // No success message was announced.
+    expect(screen.queryByText(/^Claimed/)).toBeNull();
+  });
+
   it("cancelling the confirmation dialog performs no action", () => {
-    render(<TransactionHistory transactions={ALL_TX} loading={false} network="TESTNET" />);
+    render(
+      <TransactionHistory
+        transactions={ALL_TX}
+        loading={false}
+        network="TESTNET"
+        onClaim={vi.fn()}
+      />
+    );
 
     fireEvent.click(rowCheckbox(CLAIMABLE));
     fireEvent.click(screen.getByRole("button", { name: /Claim/i }));
@@ -220,7 +279,14 @@ describe("bulk claim (mixed eligibility)", () => {
   });
 
   it("closes the confirmation dialog on Escape without acting", () => {
-    render(<TransactionHistory transactions={ALL_TX} loading={false} network="TESTNET" />);
+    render(
+      <TransactionHistory
+        transactions={ALL_TX}
+        loading={false}
+        network="TESTNET"
+        onClaim={vi.fn()}
+      />
+    );
 
     fireEvent.click(rowCheckbox(CLAIMABLE));
     fireEvent.click(screen.getByRole("button", { name: /Claim/i }));

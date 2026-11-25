@@ -4,11 +4,13 @@ import { useRef, useState } from "react";
 import { Camera, Loader2, Trash2 } from "lucide-react";
 import {
   AVATAR_ACCEPT_ATTR,
+  AVATAR_SAVE_ERRORS,
   avatarInitials,
+  downscaleAvatar,
   isRenderableAvatar,
   loadAvatar,
   removeAvatar,
-  saveAvatar,
+  saveAvatarResult,
   validateAvatarFile,
 } from "@/lib/avatar";
 import { useHydrated } from "@/hooks/useHydrated";
@@ -58,18 +60,22 @@ export default function AvatarUpload({ address, size = 56 }: AvatarUploadProps) 
     setError(null);
     setReading(true);
     const reader = new FileReader();
-    reader.onload = () => {
-      setReading(false);
+    reader.onload = async () => {
       const result = reader.result;
       if (!isRenderableAvatar(result)) {
+        setReading(false);
         setError("That image couldn't be read. Try a different file.");
         return;
       }
-      if (!saveAvatar(address, result)) {
-        setError("Couldn't save the image — browser storage may be full.");
+      // Store a small copy: full-size data URLs can exhaust localStorage. (#761)
+      const scaled = await downscaleAvatar(result);
+      setReading(false);
+      const saved = saveAvatarResult(address, scaled);
+      if (!saved.ok) {
+        setError(AVATAR_SAVE_ERRORS[saved.reason]);
         return;
       }
-      setAvatarRecord({ address, value: result });
+      setAvatarRecord({ address, value: scaled });
     };
     reader.onerror = () => {
       setReading(false);

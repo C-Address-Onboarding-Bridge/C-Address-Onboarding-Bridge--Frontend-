@@ -14,37 +14,37 @@ interface HelpArticle {
 const HELP_ARTICLES: HelpArticle[] = [
   {
     id: 'c-address',
-    titleKey: 'help.c_address_explanation',
+    titleKey: 'help.c_address_title',
     bodyKey: 'help.c_address_explanation',
     keywords: ['c-address', 'smart account', 'soroban', 'contract', 'C-address'],
   },
   {
     id: 'g-address',
-    titleKey: 'help.g_address_explanation',
+    titleKey: 'help.g_address_title',
     bodyKey: 'help.g_address_explanation',
     keywords: ['g-address', 'classic', 'stellar', 'account', 'G-address'],
   },
   {
     id: 'fees',
-    titleKey: 'help.fee_explanation',
+    titleKey: 'help.fee_title',
     bodyKey: 'help.fee_explanation',
     keywords: ['fee', 'cost', 'xlm', 'transaction', 'network'],
   },
   {
     id: 'bridge',
-    titleKey: 'help.bridge_explanation',
+    titleKey: 'help.bridge_title',
     bodyKey: 'help.bridge_explanation',
     keywords: ['bridge', 'g-to-c', 'transfer', 'fund', 'source'],
   },
   {
     id: 'onramp',
-    titleKey: 'help.onramp_explanation',
+    titleKey: 'help.onramp_title',
     bodyKey: 'help.onramp_explanation',
     keywords: ['onramp', 'fiat', 'credit card', 'buy', 'purchase'],
   },
   {
     id: 'cex',
-    titleKey: 'help.cex_explanation',
+    titleKey: 'help.cex_title',
     bodyKey: 'help.cex_explanation',
     keywords: ['cex', 'exchange', 'withdraw', 'centralized', 'binance', 'coinbase'],
   },
@@ -118,6 +118,7 @@ export function HelpCenter({ isOpen, onClose, locale = 'en' }: HelpCenterProps) 
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t(locale, 'help.search_placeholder')}
+              aria-label={t(locale, 'help.search_label')}
               className="w-full pl-10 pr-4 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
               autoFocus
             />
