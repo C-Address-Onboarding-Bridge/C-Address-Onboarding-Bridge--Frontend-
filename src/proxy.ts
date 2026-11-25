@@ -101,18 +101,20 @@ export function buildWidgetCsp(
   nonce?: string,
 ): string {
   // Always include 'self' so the app's own /widget-example route can frame
-  // /widget alongside any registered embedders in NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS (#1001).
-  const allowedOrigins = ["'self'", ...getAllowedEmbedderOrigins(env.NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS)];
+  // /widget (#1001), alongside the registered embedder allowlist
+  // (server-only WIDGET_ALLOWED_ORIGINS, #1019). Unregistered origins stay blocked.
+  const allowedOrigins = ["'self'", ...getAllowedEmbedderOrigins(env.WIDGET_ALLOWED_ORIGINS)];
   const frameAncestors = buildFrameAncestorsCsp(allowedOrigins);
   return buildCsp(env, nonce).replace("frame-ancestors 'none'", frameAncestors);
 }
 
 /**
- * The widget is meant to be framed by arbitrary host pages, so it can't ship
- * `frame-ancestors 'none'`. This mirrors the relaxed policy in next.config.ts
- * (which omits X-Frame-Options for /widget for the same reason). The real
- * security boundary for the widget is the postMessage origin check in
- * src/lib/widget.ts, not who is allowed to frame it.
+ * The widget is meant to be framed only by registered embedder origins, so it
+ * can't ship `frame-ancestors 'none'`. This mirrors the relaxed policy in
+ * next.config.ts (which omits X-Frame-Options for /widget for the same
+ * reason). The allowlist itself is the single source of truth shared with the
+ * widget page (#1019); the postMessage origin check in src/lib/widget.ts is
+ * the second line of defence.
  */
 export function isWidgetPath(pathname: string): boolean {
   return pathname === "/widget" || pathname.startsWith("/widget/");
@@ -130,16 +132,20 @@ export function proxy(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set(NONCE_HEADER_NAME, nonce);
 
+  const csp = isWidgetPath(request.nextUrl.pathname)
+    ? buildWidgetCsp(process.env, nonce)
+    : buildCsp(process.env, nonce);
+
+  // Next.js reads the CSP from the *request* headers to nonce its own inline
+  // RSC/bootstrap scripts under 'strict-dynamic' (#1020). It must be the exact
+  // same string as the response header, otherwise the nonce won't match.
+  requestHeaders.set(CSP_HEADER_NAME, csp);
+
   const response = NextResponse.next({
     request: { headers: requestHeaders },
   });
 
-  response.headers.set(
-    CSP_HEADER_NAME,
-    isWidgetPath(request.nextUrl.pathname)
-      ? buildWidgetCsp(process.env, nonce)
-      : buildCsp(process.env, nonce),
-  );
+  response.headers.set(CSP_HEADER_NAME, csp);
 
   return response;
 }

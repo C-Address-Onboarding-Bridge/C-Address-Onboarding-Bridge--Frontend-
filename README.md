@@ -54,7 +54,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, workflow, and tes
    | `NEXT_PUBLIC_MOONPAY_API_KEY` | For onramp | From [Moonpay dashboard](https://buy.moonpay.com) |
    | `NEXT_PUBLIC_TRANSAK_API_KEY` | For onramp | From [Transak dashboard](https://global.transak.com) |
    | `NEXT_PUBLIC_CEX_BRIDGE_DEPOSIT_ADDRESS` | No | CEX bridge deposit address shown in the CEX routing UI |
-   | `NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS` | No | Comma-separated allowed origins for the embeddable widget |
+   | `WIDGET_ALLOWED_ORIGINS` | No | Comma-separated allowed origins for the embeddable widget |
    | `NEXT_PUBLIC_ENABLE_SW` | No | Set to `true` to enable the service worker for asset caching |
    | `NEXT_PUBLIC_SITE_URL` | No | Canonical site URL for sitemap/robots. Defaults to `http://localhost:3000` |
    | `NEXT_PUBLIC_TRANSACTION_STATUS_URL` | No | Override the transaction status polling URL. Defaults to `/api/transactions` |

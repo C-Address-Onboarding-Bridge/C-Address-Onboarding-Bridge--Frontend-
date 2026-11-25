@@ -27,7 +27,6 @@ import {
   parseWidgetConfig,
   postWidgetMessage,
   WIDGET_MESSAGE_SOURCE,
-  getAllowedEmbedderOrigins,
   type WidgetConfig,
   type WidgetOutboundMessage,
 } from "@/lib/widget";
@@ -233,7 +232,7 @@ function FundingWidget({ config }: { config: WidgetConfig }) {
   );
 }
 
-function WidgetPageInner() {
+function WidgetPageInner({ allowedOrigins }: { allowedOrigins: readonly string[] }) {
   const searchParams = useSearchParams();
   const result = parseWidgetConfig(searchParams);
   const parentOrigin = result.ok ? result.config.parentOrigin : null;

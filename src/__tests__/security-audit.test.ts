@@ -340,7 +340,7 @@ describe("embeddable widget headers (#558)", () => {
     const allowlisted = parseCsp(
       buildWidgetCsp({
         ...testEnv,
-        NEXT_PUBLIC_WIDGET_ALLOWED_ORIGINS:
+        WIDGET_ALLOWED_ORIGINS:
           "https://host-a.example, https://host-b.example",
       }),
     ).get("frame-ancestors");
