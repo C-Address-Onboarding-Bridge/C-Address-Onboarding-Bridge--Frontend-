@@ -8,12 +8,22 @@ import type { StellarNetwork } from "@/lib/types";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 
 interface ConfirmationPageProps {
-  // Next.js 16 makes dynamic-route params async; this is a client component, so
-  // it unwraps them with React.use() (same pattern as transactions/[hash]).
   params: Promise<{
     hash: string;
   }>;
 }
+
+const STATUS_SUBTITLE: Record<PublicConfirmation["status"], string> = {
+  success: "Transaction confirmed",
+  pending: "Transaction pending",
+  failed: "Transaction failed",
+};
+
+const STATUS_SHARE_LABEL: Record<PublicConfirmation["status"], string> = {
+  success: "Transaction Confirmed",
+  pending: "Transaction Pending",
+  failed: "Transaction Failed",
+};
 
 async function fetchConfirmation(hash: string, network: StellarNetwork): Promise<TransactionConfirmation | null> {
   try {
@@ -27,10 +37,6 @@ async function fetchConfirmation(hash: string, network: StellarNetwork): Promise
 
 function ConfirmationPageInner({ params }: ConfirmationPageProps) {
   const { hash } = use(params);
-  // The confirmation route has no other way to know which Horizon ledger to
-  // query — a hash alone doesn't say whether it's a testnet or mainnet
-  // transaction. Defaults to TESTNET, matching every other network-aware
-  // query param in this app (e.g. the transaction status route). (#676)
   const network: StellarNetwork = useSearchParams().get("network") === "PUBLIC" ? "PUBLIC" : "TESTNET";
   const [confirmation, setConfirmation] = useState<PublicConfirmation | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -76,10 +82,12 @@ function ConfirmationPageInner({ params }: ConfirmationPageProps) {
       return;
     }
 
+    const shareLabel = confirmation ? STATUS_SHARE_LABEL[confirmation.status] : "Transaction Details";
+
     try {
       await navigator.share({
-        title: `Transaction Confirmed: ${confirmation?.amount} ${confirmation?.asset}`,
-        text: `Check out my transaction confirmation: ${confirmation?.amount} ${confirmation?.asset}`,
+        title: `${shareLabel}: ${confirmation?.amount} ${confirmation?.asset}`,
+        text: `${shareLabel}: ${confirmation?.amount} ${confirmation?.asset}`,
         url: getConfirmationUrl(hash, network, window.location.origin),
       });
     } catch (err) {
@@ -134,7 +142,7 @@ function ConfirmationPageInner({ params }: ConfirmationPageProps) {
             <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
               {confirmation.amount} {confirmation.asset}
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">Transaction confirmed</p>
+            <p className="text-gray-600 dark:text-gray-400">{STATUS_SUBTITLE[confirmation.status]}</p>
           </div>
 
           {/* Details */}
@@ -199,7 +207,7 @@ function ConfirmationPageInner({ params }: ConfirmationPageProps) {
 
           {/* Info Text */}
           <p className="text-xs text-gray-500 dark:text-gray-500 text-center mt-6">
-            This confirmation page displays only public information visible on the blockchain. No private keys or sensitive data are shown.
+            This transaction details page displays only public information visible on the blockchain. No private keys or sensitive data are shown.
           </p>
         </div>
       </div>

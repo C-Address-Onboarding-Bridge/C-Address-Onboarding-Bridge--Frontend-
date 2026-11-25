@@ -3,7 +3,6 @@ import { isValidHash } from "@/lib/confirmations";
 
 interface LayoutProps {
   children: React.ReactNode;
-  // Next.js 16 makes dynamic-route params async.
   params: Promise<{
     hash: string;
   }>;
@@ -41,22 +40,20 @@ export async function generateMetadata({
   const canonical = `/confirm/${hash}?network=${network === "PUBLIC" ? "PUBLIC" : "TESTNET"}`;
 
   return {
-    title: `Transaction Confirmation | C-Address Bridge`,
-    description: `View transaction confirmation for ${hash.slice(0, 8)}... on the C-Address Bridge.`,
+    title: "Transaction Details | C-Address Bridge",
+    description: `View transaction details for ${hash.slice(0, 8)}... on the C-Address Bridge.`,
     openGraph: {
-      title: `Transaction Confirmed on C-Address Bridge`,
-      description: `View transaction confirmation for ${hash.slice(0, 8)}...`,
+      title: "Transaction Details on C-Address Bridge",
+      description: `View transaction details for ${hash.slice(0, 8)}...`,
       url: canonical,
       type: "website",
       siteName: "C-Address Bridge",
     },
     twitter: {
       card: "summary",
-      title: `Transaction Confirmed on C-Address Bridge`,
-      description: `View transaction confirmation for ${hash.slice(0, 8)}...`,
+      title: "Transaction Details on C-Address Bridge",
+      description: `View transaction details for ${hash.slice(0, 8)}...`,
     },
-    // See src/app/bridge/layout.tsx: without an own canonical, Next inherits
-    // the root layout's homepage canonical for this route too. (#942)
     alternates: {
       canonical,
     },
